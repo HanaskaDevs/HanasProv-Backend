@@ -114,6 +114,21 @@ return [
             // 'trust_server_certificate' => env('DB_TRUST_SERVER_CERTIFICATE', 'false'),
         ],
 
+        // Espejo Business Central — SOLO LECTURA (Windows Server 2)
+        'sqlsrv_bc' => [
+            'driver' => 'sqlsrv',
+            'host' => env('DB_BC_HOST', 'localhost'),
+            'port' => env('DB_BC_PORT', '1433'),
+            'database' => env('DB_BC_DATABASE', 'business_central_mirror'),
+            'username' => env('DB_BC_USERNAME', ''),
+            'password' => env('DB_BC_PASSWORD', ''),
+            'charset' => env('DB_CHARSET', 'utf8'),
+            'prefix' => '',
+            'prefix_indexes' => true,
+            // 'encrypt' => env('DB_ENCRYPT', 'yes'),
+            // 'trust_server_certificate' => env('DB_TRUST_SERVER_CERTIFICATE', 'false'),
+        ],
+
     ],
 
     /*
