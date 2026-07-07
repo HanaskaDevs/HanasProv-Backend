@@ -4,7 +4,7 @@ namespace App\Modules\Auth\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
 
-class CambiarEmpresaRequest extends FormRequest
+class OlvidePasswordRequest extends FormRequest
 {
     public function authorize(): bool
     {
@@ -14,7 +14,7 @@ class CambiarEmpresaRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'id_empresa' => ['required', 'integer', 'exists:Empresa,Id_Empresa'],
+            'email' => ['required', 'email'],
         ];
     }
 }
