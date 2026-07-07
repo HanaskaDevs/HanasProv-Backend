@@ -6,12 +6,12 @@ use Illuminate\Bus\Queueable;
 use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Notifications\Notification;
 
-class ClaveTemporalNotification extends Notification
+class CodigoActivacionNotification extends Notification
 {
     use Queueable;
 
     public function __construct(
-        protected string $claveTemporal,
+        protected string $codigo,
         protected bool $esReset = false
     ) {
     }
@@ -25,17 +25,17 @@ class ClaveTemporalNotification extends Notification
     {
         $asunto = $this->esReset
             ? 'Restablecimiento de contraseña - Portal de Proveedores'
-            : 'Bienvenido - Credenciales de acceso';
+            : 'Bienvenido - Activa tu cuenta';
 
         return (new MailMessage)
             ->subject($asunto)
             ->greeting('Hola ' . $notifiable->Nombre_Completo . ',')
             ->line($this->esReset
-                ? 'Se generó una nueva contraseña temporal para tu cuenta.'
-                : 'Se creó una cuenta para ti en el Portal de Proveedores.')
+                ? 'Solicitaste restablecer tu contraseña. Usa el siguiente código para definir una nueva.'
+                : 'Se creó una cuenta para ti en el Portal de Proveedores. Usa el siguiente código para activarla.')
             ->line('Correo: ' . $notifiable->Email)
-            ->line('Contraseña temporal: ' . $this->claveTemporal)
-            ->line('Por seguridad, deberás definir una nueva contraseña al iniciar sesión.')
-            ->line('Esta contraseña temporal es de un solo uso y expira al cambiarla.');
+            ->line('Código de activación: ' . $this->codigo)
+            ->line('Este código es válido por 20 minutos y de un solo uso.')
+            ->line('Ingresa a la pantalla de activación con tu correo, este código, y la contraseña que quieras usar.');
     }
 }

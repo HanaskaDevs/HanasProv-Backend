@@ -4,7 +4,7 @@ namespace App\Modules\Auth\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
 
-class CambiarPasswordInicialRequest extends FormRequest
+class CambiarPasswordRequest extends FormRequest
 {
     public function authorize(): bool
     {
