@@ -27,15 +27,21 @@ class CodigoActivacionNotification extends Notification
             ? 'Restablecimiento de contraseña - Portal de Proveedores'
             : 'Bienvenido - Activa tu cuenta';
 
+        $urlActivacion = rtrim(config('app.frontend_url'), '/') . '/activar-cuenta?' . http_build_query([
+            'email' => $notifiable->Email,
+            'codigo' => $this->codigo,
+        ]);
+
         return (new MailMessage)
             ->subject($asunto)
             ->greeting('Hola ' . $notifiable->Nombre_Completo . ',')
             ->line($this->esReset
-                ? 'Solicitaste restablecer tu contraseña. Usa el siguiente código para definir una nueva.'
-                : 'Se creó una cuenta para ti en el Portal de Proveedores. Usa el siguiente código para activarla.')
+                ? 'Solicitaste restablecer tu contraseña. Usa el siguiente código o el botón para continuar.'
+                : 'Se creó una cuenta para ti en el Portal de Proveedores. Usa el siguiente código o el botón para activarla.')
             ->line('Correo: ' . $notifiable->Email)
             ->line('Código de activación: ' . $this->codigo)
+            ->action($this->esReset ? 'Restablecer mi contraseña' : 'Activar mi cuenta', $urlActivacion)
             ->line('Este código es válido por 20 minutos y de un solo uso.')
-            ->line('Ingresa a la pantalla de activación con tu correo, este código, y la contraseña que quieras usar.');
+            ->line('Si el botón no funciona, ingresa manualmente a la pantalla de activación con tu correo y este código.');
     }
 }

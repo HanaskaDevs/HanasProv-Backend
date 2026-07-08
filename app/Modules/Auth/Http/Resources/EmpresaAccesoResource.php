@@ -14,6 +14,7 @@ class EmpresaAccesoResource extends JsonResource
             'razon_social' => $this->Razon_Social,
             'nombre_comercial' => $this->Nombre_Comercial,
             'id_rol' => $this->pivot->Id_Rol ?? null,
+            'nombre_rol' => $this->pivot->rol->Nombre_Rol ?? null,
             'activo' => (bool) ($this->pivot->Activo ?? false),
         ];
     }
