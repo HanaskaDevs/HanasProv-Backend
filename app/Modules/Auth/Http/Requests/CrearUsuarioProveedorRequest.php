@@ -15,8 +15,6 @@ class CrearUsuarioProveedorRequest extends FormRequest
     {
         return [
             'email' => ['required', 'email', 'max:150'],
-            'nombre_completo' => ['required', 'string', 'max:200'],
-            'id_proveedor' => ['required', 'integer', 'exists:Proveedor,Id_Proveedor'],
         ];
     }
 }

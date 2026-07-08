@@ -78,8 +78,8 @@ class Usuario extends Authenticatable
         return $this->tieneRolEnEmpresa($idEmpresa, 'Sistemas');
     }
 
-    public function esAdministrador(int $idEmpresa): bool
+    public function esAdmin(int $idEmpresa): bool
     {
-        return $this->tieneRolEnEmpresa($idEmpresa, 'Administrador');
+        return $this->tieneRolEnEmpresa($idEmpresa, 'Admin');
     }
 }

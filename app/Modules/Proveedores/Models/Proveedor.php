@@ -6,6 +6,7 @@ use App\Models\Empresa;
 use App\Modules\Auth\Models\Usuario;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Proveedor extends Model
@@ -15,9 +16,15 @@ class Proveedor extends Model
     public $timestamps = false;
 
     protected $fillable = [
-        'Id_Empresa', 'Id_Estado_Proveedor', 'Ruc', 'Razon_Social', 'Nombre_Comercial',
-        'Email', 'Telefono', 'Direccion', 'Latitud', 'Longitud', 'Seccion_Actual',
-        'Porcentaje_Completado_Ficha', 'Fecha_Postulacion', 'Fecha_Aprobacion',
+        'Id_Empresa', 'Id_Estado_Proveedor', 'Ruc', 'Clase_Contribuyente',
+        'Razon_Social', 'Nombre_Comercial', 'Email', 'Telefono', 'Direccion',
+        'Ciudad', 'Pagina_Web', 'Latitud', 'Longitud',
+        'Representante_Legal', 'Correo_Representante', 'Telefono_Representante',
+        'Contacto_Venta', 'Correo_Venta', 'Telefono_Contacto_Venta',
+        'Contacto_Calidad', 'Correo_Calidad', 'Telefono_Contacto_Calidad',
+        'Contacto_Contabilidad', 'Correo_Contabilidad', 'Telefono_Contabilidad',
+        'Seccion_Actual', 'Porcentaje_Completado_Ficha',
+        'Fecha_Postulacion', 'Fecha_Aprobacion',
         'Activo', 'Creado_Por', 'Fecha_Creacion', 'Modificado_Por', 'Fecha_Modificacion',
     ];
 
@@ -46,14 +53,30 @@ class Proveedor extends Model
         return $this->hasMany(Usuario::class, 'Id_Proveedor');
     }
 
-    public function clases(): HasMany
+    /**
+     * Sección 2 de la Ficha: multi-select de Clase de Proveedor.
+     */
+    public function clases(): BelongsToMany
     {
-        return $this->hasMany(ProveedorClase::class, 'Id_Proveedor');
+        return $this->belongsToMany(
+            ClaseProveedor::class,
+            'Proveedor_Clase',
+            'Id_Proveedor',
+            'Id_Clase_Proveedor'
+        )->withPivot(['Activo', 'Id_Proveedor_Clase']);
     }
 
-    public function categoriasProducto(): HasMany
+    /**
+     * Sección 3 de la Ficha: multi-select de Categoría de Productos/Servicios.
+     */
+    public function categoriasProducto(): BelongsToMany
     {
-        return $this->hasMany(ProveedorCategoriaProducto::class, 'Id_Proveedor');
+        return $this->belongsToMany(
+            CategoriaProducto::class,
+            'Proveedor_Categoria_Producto',
+            'Id_Proveedor',
+            'Id_Categoria_Producto'
+        )->withPivot(['Activo', 'Id_Proveedor_Categoria']);
     }
 
     public function certificaciones(): HasMany

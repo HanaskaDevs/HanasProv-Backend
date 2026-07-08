@@ -5,8 +5,8 @@ namespace App\Modules\Auth\Http\Controllers;
 use App\Http\Controllers\Controller;
 use App\Modules\Auth\Http\Requests\CrearUsuarioInternoRequest;
 use App\Modules\Auth\Http\Requests\CrearUsuarioProveedorRequest;
+use App\Modules\Auth\Http\Resources\UsuarioExternoResource;
 use App\Modules\Auth\Http\Resources\UsuarioInternoResource;
-use App\Modules\Auth\Http\Resources\UsuarioResource;
 use App\Modules\Auth\Models\Usuario;
 use App\Modules\Auth\Services\UsuarioService;
 use Illuminate\Http\JsonResponse;
@@ -19,19 +19,23 @@ class UsuarioController extends Controller
     }
 
     /**
-     * Panel de usuarios internos: lista los usuarios de la empresa activa.
+     * Panel de usuarios internos: solo visible para rol Sistemas.
      */
-    public function index(Request $request): JsonResponse
+    public function indexInternos(Request $request): JsonResponse
     {
         $idEmpresa = (int) $request->attributes->get('id_empresa_activa');
 
-        $usuarios = $this->usuarioService->listarInternos($idEmpresa);
+        $usuarios = $this->usuarioService->listarInternos($idEmpresa, $request->user());
 
         return response()->json(UsuarioInternoResource::collection($usuarios));
     }
 
-    public function show(Usuario $usuario): JsonResponse
+    public function showInterno(Request $request, Usuario $usuario): JsonResponse
     {
+        $idEmpresa = (int) $request->attributes->get('id_empresa_activa');
+
+        $this->usuarioService->verificarAccesoPanelInternos($request->user(), $idEmpresa);
+
         return response()->json(
             new UsuarioInternoResource($usuario->load('usuarioEmpresas.rol'))
         );
@@ -54,14 +58,45 @@ class UsuarioController extends Controller
         return response()->json(new UsuarioInternoResource($usuario->load('usuarioEmpresas.rol')), 201);
     }
 
+    /**
+     * Panel de usuarios externos (Proveedores): visible para Sistemas o Admin.
+     */
+    public function indexExternos(Request $request): JsonResponse
+    {
+        $idEmpresa = (int) $request->attributes->get('id_empresa_activa');
+
+        $usuarios = $this->usuarioService->listarExternos($idEmpresa, $request->user());
+
+        return response()->json(UsuarioExternoResource::collection($usuarios));
+    }
+
+    public function showExterno(Request $request, Usuario $usuario): JsonResponse
+    {
+        $idEmpresa = (int) $request->attributes->get('id_empresa_activa');
+
+        $this->usuarioService->verificarAccesoPanelExternos($request->user(), $idEmpresa);
+
+        return response()->json(
+            new UsuarioExternoResource($usuario->load(['usuarioEmpresas.rol', 'proveedor']))
+        );
+    }
+
+    /**
+     * Crea un usuario externo (Proveedor) con solo email. Permitido para
+     * rol Sistemas o Admin dentro de la empresa activa. El Proveedor en sí
+     * se crea después, cuando el usuario completa la Ficha tras activarse.
+     */
     public function storeProveedor(CrearUsuarioProveedorRequest $request): JsonResponse
     {
+        $idEmpresaActiva = (int) $request->attributes->get('id_empresa_activa');
+
         $usuario = $this->usuarioService->crearUsuarioProveedor(
             data: $request->validated(),
             creador: $request->user(),
+            idEmpresaActiva: $idEmpresaActiva,
         );
 
-        return response()->json(new UsuarioResource($usuario), 201);
+        return response()->json(new UsuarioExternoResource($usuario->load('usuarioEmpresas.rol')), 201);
     }
 
     public function inactivar(Request $request, Usuario $usuario): JsonResponse
