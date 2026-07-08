@@ -4,6 +4,7 @@ use App\Modules\Auth\Http\Controllers\AuthController;
 use App\Modules\Auth\Http\Controllers\UsuarioController;
 use App\Modules\Auth\Http\Middleware\EmpresaActiva;
 use Illuminate\Support\Facades\Route;
+use App\Modules\Auth\Http\Controllers\RolController;
 
 Route::prefix('auth')->group(function () {
     Route::post('/login', [AuthController::class, 'login']);
@@ -15,6 +16,7 @@ Route::prefix('auth')->group(function () {
         Route::get('/me', [AuthController::class, 'me']);
         Route::post('/cambiar-empresa', [AuthController::class, 'cambiarEmpresa']);
         Route::post('/cambiar-password', [AuthController::class, 'cambiarPassword']);
+        Route::get('/roles', [RolController::class, 'index']);
     });
 });
 
