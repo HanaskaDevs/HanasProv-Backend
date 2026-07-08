@@ -1,8 +1,9 @@
 <?php
 
-namespace App\Modules\Proveedores\Models;
+namespace App\Modules\Documentos_Proveedor\Models;
 
 use App\Modules\Auth\Models\Usuario;
+use App\Modules\Proveedores\Models\Proveedor;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 

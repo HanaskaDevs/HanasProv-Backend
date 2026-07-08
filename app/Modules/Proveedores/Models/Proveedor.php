@@ -79,10 +79,10 @@ class Proveedor extends Model
         )->withPivot(['Activo', 'Id_Proveedor_Categoria']);
     }
 
-    public function certificaciones(): HasMany
-    {
-        return $this->hasMany(ProveedorCertificacion::class, 'Id_Proveedor');
-    }
+    public function documentos(): HasMany
+{
+    return $this->hasMany(\App\Modules\Documentos_Proveedor\Models\DocumentoProveedor::class, 'Id_Proveedor');
+}
 
     public function historialEstados(): HasMany
     {
@@ -90,9 +90,9 @@ class Proveedor extends Model
     }
 
     public function archivos(): HasMany
-    {
-        return $this->hasMany(Archivo::class, 'Id_Proveedor');
-    }
+{
+    return $this->hasMany(\App\Modules\Documentos_Proveedor\Models\Archivo::class, 'Id_Proveedor');
+}
 
     public function aceptacionesNormativa(): HasMany
     {
