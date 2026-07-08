@@ -2,6 +2,7 @@
 
 namespace App\Modules\Auth\Services;
 
+use App\Models\Rol;
 use App\Modules\Auth\Models\CodigoActivacion;
 use App\Modules\Auth\Models\Usuario;
 use App\Modules\Auth\Models\UsuarioEmpresa;
@@ -57,9 +58,12 @@ class UsuarioService
     /**
      * Lista los usuarios internos (Tipo_Usuario = Interno) vinculados a la
      * empresa activa, con su rol dentro de esa empresa ya cargado.
+     * Solo rol "Sistemas" puede ver este panel.
      */
-    public function listarInternos(int $idEmpresa): Collection
+    public function listarInternos(int $idEmpresa, Usuario $solicitante): Collection
     {
+        $this->verificarAccesoPanelInternos($solicitante, $idEmpresa);
+
         return Usuario::where('Tipo_Usuario', 'Interno')
             ->whereHas('usuarioEmpresas', fn ($q) => $q->where('Id_Empresa', $idEmpresa))
             ->with(['usuarioEmpresas' => fn ($q) => $q->where('Id_Empresa', $idEmpresa)->with('rol')])
@@ -67,35 +71,77 @@ class UsuarioService
             ->get();
     }
 
-    /**
-     * Crea un usuario tipo Proveedor, vinculado a un registro de Proveedor existente.
-     * Permitido para rol "Sistemas" o "Administrador" dentro de la empresa dueña del proveedor.
-     */
-    public function crearUsuarioProveedor(array $data, Usuario $creador): Usuario
+    public function verificarAccesoPanelInternos(Usuario $solicitante, int $idEmpresa): void
     {
-        $proveedor = Proveedor::findOrFail($data['id_proveedor']);
+        if (! $solicitante->esSistemas($idEmpresa)) {
+            throw new AccessDeniedHttpException('Solo usuarios con rol Sistemas pueden ver el panel de usuarios internos.');
+        }
+    }
 
-        if (! $creador->esSistemas($proveedor->Id_Empresa) && ! $creador->esAdministrador($proveedor->Id_Empresa)) {
-            throw new AccessDeniedHttpException('No tiene permisos para crear credenciales de proveedores.');
+    /**
+     * Crea un usuario externo (Proveedor) dentro de la empresa activa de quien lo crea.
+     * Formulario mínimo: solo email. El Proveedor (la empresa proveedora en sí)
+     * todavía NO existe en este punto -> Usuario.Id_Proveedor queda NULL hasta
+     * que el usuario complete la Ficha de Proveedor tras activar su cuenta.
+     * Permitido para rol "Sistemas" o "Admin" dentro de la empresa activa.
+     */
+    public function crearUsuarioProveedor(array $data, Usuario $creador, int $idEmpresaActiva): Usuario
+    {
+        if (! $creador->esSistemas($idEmpresaActiva) && ! $creador->esAdmin($idEmpresaActiva)) {
+            throw new AccessDeniedHttpException('No tiene permisos para crear usuarios externos.');
         }
 
-        return DB::transaction(function () use ($data, $creador, $proveedor) {
+        $idRolProveedor = Rol::where('Nombre_Rol', 'Proveedor')->value('Id_Rol');
+
+        if (! $idRolProveedor) {
+            throw ValidationException::withMessages([
+                'email' => ['No existe el rol "Proveedor" configurado en el sistema.'],
+            ]);
+        }
+
+        return DB::transaction(function () use ($data, $creador, $idEmpresaActiva, $idRolProveedor) {
             $usuario = $this->crearUsuarioBase([
                 'Email' => $data['email'],
                 'Nombre_Completo' => $data['email'],
-                'Id_Proveedor' => $proveedor->Id_Proveedor,
                 'Tipo_Usuario' => 'Proveedor',
             ], $creador);
 
-            $this->generarYEnviarCodigo(
-                $usuario,
-                tipo: 'Bienvenida',
-                idProveedor: $proveedor->Id_Proveedor,
-                creadoPor: $creador->Id_Usuario,
-            );
+            UsuarioEmpresa::create([
+                'Id_Usuario' => $usuario->Id_Usuario,
+                'Id_Empresa' => $idEmpresaActiva,
+                'Id_Rol' => $idRolProveedor,
+                'Activo' => true,
+                'Creado_Por' => $creador->Id_Usuario,
+                'Fecha_Creacion' => now(),
+            ]);
+
+            $this->generarYEnviarCodigo($usuario, tipo: 'Bienvenida', creadoPor: $creador->Id_Usuario);
 
             return $usuario;
         });
+    }
+
+    /**
+     * Lista los usuarios externos (Tipo_Usuario = Proveedor) vinculados a la
+     * empresa activa, con su rol dentro de esa empresa ya cargado.
+     * Solo rol "Sistemas" o "Admin" pueden ver este panel.
+     */
+    public function listarExternos(int $idEmpresa, Usuario $solicitante): Collection
+    {
+        $this->verificarAccesoPanelExternos($solicitante, $idEmpresa);
+
+        return Usuario::where('Tipo_Usuario', 'Proveedor')
+            ->whereHas('usuarioEmpresas', fn ($q) => $q->where('Id_Empresa', $idEmpresa))
+            ->with(['usuarioEmpresas' => fn ($q) => $q->where('Id_Empresa', $idEmpresa)->with('rol'), 'proveedor'])
+            ->orderBy('Nombre_Completo')
+            ->get();
+    }
+
+    public function verificarAccesoPanelExternos(Usuario $solicitante, int $idEmpresa): void
+    {
+        if (! $solicitante->esSistemas($idEmpresa) && ! $solicitante->esAdmin($idEmpresa)) {
+            throw new AccessDeniedHttpException('No tiene permisos para ver el panel de usuarios externos.');
+        }
     }
 
     /**
@@ -235,6 +281,24 @@ class UsuarioService
                     'Telefono' => $datosPerfil['telefono'] ?? null,
                 ] : []),
             ])->save();
+
+            // Primera activación de un usuario externo: se crea el "cascarón"
+            // del Proveedor para que pueda empezar a llenar su Ficha.
+            if ($esPrimeraActivacion && $usuario->Tipo_Usuario === 'Proveedor' && ! $usuario->Id_Proveedor) {
+                $idEmpresa = $usuario->usuarioEmpresas()->where('Activo', true)->value('Id_Empresa');
+
+                $proveedor = Proveedor::create([
+                    'Id_Empresa' => $idEmpresa,
+                    'Email' => $usuario->Email,
+                    'Seccion_Actual' => 1,
+                    'Porcentaje_Completado_Ficha' => 0,
+                    'Fecha_Postulacion' => now(),
+                    'Activo' => true,
+                    'Fecha_Creacion' => now(),
+                ]);
+
+                $usuario->forceFill(['Id_Proveedor' => $proveedor->Id_Proveedor])->save();
+            }
 
             $codigoActivacion->forceFill([
                 'Usado' => true,

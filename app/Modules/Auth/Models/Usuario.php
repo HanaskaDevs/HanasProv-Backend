@@ -61,6 +61,18 @@ class Usuario extends Authenticatable
     }
 
     /**
+     * El trait Notifiable, por defecto, busca $this->email (minúscula) para
+     * saber a dónde mandar notificaciones por el canal "mail". Nuestra
+     * columna real es "Email" (con mayúscula) -> sin este método, Eloquent
+     * nunca encuentra el destinatario y el correo se "envía" sin ir a
+     * ningún lado, sin lanzar ninguna excepción visible.
+     */
+    public function routeNotificationForMail(\Illuminate\Notifications\Notification $notification): string
+    {
+        return $this->Email;
+    }
+
+    /**
      * ¿Este usuario tiene el rol indicado (por nombre) en la empresa dada?
      * El vínculo Usuario_Empresa debe estar activo.
      */
@@ -78,8 +90,8 @@ class Usuario extends Authenticatable
         return $this->tieneRolEnEmpresa($idEmpresa, 'Sistemas');
     }
 
-    public function esAdministrador(int $idEmpresa): bool
+    public function esAdmin(int $idEmpresa): bool
     {
-        return $this->tieneRolEnEmpresa($idEmpresa, 'Administrador');
+        return $this->tieneRolEnEmpresa($idEmpresa, 'Admin');
     }
 }
