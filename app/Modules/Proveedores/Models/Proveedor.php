@@ -79,7 +79,7 @@ class Proveedor extends Model
         )->withPivot(['Activo', 'Id_Proveedor_Categoria']);
     }
 
-    public function documentos(): HasMany
+   public function documentos(): HasMany
 {
     return $this->hasMany(\App\Modules\Documentos_Proveedor\Models\DocumentoProveedor::class, 'Id_Proveedor');
 }
@@ -98,4 +98,9 @@ class Proveedor extends Model
     {
         return $this->hasMany(AceptacionNormativa::class, 'Id_Proveedor');
     }
+
+    public function productos(): HasMany
+{
+    return $this->hasMany(\App\Modules\Ficha_Productos\Models\Producto::class, 'Id_Proveedor');
+}
 }
