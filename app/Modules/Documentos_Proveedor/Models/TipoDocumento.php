@@ -4,6 +4,8 @@ namespace App\Modules\Documentos_Proveedor\Models;
 
 use Illuminate\Database\Eloquent\Model;
 
+
+
 class TipoDocumento extends Model
 {
     protected $table = 'Tipo_Documento';
@@ -23,4 +25,5 @@ class TipoDocumento extends Model
         'Requiere_Solo_Quito' => 'boolean',
         'Activo' => 'boolean',
     ];
+    
 }
