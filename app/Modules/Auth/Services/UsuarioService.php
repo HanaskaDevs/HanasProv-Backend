@@ -263,7 +263,13 @@ class UsuarioService
             ]);
         }
 
-        $esPrimeraActivacion = $codigoActivacion->Tipo === 'Bienvenida';
+        // "Primera activación" se determina por el ESTADO REAL del usuario
+        // (nunca completó ninguna activación todavía), NO por el tipo de
+        // código usado para lograrlo. Así, si el código de bienvenida
+        // expiró y se reenvía (o se usa "olvidé mi contraseña" como
+        // reintento), sigue pidiendo nombre completo y creando el
+        // Proveedor cascarón la primera vez que de verdad se complete.
+        $esPrimeraActivacion = (bool) $usuario->Requiere_Cambio_Password;
 
         if ($esPrimeraActivacion && empty($datosPerfil['nombre_completo'])) {
             throw ValidationException::withMessages([
@@ -287,15 +293,27 @@ class UsuarioService
             if ($esPrimeraActivacion && $usuario->Tipo_Usuario === 'Proveedor' && ! $usuario->Id_Proveedor) {
                 $idEmpresa = $usuario->usuarioEmpresas()->where('Activo', true)->value('Id_Empresa');
 
-                $proveedor = Proveedor::create([
-                    'Id_Empresa' => $idEmpresa,
-                    'Email' => $usuario->Email,
-                    'Seccion_Actual' => 1,
-                    'Porcentaje_Completado_Ficha' => 0,
-                    'Fecha_Postulacion' => now(),
-                    'Activo' => true,
-                    'Fecha_Creacion' => now(),
-                ]);
+                // Si un intento de activación anterior (con un código que
+                // luego expiró) ya alcanzó a crear el cascarón pero no
+                // llegó a vincularlo al usuario, lo reutilizamos en vez de
+                // intentar crear uno nuevo (chocaría con la restricción
+                // UNIQUE de Id_Empresa+Ruc, ya que Ruc sigue en NULL).
+                $proveedor = Proveedor::where('Id_Empresa', $idEmpresa)
+                    ->where('Email', $usuario->Email)
+                    ->whereNull('Ruc')
+                    ->first();
+
+                if (! $proveedor) {
+                    $proveedor = Proveedor::create([
+                        'Id_Empresa' => $idEmpresa,
+                        'Email' => $usuario->Email,
+                        'Seccion_Actual' => 1,
+                        'Porcentaje_Completado_Ficha' => 0,
+                        'Fecha_Postulacion' => now(),
+                        'Activo' => true,
+                        'Fecha_Creacion' => now(),
+                    ]);
+                }
 
                 $usuario->forceFill(['Id_Proveedor' => $proveedor->Id_Proveedor])->save();
             }
@@ -341,6 +359,36 @@ class UsuarioService
     /**
      * Solo rol "Sistemas" puede inactivar usuarios.
      */
+    /**
+     * Reenvía un código de activación a un usuario que todavía no ha
+     * completado su primera activación (Requiere_Cambio_Password = true).
+     * Los mismos permisos que crear ese tipo de usuario: internos ->
+     * solo Sistemas; externos -> Sistemas o Admin.
+     */
+    public function reenviarCodigoActivacion(Usuario $usuario, Usuario $solicitante, int $idEmpresa): void
+    {
+        if (! $usuario->Requiere_Cambio_Password) {
+            throw ValidationException::withMessages([
+                'email' => ['Este usuario ya activó su cuenta. Si olvidó su contraseña, use la opción "Olvidé mi contraseña".'],
+            ]);
+        }
+
+        $puedeGestionar = $usuario->Tipo_Usuario === 'Interno'
+            ? $solicitante->esSistemas($idEmpresa)
+            : ($solicitante->esSistemas($idEmpresa) || $solicitante->esAdmin($idEmpresa));
+
+        if (! $puedeGestionar) {
+            throw new AccessDeniedHttpException('No tiene permisos para reenviar el código a este usuario.');
+        }
+
+        $this->generarYEnviarCodigo(
+            $usuario,
+            tipo: 'Bienvenida',
+            idProveedor: $usuario->Id_Proveedor,
+            creadoPor: $solicitante->Id_Usuario,
+        );
+    }
+
     public function inactivar(Usuario $usuario, Usuario $ejecutor, int $idEmpresa): void
     {
         if (! $ejecutor->esSistemas($idEmpresa)) {
