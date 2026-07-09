@@ -99,6 +99,15 @@ class UsuarioController extends Controller
         return response()->json(new UsuarioExternoResource($usuario->load('usuarioEmpresas.rol')), 201);
     }
 
+    public function reenviarCodigo(Request $request, Usuario $usuario): JsonResponse
+    {
+        $idEmpresa = (int) $request->attributes->get('id_empresa_activa');
+
+        $this->usuarioService->reenviarCodigoActivacion($usuario, $request->user(), $idEmpresa);
+
+        return response()->json(['message' => 'Código de activación reenviado correctamente.']);
+    }
+
     public function inactivar(Request $request, Usuario $usuario): JsonResponse
     {
         $idEmpresa = (int) $request->attributes->get('id_empresa_activa');

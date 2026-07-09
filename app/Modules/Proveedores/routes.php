@@ -1,6 +1,7 @@
 <?php
 
 use App\Modules\Auth\Http\Middleware\EmpresaActiva;
+use App\Modules\Proveedores\Http\Controllers\CatalogoController;
 use App\Modules\Proveedores\Http\Controllers\FichaProveedorController;
 use App\Modules\Proveedores\Http\Controllers\ProveedorController;
 use Illuminate\Support\Facades\Route;
@@ -22,3 +23,10 @@ Route::prefix('mi-ficha')
         Route::put('/seccion-2', [FichaProveedorController::class, 'seccion2']);
         Route::put('/seccion-3', [FichaProveedorController::class, 'seccion3']);
     });
+
+// Catálogos globales (no dependen de empresa activa) usados en los
+// multi-select de la Ficha de Proveedor.
+Route::middleware('auth:sanctum')->group(function () {
+    Route::get('/catalogos/clases-proveedor', [CatalogoController::class, 'clasesProveedor']);
+    Route::get('/catalogos/categorias-producto', [CatalogoController::class, 'categoriasProducto']);
+});
