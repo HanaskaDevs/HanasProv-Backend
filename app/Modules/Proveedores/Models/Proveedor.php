@@ -48,9 +48,14 @@ class Proveedor extends Model
         return $this->belongsTo(EstadoProveedor::class, 'Id_Estado_Proveedor');
     }
 
-    public function usuarios(): HasMany
+    /**
+     * Usuarios externos vinculados a este Proveedor vía Usuario_Proveedor.
+     */
+    public function usuarios(): BelongsToMany
     {
-        return $this->hasMany(Usuario::class, 'Id_Proveedor');
+        return $this->belongsToMany(Usuario::class, 'Usuario_Proveedor', 'Id_Proveedor', 'Id_Usuario')
+            ->withPivot(['Activo', 'Id_Usuario_Proveedor'])
+            ->using(\App\Modules\Auth\Models\UsuarioProveedor::class);
     }
 
     /**

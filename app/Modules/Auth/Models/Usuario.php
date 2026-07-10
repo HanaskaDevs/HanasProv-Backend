@@ -4,7 +4,6 @@ namespace App\Modules\Auth\Models;
 
 use App\Models\Empresa;
 use App\Modules\Proveedores\Models\Proveedor;
-use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
@@ -38,11 +37,32 @@ class Usuario extends Authenticatable
         'Fecha_Modificacion' => 'datetime',
     ];
 
+    /**
+     * Proveedores vinculados a este usuario externo, vía la tabla puente
+     * Usuario_Proveedor. En la práctica un usuario externo suele tener
+     * un solo Proveedor activo, pero el esquema permite varios (ej. un
+     * mismo proveedor con distintos contactos/usuarios).
+     */
     public function proveedores(): BelongsToMany
-{
-    return $this->belongsToMany(Proveedor::class, 'Usuario_Proveedor', 'Id_Usuario', 'Id_Proveedor')
-        ->wherePivot('Activo', true);
-}
+    {
+        return $this->belongsToMany(Proveedor::class, 'Usuario_Proveedor', 'Id_Usuario', 'Id_Proveedor')
+            ->withPivot(['Activo', 'Id_Usuario_Proveedor'])
+            ->using(UsuarioProveedor::class);
+    }
+
+    public function usuarioProveedores(): HasMany
+    {
+        return $this->hasMany(UsuarioProveedor::class, 'Id_Usuario');
+    }
+
+    /**
+     * Atajo para el caso normal: el Proveedor principal (activo) de este
+     * usuario externo, o null si todavía no tiene ninguno vinculado.
+     */
+    public function proveedorPrincipal(): ?Proveedor
+    {
+        return $this->proveedores()->wherePivot('Activo', true)->first();
+    }
 
     public function empresas(): BelongsToMany
     {
@@ -60,14 +80,6 @@ class Usuario extends Authenticatable
     {
         return $this->hasMany(Sesion::class, 'Id_Usuario');
     }
-
-    public function esSistemasGlobal(): bool
-{
-    return $this->usuarioEmpresas()
-        ->where('Activo', true)
-        ->whereHas('rol', fn ($q) => $q->where('Nombre_Rol', 'Sistemas'))
-        ->exists();
-}
 
     /**
      * El trait Notifiable, por defecto, busca $this->email (minúscula) para
