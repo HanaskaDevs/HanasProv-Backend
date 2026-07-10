@@ -11,10 +11,10 @@ class SubirDocumentoProductoRequest extends FormRequest
         return true;
     }
 
-    public function rules(): array
-    {
-        return [
-            'archivo' => ['required', 'file', 'mimes:pdf,jpg,jpeg,png', 'max:10240'],
-        ];
-    }
+   public function rules(): array
+{
+    return [
+        'archivo' => ['required', 'file', 'mimes:pdf', 'max:4096'],
+    ];
+}
 }

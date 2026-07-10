@@ -26,11 +26,16 @@ class UsuarioService
      */
     public function crearUsuarioInterno(array $data, Usuario $creador): Usuario
     {
-        foreach ($data['id_empresas'] as $idEmpresa) {
-            if (! $creador->esSistemas($idEmpresa)) {
-                throw new AccessDeniedHttpException('Solo puede asignar empresas donde usted mismo tiene rol Sistemas.');
-            }
-        }
+        if (! $creador->esSistemasGlobal()) {
+    throw new AccessDeniedHttpException('Solo usuarios con rol Sistemas pueden crear usuarios internos.');
+}
+$idRolProveedor = Rol::where('Nombre_Rol', 'Proveedor')->value('Id_Rol');
+
+if ((int) $data['id_rol'] === (int) $idRolProveedor) {
+    throw ValidationException::withMessages([
+        'id_rol' => ['El rol Proveedor no puede asignarse a un usuario interno.'],
+    ]);
+}
 
         return DB::transaction(function () use ($data, $creador) {
             $usuario = $this->crearUsuarioBase([
@@ -509,12 +514,13 @@ public function quitarAccesoEmpresa(Usuario $usuario, int $idEmpresa, Usuario $e
 public function otorgarAccesoEmpresa(Usuario $usuario, int $idEmpresa, Usuario $creador, ?int $idRol = null): void
 {
     if ($usuario->Tipo_Usuario === 'Interno') {
-        if (! $creador->esSistemas($idEmpresa)) {
-            throw new AccessDeniedHttpException('Solo usuarios con rol Sistemas pueden otorgar acceso en esa empresa.');
-        }
-        if (! $idRol) {
-            throw ValidationException::withMessages(['id_rol' => ['El rol es requerido para un usuario interno.']]);
-        }
+    if (! $creador->esSistemasGlobal()) {
+        throw new AccessDeniedHttpException('Solo usuarios con rol Sistemas pueden otorgar acceso a usuarios internos.');
+    }
+    if (! $idRol) {
+        throw ValidationException::withMessages(['id_rol' => ['El rol es requerido para un usuario interno.']]);
+    }
+
     } else {
         if (! $creador->esSistemas($idEmpresa) && ! $creador->esAdmin($idEmpresa)) {
             throw new AccessDeniedHttpException('No tiene permisos para otorgar acceso de proveedor en esa empresa.');

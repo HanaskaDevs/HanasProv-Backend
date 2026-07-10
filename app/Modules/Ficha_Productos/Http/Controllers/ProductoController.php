@@ -18,20 +18,29 @@ class ProductoController extends Controller
 
     public function index(Request $request): JsonResponse
     {
-        return response()->json(ProductoResource::collection($this->productoService->listar($request->user())));
+        $idEmpresaActiva = (int) $request->attributes->get('id_empresa_activa');
+
+        return response()->json(
+            ProductoResource::collection($this->productoService->listar($request->user(), $idEmpresaActiva))
+        );
     }
 
     public function store(GuardarProductoRequest $request): JsonResponse
     {
-        $producto = $this->productoService->crear($request->user(), $request->validated());
+        $idEmpresaActiva = (int) $request->attributes->get('id_empresa_activa');
+
+        $producto = $this->productoService->crear($request->user(), $idEmpresaActiva, $request->validated());
 
         return response()->json(new ProductoResource($producto), 201);
     }
 
     public function subirDocumento(SubirDocumentoProductoRequest $request, int $producto, int $tipoDocumento): JsonResponse
     {
+        $idEmpresaActiva = (int) $request->attributes->get('id_empresa_activa');
+
         $documento = $this->productoService->subirDocumento(
             $request->user(),
+            $idEmpresaActiva,
             $producto,
             $tipoDocumento,
             $request->file('archivo')
@@ -39,4 +48,11 @@ class ProductoController extends Controller
 
         return response()->json($documento, 201);
     }
+
+    public function descargarDocumento(Request $request, int $documentoProducto)
+{
+    $idEmpresaActiva = (int) $request->attributes->get('id_empresa_activa');
+
+    return $this->productoService->descargarDocumento($request->user(), $idEmpresaActiva, $documentoProducto);
+}
 }

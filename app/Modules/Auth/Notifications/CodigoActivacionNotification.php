@@ -27,10 +27,13 @@ class CodigoActivacionNotification extends Notification
             ? 'Restablecimiento de contraseña - Portal de Proveedores'
             : 'Bienvenido - Activa tu cuenta';
 
-        $urlActivacion = rtrim(config('app.frontend_url'), '/') . '/activar-cuenta?' . http_build_query([
-            'email' => $notifiable->Email,
-            'codigo' => $this->codigo,
-        ]);
+        $ruta = $this->esReset ? '/restablecer-password' : '/activar-cuenta';
+
+$urlActivacion = rtrim(config('app.frontend_url'), '/') . $ruta . '?' . http_build_query([
+    'email' => $notifiable->Email,
+    'codigo' => $this->codigo,
+]);
+       
 
         return (new MailMessage)
             ->subject($asunto)
