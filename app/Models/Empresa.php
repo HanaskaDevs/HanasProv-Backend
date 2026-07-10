@@ -16,7 +16,7 @@ class Empresa extends Model
     public $timestamps = false;
 
     protected $fillable = [
-        'Razon_Social', 'Ruc', 'Nombre_Comercial', 'Logo_Url', 'Activo',
+        'Razon_Social','Empresa_BC', 'Ruc', 'Nombre_Comercial', 'Logo_Url', 'Activo',
         'Creado_Por', 'Fecha_Creacion', 'Modificado_Por', 'Fecha_Modificacion',
     ];
 

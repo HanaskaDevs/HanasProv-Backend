@@ -12,9 +12,11 @@ class CrearUsuarioProveedorRequest extends FormRequest
     }
 
     public function rules(): array
-    {
-        return [
-            'email' => ['required', 'email', 'max:150'],
-        ];
-    }
+{
+    return [
+        'email' => ['required', 'email', 'max:150'],
+        'id_empresas' => ['required', 'array', 'min:1'],
+        'id_empresas.*' => ['integer', 'exists:Empresa,Id_Empresa'],
+    ];
+}
 }

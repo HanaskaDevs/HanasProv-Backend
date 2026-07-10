@@ -22,7 +22,7 @@ class Usuario extends Authenticatable
     protected $authPasswordName = 'Password_Hash';
 
     protected $fillable = [
-        'Id_Proveedor', 'Email', 'Password_Hash', 'Nombre_Completo', 'Cargo',
+        'Email', 'Password_Hash', 'Nombre_Completo', 'Cargo',
         'Telefono', 'Requiere_Cambio_Password', 'Ultimo_Acceso', 'Activo',
         'Creado_Por', 'Fecha_Creacion', 'Modificado_Por', 'Fecha_Modificacion',
         'Tipo_Usuario',
@@ -38,10 +38,11 @@ class Usuario extends Authenticatable
         'Fecha_Modificacion' => 'datetime',
     ];
 
-    public function proveedor(): BelongsTo
-    {
-        return $this->belongsTo(Proveedor::class, 'Id_Proveedor');
-    }
+    public function proveedores(): BelongsToMany
+{
+    return $this->belongsToMany(Proveedor::class, 'Usuario_Proveedor', 'Id_Usuario', 'Id_Proveedor')
+        ->wherePivot('Activo', true);
+}
 
     public function empresas(): BelongsToMany
     {
@@ -59,6 +60,14 @@ class Usuario extends Authenticatable
     {
         return $this->hasMany(Sesion::class, 'Id_Usuario');
     }
+
+    public function esSistemasGlobal(): bool
+{
+    return $this->usuarioEmpresas()
+        ->where('Activo', true)
+        ->whereHas('rol', fn ($q) => $q->where('Nombre_Rol', 'Sistemas'))
+        ->exists();
+}
 
     /**
      * El trait Notifiable, por defecto, busca $this->email (minúscula) para

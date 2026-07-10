@@ -20,34 +20,35 @@ class UsuarioService
     protected const MINUTOS_VIGENCIA_CODIGO = 20;
 
     /**
-     * Crea un usuario interno (staff) dentro de la empresa activa de quien lo crea.
-     * Formulario mínimo: solo email + rol. El propio usuario completa
+     * Crea un usuario interno (staff) en una o varias empresas donde quien
+     * lo crea tenga rol "Sistemas". El propio usuario completa
      * Nombre_Completo/Cargo/Telefono al activar su cuenta con el código.
-     * Solo un usuario con rol "Sistemas" en esa empresa puede hacerlo.
      */
-    public function crearUsuarioInterno(array $data, Usuario $creador, int $idEmpresaActiva): Usuario
+    public function crearUsuarioInterno(array $data, Usuario $creador): Usuario
     {
-        if (! $creador->esSistemas($idEmpresaActiva)) {
-            throw new AccessDeniedHttpException('Solo usuarios con rol Sistemas pueden crear usuarios internos.');
+        foreach ($data['id_empresas'] as $idEmpresa) {
+            if (! $creador->esSistemas($idEmpresa)) {
+                throw new AccessDeniedHttpException('Solo puede asignar empresas donde usted mismo tiene rol Sistemas.');
+            }
         }
 
-        return DB::transaction(function () use ($data, $creador, $idEmpresaActiva) {
+        return DB::transaction(function () use ($data, $creador) {
             $usuario = $this->crearUsuarioBase([
                 'Email' => $data['email'],
-                // Placeholder obligatorio (la columna es NOT NULL): el usuario
-                // real lo define al activar su cuenta.
                 'Nombre_Completo' => $data['email'],
                 'Tipo_Usuario' => 'Interno',
             ], $creador);
 
-            UsuarioEmpresa::create([
-                'Id_Usuario' => $usuario->Id_Usuario,
-                'Id_Empresa' => $idEmpresaActiva,
-                'Id_Rol' => $data['id_rol'],
-                'Activo' => true,
-                'Creado_Por' => $creador->Id_Usuario,
-                'Fecha_Creacion' => now(),
-            ]);
+            foreach ($data['id_empresas'] as $idEmpresa) {
+                UsuarioEmpresa::create([
+                    'Id_Usuario' => $usuario->Id_Usuario,
+                    'Id_Empresa' => $idEmpresa,
+                    'Id_Rol' => $data['id_rol'],
+                    'Activo' => true,
+                    'Creado_Por' => $creador->Id_Usuario,
+                    'Fecha_Creacion' => now(),
+                ]);
+            }
 
             $this->generarYEnviarCodigo($usuario, tipo: 'Bienvenida', creadoPor: $creador->Id_Usuario);
 
@@ -79,18 +80,14 @@ class UsuarioService
     }
 
     /**
-     * Crea un usuario externo (Proveedor) dentro de la empresa activa de quien lo crea.
-     * Formulario mínimo: solo email. El Proveedor (la empresa proveedora en sí)
-     * todavía NO existe en este punto -> Usuario.Id_Proveedor queda NULL hasta
-     * que el usuario complete la Ficha de Proveedor tras activar su cuenta.
-     * Permitido para rol "Sistemas" o "Admin" dentro de la empresa activa.
+     * Crea un usuario externo (Proveedor) en una o varias empresas.
+     * El Proveedor (la empresa proveedora en sí) todavía NO existe en este
+     * punto -> se crea uno por cada empresa recién cuando el usuario activa
+     * su cuenta por primera vez.
+     * Permitido para rol "Sistemas" o "Admin" en cada empresa seleccionada.
      */
-    public function crearUsuarioProveedor(array $data, Usuario $creador, int $idEmpresaActiva): Usuario
+    public function crearUsuarioProveedor(array $data, Usuario $creador): Usuario
     {
-        if (! $creador->esSistemas($idEmpresaActiva) && ! $creador->esAdmin($idEmpresaActiva)) {
-            throw new AccessDeniedHttpException('No tiene permisos para crear usuarios externos.');
-        }
-
         $idRolProveedor = Rol::where('Nombre_Rol', 'Proveedor')->value('Id_Rol');
 
         if (! $idRolProveedor) {
@@ -99,21 +96,29 @@ class UsuarioService
             ]);
         }
 
-        return DB::transaction(function () use ($data, $creador, $idEmpresaActiva, $idRolProveedor) {
+        foreach ($data['id_empresas'] as $idEmpresa) {
+            if (! $creador->esSistemas($idEmpresa) && ! $creador->esAdmin($idEmpresa)) {
+                throw new AccessDeniedHttpException('No tiene permisos para crear proveedores en una de las empresas seleccionadas.');
+            }
+        }
+
+        return DB::transaction(function () use ($data, $creador, $idRolProveedor) {
             $usuario = $this->crearUsuarioBase([
                 'Email' => $data['email'],
                 'Nombre_Completo' => $data['email'],
                 'Tipo_Usuario' => 'Proveedor',
             ], $creador);
 
-            UsuarioEmpresa::create([
-                'Id_Usuario' => $usuario->Id_Usuario,
-                'Id_Empresa' => $idEmpresaActiva,
-                'Id_Rol' => $idRolProveedor,
-                'Activo' => true,
-                'Creado_Por' => $creador->Id_Usuario,
-                'Fecha_Creacion' => now(),
-            ]);
+            foreach ($data['id_empresas'] as $idEmpresa) {
+                UsuarioEmpresa::create([
+                    'Id_Usuario' => $usuario->Id_Usuario,
+                    'Id_Empresa' => $idEmpresa,
+                    'Id_Rol' => $idRolProveedor,
+                    'Activo' => true,
+                    'Creado_Por' => $creador->Id_Usuario,
+                    'Fecha_Creacion' => now(),
+                ]);
+            }
 
             $this->generarYEnviarCodigo($usuario, tipo: 'Bienvenida', creadoPor: $creador->Id_Usuario);
 
@@ -132,7 +137,10 @@ class UsuarioService
 
         return Usuario::where('Tipo_Usuario', 'Proveedor')
             ->whereHas('usuarioEmpresas', fn ($q) => $q->where('Id_Empresa', $idEmpresa))
-            ->with(['usuarioEmpresas' => fn ($q) => $q->where('Id_Empresa', $idEmpresa)->with('rol'), 'proveedor'])
+            ->with([
+    'usuarioEmpresas' => fn ($q) => $q->where('Id_Empresa', $idEmpresa)->with('rol'),
+    'proveedores' => fn ($q) => $q->where('Id_Empresa', $idEmpresa),
+])
             ->orderBy('Nombre_Completo')
             ->get();
     }
@@ -174,7 +182,6 @@ class UsuarioService
     protected function generarYEnviarCodigo(
         Usuario $usuario,
         string $tipo,
-        ?int $idProveedor = null,
         ?int $creadoPor = null,
     ): CodigoActivacion {
         CodigoActivacion::where('Email', $usuario->Email)
@@ -185,7 +192,6 @@ class UsuarioService
 
         $codigoActivacion = CodigoActivacion::create([
             'Email' => $usuario->Email,
-            'Id_Proveedor' => $idProveedor,
             'Tipo' => $tipo,
             'Codigo' => $codigo,
             'Fecha_Expiracion' => now()->addMinutes(self::MINUTOS_VIGENCIA_CODIGO),
@@ -265,17 +271,8 @@ class UsuarioService
 
         // "Primera activación" se determina por el ESTADO REAL del usuario
         // (nunca completó ninguna activación todavía), NO por el tipo de
-        // código usado para lograrlo. Así, si el código de bienvenida
-        // expiró y se reenvía (o se usa "olvidé mi contraseña" como
-        // reintento), sigue pidiendo nombre completo y creando el
-        // Proveedor cascarón la primera vez que de verdad se complete.
+        // código usado para lograrlo.
         $esPrimeraActivacion = (bool) $usuario->Requiere_Cambio_Password;
-
-        if ($esPrimeraActivacion && empty($datosPerfil['nombre_completo'])) {
-            throw ValidationException::withMessages([
-                'nombre_completo' => ['El nombre completo es requerido para activar la cuenta.'],
-            ]);
-        }
 
         return DB::transaction(function () use ($usuario, $codigoActivacion, $passwordNueva, $datosPerfil, $esPrimeraActivacion) {
             $usuario->forceFill([
@@ -288,34 +285,37 @@ class UsuarioService
                 ] : []),
             ])->save();
 
-            // Primera activación de un usuario externo: se crea el "cascarón"
-            // del Proveedor para que pueda empezar a llenar su Ficha.
-            if ($esPrimeraActivacion && $usuario->Tipo_Usuario === 'Proveedor' && ! $usuario->Id_Proveedor) {
-                $idEmpresa = $usuario->usuarioEmpresas()->where('Activo', true)->value('Id_Empresa');
+            // Primera activación de un usuario externo: se crea un "cascarón"
+            // de Proveedor por CADA empresa a la que tiene acceso, para que
+            // pueda empezar a llenar su Ficha en cada una por separado.
+            if ($esPrimeraActivacion && $usuario->Tipo_Usuario === 'Proveedor' && $usuario->proveedores()->count() === 0) {
+                $idsEmpresas = $usuario->usuarioEmpresas()->where('Activo', true)->pluck('Id_Empresa');
 
-                // Si un intento de activación anterior (con un código que
-                // luego expiró) ya alcanzó a crear el cascarón pero no
-                // llegó a vincularlo al usuario, lo reutilizamos en vez de
-                // intentar crear uno nuevo (chocaría con la restricción
-                // UNIQUE de Id_Empresa+Ruc, ya que Ruc sigue en NULL).
-                $proveedor = Proveedor::where('Id_Empresa', $idEmpresa)
-                    ->where('Email', $usuario->Email)
-                    ->whereNull('Ruc')
-                    ->first();
+                foreach ($idsEmpresas as $idEmpresa) {
+                    // Si un intento de activación anterior (con un código que
+                    // luego expiró) ya alcanzó a crear el cascarón pero no
+                    // llegó a vincularlo al usuario, lo reutilizamos en vez de
+                    // crear uno nuevo (chocaría con la restricción UNIQUE de
+                    // Id_Empresa+Ruc, ya que Ruc sigue en NULL).
+                    $proveedor = Proveedor::where('Id_Empresa', $idEmpresa)
+                        ->where('Email', $usuario->Email)
+                        ->whereNull('Ruc')
+                        ->first();
 
-                if (! $proveedor) {
-                    $proveedor = Proveedor::create([
-                        'Id_Empresa' => $idEmpresa,
-                        'Email' => $usuario->Email,
-                        'Seccion_Actual' => 1,
-                        'Porcentaje_Completado_Ficha' => 0,
-                        'Fecha_Postulacion' => now(),
-                        'Activo' => true,
-                        'Fecha_Creacion' => now(),
-                    ]);
+                    if (! $proveedor) {
+                        $proveedor = Proveedor::create([
+                            'Id_Empresa' => $idEmpresa,
+                            'Email' => $usuario->Email,
+                            'Seccion_Actual' => 1,
+                            'Porcentaje_Completado_Ficha' => 0,
+                            'Fecha_Postulacion' => now(),
+                            'Activo' => true,
+                            'Fecha_Creacion' => now(),
+                        ]);
+                    }
+
+                    $usuario->proveedores()->attach($proveedor->Id_Proveedor);
                 }
-
-                $usuario->forceFill(['Id_Proveedor' => $proveedor->Id_Proveedor])->save();
             }
 
             $codigoActivacion->forceFill([
@@ -357,9 +357,6 @@ class UsuarioService
     }
 
     /**
-     * Solo rol "Sistemas" puede inactivar usuarios.
-     */
-    /**
      * Reenvía un código de activación a un usuario que todavía no ha
      * completado su primera activación (Requiere_Cambio_Password = true).
      * Los mismos permisos que crear ese tipo de usuario: internos ->
@@ -384,11 +381,13 @@ class UsuarioService
         $this->generarYEnviarCodigo(
             $usuario,
             tipo: 'Bienvenida',
-            idProveedor: $usuario->Id_Proveedor,
             creadoPor: $solicitante->Id_Usuario,
         );
     }
 
+    /**
+     * Solo rol "Sistemas" puede inactivar usuarios.
+     */
     public function inactivar(Usuario $usuario, Usuario $ejecutor, int $idEmpresa): void
     {
         if (! $ejecutor->esSistemas($idEmpresa)) {
@@ -414,4 +413,147 @@ class UsuarioService
     {
         return Str::upper(Str::random(4)) . '-' . random_int(1000, 9999);
     }
+
+    public function reactivar(Usuario $usuario, Usuario $ejecutor, int $idEmpresa): void
+{
+    if (! $ejecutor->esSistemas($idEmpresa)) {
+        throw new AccessDeniedHttpException('Solo usuarios con rol Sistemas pueden reactivar usuarios.');
+    }
+
+    $usuario->forceFill([
+        'Activo' => true,
+        'Modificado_Por' => $ejecutor->Id_Usuario,
+        'Fecha_Modificacion' => now(),
+    ])->save();
+}
+
+public function actualizarEmail(Usuario $usuario, string $nuevoEmail, Usuario $ejecutor, int $idEmpresa): void
+{
+    $puedeGestionar = $usuario->Tipo_Usuario === 'Interno'
+        ? $ejecutor->esSistemas($idEmpresa)
+        : ($ejecutor->esSistemas($idEmpresa) || $ejecutor->esAdmin($idEmpresa));
+
+    if (! $puedeGestionar) {
+        throw new AccessDeniedHttpException('No tiene permisos para editar este usuario.');
+    }
+
+    if (Usuario::where('Email', $nuevoEmail)->where('Id_Usuario', '!=', $usuario->Id_Usuario)->exists()) {
+        throw ValidationException::withMessages([
+            'email' => ['Ya existe otro usuario con ese correo.'],
+        ]);
+    }
+
+    $usuario->forceFill([
+        'Email' => $nuevoEmail,
+        'Modificado_Por' => $ejecutor->Id_Usuario,
+        'Fecha_Modificacion' => now(),
+    ])->save();
+}
+
+public function actualizarRolEnEmpresa(Usuario $usuario, int $idEmpresa, int $idRol, Usuario $ejecutor): void
+{
+    if (! $ejecutor->esSistemas($idEmpresa)) {
+        throw new AccessDeniedHttpException('Solo usuarios con rol Sistemas pueden cambiar roles.');
+    }
+
+    $vinculo = $usuario->usuarioEmpresas()->where('Id_Empresa', $idEmpresa)->where('Activo', true)->first();
+
+    if (! $vinculo) {
+        throw ValidationException::withMessages([
+            'id_empresa' => ['El usuario no tiene acceso activo a esa empresa.'],
+        ]);
+    }
+
+    $vinculo->forceFill([
+        'Id_Rol' => $idRol,
+        'Modificado_Por' => $ejecutor->Id_Usuario,
+        'Fecha_Modificacion' => now(),
+    ])->save();
+}
+
+public function quitarAccesoEmpresa(Usuario $usuario, int $idEmpresa, Usuario $ejecutor): void
+{
+    $puedeGestionar = $usuario->Tipo_Usuario === 'Interno'
+        ? $ejecutor->esSistemas($idEmpresa)
+        : ($ejecutor->esSistemas($idEmpresa) || $ejecutor->esAdmin($idEmpresa));
+
+    if (! $puedeGestionar) {
+        throw new AccessDeniedHttpException('No tiene permisos para modificar el acceso de este usuario en esa empresa.');
+    }
+
+    $vinculo = $usuario->usuarioEmpresas()->where('Id_Empresa', $idEmpresa)->where('Activo', true)->first();
+
+    if (! $vinculo) {
+        throw ValidationException::withMessages([
+            'id_empresa' => ['El usuario no tiene acceso activo a esa empresa.'],
+        ]);
+    }
+
+    if ($usuario->usuarioEmpresas()->where('Activo', true)->count() <= 1) {
+        throw ValidationException::withMessages([
+            'id_empresa' => ['No puede quitar el único acceso que le queda. Inactive el usuario completo en su lugar.'],
+        ]);
+    }
+
+    $vinculo->forceFill(['Activo' => false])->save();
+}
+
+/**
+ * Da acceso a un usuario EXISTENTE a una empresa adicional.
+ * - Interno: requiere id_rol explícito, solo Sistemas puede otorgarlo.
+ * - Proveedor: el rol siempre es "Proveedor"; Sistemas o Admin pueden otorgarlo.
+ *   Si el usuario ya activó su cuenta, se crea de inmediato el "cascarón"
+ *   del Proveedor para esa empresa (si aún no activó, se crea después,
+ *   junto con las demás, al momento de activarCuenta()).
+ */
+public function otorgarAccesoEmpresa(Usuario $usuario, int $idEmpresa, Usuario $creador, ?int $idRol = null): void
+{
+    if ($usuario->Tipo_Usuario === 'Interno') {
+        if (! $creador->esSistemas($idEmpresa)) {
+            throw new AccessDeniedHttpException('Solo usuarios con rol Sistemas pueden otorgar acceso en esa empresa.');
+        }
+        if (! $idRol) {
+            throw ValidationException::withMessages(['id_rol' => ['El rol es requerido para un usuario interno.']]);
+        }
+    } else {
+        if (! $creador->esSistemas($idEmpresa) && ! $creador->esAdmin($idEmpresa)) {
+            throw new AccessDeniedHttpException('No tiene permisos para otorgar acceso de proveedor en esa empresa.');
+        }
+        $idRol = Rol::where('Nombre_Rol', 'Proveedor')->value('Id_Rol');
+    }
+
+    $yaTieneAcceso = $usuario->usuarioEmpresas()
+        ->where('Id_Empresa', $idEmpresa)
+        ->where('Activo', true)
+        ->exists();
+
+    if ($yaTieneAcceso) {
+        throw ValidationException::withMessages(['id_empresa' => ['El usuario ya tiene acceso a esa empresa.']]);
+    }
+
+    DB::transaction(function () use ($usuario, $idEmpresa, $idRol, $creador) {
+        UsuarioEmpresa::create([
+            'Id_Usuario' => $usuario->Id_Usuario,
+            'Id_Empresa' => $idEmpresa,
+            'Id_Rol' => $idRol,
+            'Activo' => true,
+            'Creado_Por' => $creador->Id_Usuario,
+            'Fecha_Creacion' => now(),
+        ]);
+
+        if ($usuario->Tipo_Usuario === 'Proveedor' && ! $usuario->Requiere_Cambio_Password) {
+            $proveedor = Proveedor::create([
+                'Id_Empresa' => $idEmpresa,
+                'Email' => $usuario->Email,
+                'Seccion_Actual' => 1,
+                'Porcentaje_Completado_Ficha' => 0,
+                'Fecha_Postulacion' => now(),
+                'Activo' => true,
+                'Fecha_Creacion' => now(),
+            ]);
+
+            $usuario->proveedores()->attach($proveedor->Id_Proveedor);
+        }
+    });
+}
 }
