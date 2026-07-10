@@ -17,13 +17,18 @@ class DocumentoProveedorController extends Controller
 
     public function index(Request $request): JsonResponse
     {
-        return response()->json($this->documentoService->obtenerChecklist($request->user()));
+        $idEmpresa = (int) $request->attributes->get('id_empresa_activa');
+
+        return response()->json($this->documentoService->obtenerChecklist($request->user(), $idEmpresa));
     }
 
     public function subir(SubirDocumentoRequest $request, int $tipoDocumento): JsonResponse
     {
+        $idEmpresa = (int) $request->attributes->get('id_empresa_activa');
+
         $documento = $this->documentoService->subirDocumento(
             $request->user(),
+            $idEmpresa,
             $tipoDocumento,
             $request->file('archivo'),
             $request->validated('fecha_caducidad')
@@ -34,6 +39,8 @@ class DocumentoProveedorController extends Controller
 
     public function descargar(Request $request, int $documentoProveedor)
     {
-        return $this->documentoService->descargar($request->user(), $documentoProveedor);
+        $idEmpresa = (int) $request->attributes->get('id_empresa_activa');
+
+        return $this->documentoService->descargar($request->user(), $idEmpresa, $documentoProveedor);
     }
 }

@@ -23,9 +23,9 @@ class DocumentoProveedorService
 {
     protected const DISCO = 'repositorio_proveedores';
 
-   public function obtenerChecklist(Usuario $usuario): array
+   public function obtenerChecklist(Usuario $usuario, int $idEmpresaActiva): array
 {
-    $proveedor = $this->miProveedor($usuario);
+    $proveedor = $this->miProveedor($usuario, $idEmpresaActiva);
 
     $tipos = TipoDocumento::where('Activo', 1)
         ->with(['documentosProveedor' => function ($query) use ($proveedor) {
@@ -61,11 +61,12 @@ class DocumentoProveedorService
 
     public function subirDocumento(
         Usuario $usuario,
+        int $idEmpresaActiva,
         int $idTipoDocumento,
         UploadedFile $archivo,
         ?string $fechaCaducidad
     ): DocumentoProveedor {
-        $proveedor = $this->miProveedor($usuario);
+        $proveedor = $this->miProveedor($usuario, $idEmpresaActiva);
         $tipo = TipoDocumento::where('Activo', 1)->findOrFail($idTipoDocumento);
 
         if ($tipo->Requiere_Fecha_Caducidad && ! $fechaCaducidad) {
@@ -118,9 +119,9 @@ class DocumentoProveedorService
         });
     }
 
-    public function descargar(Usuario $usuario, int $idDocumentoProveedor)
+    public function descargar(Usuario $usuario, int $idEmpresaActiva, int $idDocumentoProveedor)
 {
-    $proveedor = $this->miProveedor($usuario);
+    $proveedor = $this->miProveedor($usuario, $idEmpresaActiva);
 
     $documento = DocumentoProveedor::where('Id_Proveedor', $proveedor->Id_Proveedor)
         ->with('archivo')
@@ -135,16 +136,26 @@ class DocumentoProveedorService
     return response()->download($rutaCompleta, $documento->archivo->Nombre_Original);
 }
 
-    protected function miProveedor(Usuario $usuario): Proveedor
+    /**
+     * Resuelve el Proveedor del usuario autenticado QUE PERTENECE A LA
+     * EMPRESA ACTIVA de su sesión -> un mismo usuario externo puede tener
+     * Proveedores distintos en distintas empresas (vía Usuario_Proveedor),
+     * la documentación de cada empresa es completamente independiente.
+     */
+    protected function miProveedor(Usuario $usuario, int $idEmpresaActiva): Proveedor
     {
         if ($usuario->Tipo_Usuario !== 'Proveedor') {
             throw new AccessDeniedHttpException('Solo usuarios externos (Proveedor) gestionan su propia documentación.');
         }
 
-        if (! $usuario->Id_Proveedor) {
-            throw new NotFoundHttpException('Este usuario todavía no tiene un Proveedor asociado.');
+        $proveedor = $usuario->proveedores()
+            ->where('Proveedor.Id_Empresa', $idEmpresaActiva)
+            ->first();
+
+        if (! $proveedor) {
+            throw new NotFoundHttpException('Este usuario todavía no tiene un Proveedor asociado a la empresa activa.');
         }
 
-        return Proveedor::findOrFail($usuario->Id_Proveedor);
+        return $proveedor;
     }
 }

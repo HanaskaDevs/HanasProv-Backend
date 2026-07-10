@@ -11,7 +11,6 @@ use App\Modules\Auth\Models\Usuario;
 use App\Modules\Auth\Services\UsuarioService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use App\Modules\Auth\Http\Resources\UsuarioDetalleResource;
 
 class UsuarioController extends Controller
 {
@@ -32,28 +31,32 @@ class UsuarioController extends Controller
     }
 
     public function showInterno(Request $request, Usuario $usuario): JsonResponse
-{
-    $idEmpresa = (int) $request->attributes->get('id_empresa_activa');
-    $this->usuarioService->verificarAccesoPanelInternos($request->user(), $idEmpresa);
+    {
+        $idEmpresa = (int) $request->attributes->get('id_empresa_activa');
 
-    return response()->json(
-        new UsuarioDetalleResource($usuario->load('usuarioEmpresas.rol', 'usuarioEmpresas.empresa'))
-    );
-}
+        $this->usuarioService->verificarAccesoPanelInternos($request->user(), $idEmpresa);
+
+        return response()->json(
+            new UsuarioInternoResource($usuario->load('usuarioEmpresas.rol'))
+        );
+    }
 
     /**
      * Crea un usuario interno con solo email + rol. La empresa se toma de
      * la sesión activa de quien crea (no se pide en el formulario).
      */
-   public function storeInterno(CrearUsuarioInternoRequest $request): JsonResponse
-{
-    $usuario = $this->usuarioService->crearUsuarioInterno(
-        data: $request->validated(),
-        creador: $request->user(),
-    );
+    public function storeInterno(CrearUsuarioInternoRequest $request): JsonResponse
+    {
+        $idEmpresaActiva = (int) $request->attributes->get('id_empresa_activa');
 
-    return response()->json(new UsuarioInternoResource($usuario->load('usuarioEmpresas.rol')), 201);
-}
+        $usuario = $this->usuarioService->crearUsuarioInterno(
+            data: $request->validated(),
+            creador: $request->user(),
+            idEmpresaActiva: $idEmpresaActiva,
+        );
+
+        return response()->json(new UsuarioInternoResource($usuario->load('usuarioEmpresas.rol')), 201);
+    }
 
     /**
      * Panel de usuarios externos (Proveedores): visible para Sistemas o Admin.
@@ -68,29 +71,33 @@ class UsuarioController extends Controller
     }
 
     public function showExterno(Request $request, Usuario $usuario): JsonResponse
-{
-    $idEmpresa = (int) $request->attributes->get('id_empresa_activa');
-    $this->usuarioService->verificarAccesoPanelExternos($request->user(), $idEmpresa);
+    {
+        $idEmpresa = (int) $request->attributes->get('id_empresa_activa');
 
-    return response()->json(
-        new UsuarioDetalleResource($usuario->load('usuarioEmpresas.rol', 'usuarioEmpresas.empresa'))
-    );
-}
+        $this->usuarioService->verificarAccesoPanelExternos($request->user(), $idEmpresa);
+
+        return response()->json(
+            new UsuarioExternoResource($usuario->load(['usuarioEmpresas.rol', 'proveedores']))
+        );
+    }
 
     /**
      * Crea un usuario externo (Proveedor) con solo email. Permitido para
      * rol Sistemas o Admin dentro de la empresa activa. El Proveedor en sí
      * se crea después, cuando el usuario completa la Ficha tras activarse.
      */
-   public function storeProveedor(CrearUsuarioProveedorRequest $request): JsonResponse
-{
-    $usuario = $this->usuarioService->crearUsuarioProveedor(
-        data: $request->validated(),
-        creador: $request->user(),
-    );
+    public function storeProveedor(CrearUsuarioProveedorRequest $request): JsonResponse
+    {
+        $idEmpresaActiva = (int) $request->attributes->get('id_empresa_activa');
 
-    return response()->json(new UsuarioExternoResource($usuario->load('usuarioEmpresas.rol')), 201);
-}
+        $usuario = $this->usuarioService->crearUsuarioProveedor(
+            data: $request->validated(),
+            creador: $request->user(),
+            idEmpresaActiva: $idEmpresaActiva,
+        );
+
+        return response()->json(new UsuarioExternoResource($usuario->load('usuarioEmpresas.rol')), 201);
+    }
 
     public function reenviarCodigo(Request $request, Usuario $usuario): JsonResponse
     {
@@ -109,56 +116,4 @@ class UsuarioController extends Controller
 
         return response()->json(['message' => 'Usuario inactivado correctamente.']);
     }
-
-    public function reactivar(Request $request, Usuario $usuario): JsonResponse
-{
-    $idEmpresa = (int) $request->attributes->get('id_empresa_activa');
-
-    $this->usuarioService->reactivar($usuario, $request->user(), $idEmpresa);
-
-    return response()->json(['message' => 'Usuario reactivado correctamente.']);
-}
-
-public function agregarEmpresa(Request $request, Usuario $usuario): JsonResponse
-{
-    $data = $request->validate([
-        'id_empresa' => ['required', 'integer', 'exists:Empresa,Id_Empresa'],
-        'id_rol' => ['nullable', 'integer', 'exists:Rol,Id_Rol'],
-    ]);
-
-    $this->usuarioService->otorgarAccesoEmpresa(
-        $usuario,
-        $data['id_empresa'],
-        $request->user(),
-        $data['id_rol'] ?? null,
-    );
-
-    return response()->json(['message' => 'Acceso otorgado correctamente.']);
-}
-
-public function actualizarEmail(Request $request, Usuario $usuario): JsonResponse
-{
-    $data = $request->validate(['email' => ['required', 'email', 'max:150']]);
-    $idEmpresa = (int) $request->attributes->get('id_empresa_activa');
-
-    $this->usuarioService->actualizarEmail($usuario, $data['email'], $request->user(), $idEmpresa);
-
-    return response()->json(['message' => 'Correo actualizado correctamente.']);
-}
-
-public function actualizarRolEnEmpresa(Request $request, Usuario $usuario, int $empresa): JsonResponse
-{
-    $data = $request->validate(['id_rol' => ['required', 'integer', 'exists:Rol,Id_Rol']]);
-
-    $this->usuarioService->actualizarRolEnEmpresa($usuario, $empresa, $data['id_rol'], $request->user());
-
-    return response()->json(['message' => 'Rol actualizado correctamente.']);
-}
-
-public function quitarAccesoEmpresa(Request $request, Usuario $usuario, int $empresa): JsonResponse
-{
-    $this->usuarioService->quitarAccesoEmpresa($usuario, $empresa, $request->user());
-
-    return response()->json(['message' => 'Acceso removido correctamente.']);
-}
 }

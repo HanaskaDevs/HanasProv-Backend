@@ -4,7 +4,6 @@ namespace App\Modules\Proveedores\Services;
 
 use App\Modules\Auth\Models\Usuario;
 use App\Modules\Proveedores\Models\Proveedor;
-use Illuminate\Support\Facades\DB;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
@@ -13,21 +12,22 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
  * sección, reanudable). Solo el propio usuario externo (Tipo_Usuario =
  * Proveedor) puede leer/editar SU propia ficha -> nunca se recibe un
  * Id_Proveedor desde el cliente, siempre se resuelve desde el usuario
- * autenticado.
+ * autenticado + la empresa activa de su sesión (un mismo usuario puede
+ * estar vinculado a Proveedores de más de una empresa, vía Usuario_Proveedor).
  *
  * 3 secciones en total por ahora: Información del Proveedor (33%),
  * Clase de Proveedor (33%), Categoría de Productos/Servicios (34%).
  */
 class FichaProveedorService
 {
-    public function obtenerMiFicha(Usuario $usuario): Proveedor
+    public function obtenerMiFicha(Usuario $usuario, int $idEmpresaActiva): Proveedor
     {
-        return $this->miProveedor($usuario)->load(['clases', 'categoriasProducto', 'estado']);
+        return $this->miProveedor($usuario, $idEmpresaActiva)->load(['clases', 'categoriasProducto', 'estado']);
     }
 
-    public function guardarSeccion1(Usuario $usuario, array $data): Proveedor
+    public function guardarSeccion1(Usuario $usuario, int $idEmpresaActiva, array $data): Proveedor
     {
-        $proveedor = $this->miProveedor($usuario);
+        $proveedor = $this->miProveedor($usuario, $idEmpresaActiva);
 
         $proveedor->forceFill([
             'Ruc' => $data['ruc'],
@@ -62,9 +62,9 @@ class FichaProveedorService
         return $proveedor->fresh(['clases', 'categoriasProducto']);
     }
 
-    public function guardarSeccion2(Usuario $usuario, array $idClases): Proveedor
+    public function guardarSeccion2(Usuario $usuario, int $idEmpresaActiva, array $idClases): Proveedor
     {
-        $proveedor = $this->miProveedor($usuario);
+        $proveedor = $this->miProveedor($usuario, $idEmpresaActiva);
 
         $proveedor->clases()->sync($idClases);
 
@@ -78,9 +78,9 @@ class FichaProveedorService
         return $proveedor->fresh(['clases', 'categoriasProducto']);
     }
 
-    public function guardarSeccion3(Usuario $usuario, array $idCategorias): Proveedor
+    public function guardarSeccion3(Usuario $usuario, int $idEmpresaActiva, array $idCategorias): Proveedor
     {
-        $proveedor = $this->miProveedor($usuario);
+        $proveedor = $this->miProveedor($usuario, $idEmpresaActiva);
 
         $proveedor->categoriasProducto()->sync($idCategorias);
 
@@ -95,20 +95,27 @@ class FichaProveedorService
     }
 
     /**
-     * Resuelve el Proveedor del usuario autenticado. Solo usuarios externos
-     * (Tipo_Usuario = Proveedor) tienen ficha propia.
+     * Resuelve el Proveedor del usuario autenticado QUE PERTENECE A LA
+     * EMPRESA ACTIVA de su sesión. Un mismo usuario externo puede estar
+     * vinculado (vía Usuario_Proveedor) a Proveedores de distintas
+     * empresas -> nunca alcanza con tomar "el primero", hay que filtrar
+     * por la empresa con la que está trabajando en este momento.
      */
-    protected function miProveedor(Usuario $usuario): Proveedor
+    protected function miProveedor(Usuario $usuario, int $idEmpresaActiva): Proveedor
     {
         if ($usuario->Tipo_Usuario !== 'Proveedor') {
             throw new AccessDeniedHttpException('Solo usuarios externos (Proveedor) tienen Ficha de Proveedor.');
         }
 
-        if (! $usuario->Id_Proveedor) {
-            throw new NotFoundHttpException('Este usuario todavía no tiene una Ficha de Proveedor asociada.');
+        $proveedor = $usuario->proveedores()
+            ->where('Proveedor.Id_Empresa', $idEmpresaActiva)
+            ->first();
+
+        if (! $proveedor) {
+            throw new NotFoundHttpException('Este usuario todavía no tiene una Ficha de Proveedor asociada a la empresa activa.');
         }
 
-        return Proveedor::findOrFail($usuario->Id_Proveedor);
+        return $proveedor;
     }
 
     /**
