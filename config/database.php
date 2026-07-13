@@ -99,35 +99,44 @@ return [
             'sslmode' => env('DB_SSLMODE', 'prefer'),
         ],
 
+        
         'sqlsrv' => [
-            'driver' => 'sqlsrv',
-            'url' => env('DB_URL'),
-            'host' => env('DB_HOST', 'localhost'),
-            'port' => env('DB_PORT', '1433'),
-            'database' => env('DB_DATABASE', 'laravel'),
-            'username' => env('DB_USERNAME', 'root'),
-            'password' => env('DB_PASSWORD', ''),
-            'charset' => env('DB_CHARSET', 'utf8'),
-            'prefix' => '',
-            'prefix_indexes' => true,
-            // 'encrypt' => env('DB_ENCRYPT', 'yes'),
-            // 'trust_server_certificate' => env('DB_TRUST_SERVER_CERTIFICATE', 'false'),
-        ],
+                    'driver' => 'sqlsrv',
+                    'url' => env('DB_URL'),
+                    'host' => env('DB_HOST', 'localhost'),
+                    'port' => env('DB_PORT', '1433'),
+                    'database' => env('DB_DATABASE', 'laravel'),
+                    'username' => env('DB_USERNAME', 'root'),
+                    'password' => env('DB_PASSWORD', ''),
+                    'charset' => env('DB_CHARSET', 'utf8'),
+                    'prefix' => '',
+                    'prefix_indexes' => true,
+                    
+                    // SOLUCIÓN DIRECTA AL DRIVER ODBC (Fuerza a SQL Server a hablar en Español para esta sesión)
+                    'options' => [
+                        PDO::SQLSRV_ATTR_ENCODING => PDO::SQLSRV_ENCODING_UTF8,
+                    ],
+                    'language' => 'Spanish', // El driver pdo_sqlsrv lee esta propiedad en versiones recientes
+                ],
 
-        // Espejo Business Central — SOLO LECTURA (Windows Server 2)
-        'sqlsrv_bc' => [
-            'driver' => 'sqlsrv',
-            'host' => env('DB_BC_HOST', 'localhost'),
-            'port' => env('DB_BC_PORT', '1433'),
-            'database' => env('DB_BC_DATABASE', 'business_central_mirror'),
-            'username' => env('DB_BC_USERNAME', ''),
-            'password' => env('DB_BC_PASSWORD', ''),
-            'charset' => env('DB_CHARSET', 'utf8'),
-            'prefix' => '',
-            'prefix_indexes' => true,
-            // 'encrypt' => env('DB_ENCRYPT', 'yes'),
-            // 'trust_server_certificate' => env('DB_TRUST_SERVER_CERTIFICATE', 'false'),
-        ],
+                // Espejo Business Central — SOLO LECTURA (Windows Server 2)
+                'sqlsrv_bc' => [
+                    'driver' => 'sqlsrv',
+                    'host' => env('DB_BC_HOST', 'localhost'),
+                    'port' => env('DB_BC_PORT', '1433'),
+                    'database' => env('DB_BC_DATABASE', 'business_central_mirror'),
+                    'username' => env('DB_BC_USERNAME', ''),
+                    'password' => env('DB_BC_PASSWORD', ''),
+                    'charset' => env('DB_CHARSET', 'utf8'),
+                    'prefix' => '',
+                    'prefix_indexes' => true,
+                    
+                    // SOLUCIÓN DIRECTA AL DRIVER ODBC (También para Business Central)
+                    'options' => [
+                        PDO::SQLSRV_ATTR_ENCODING => PDO::SQLSRV_ENCODING_UTF8,
+                    ],
+                    'language' => 'Spanish',
+                ],
 
     ],
 

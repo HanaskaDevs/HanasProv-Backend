@@ -12,6 +12,9 @@ class Sesion extends Model
     protected $primaryKey = 'Id_Sesion';
     public $timestamps = false;
 
+    // SOLUCIÓN: Evita el error "nvarchar a datetime fuera de intervalo" en Sesiones
+    protected $dateFormat = 'Ymd H:i:s'; 
+
     protected $fillable = [
         'Id_Usuario', 'Token', 'Ip_Origen', 'Dispositivo',
         'Fecha_Inicio', 'Fecha_Expiracion', 'Activa', 'Id_Empresa_Activa',
