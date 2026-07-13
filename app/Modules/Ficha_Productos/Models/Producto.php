@@ -3,11 +3,11 @@
 namespace App\Modules\Ficha_Productos\Models;
 
 use App\Modules\Proveedores\Models\Proveedor;
-use Illuminate\Database\Eloquent\Model;
+use App\Models\BaseModel;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-class Producto extends Model
+class Producto extends BaseModel
 {
     protected $table = 'Producto';
     protected $primaryKey = 'Id_Producto';

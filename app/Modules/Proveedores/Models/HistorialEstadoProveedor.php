@@ -3,10 +3,10 @@
 namespace App\Modules\Proveedores\Models;
 
 use App\Modules\Auth\Models\Usuario;
-use Illuminate\Database\Eloquent\Model;
+use App\Models\BaseModel;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-class HistorialEstadoProveedor extends Model
+class HistorialEstadoProveedor extends BaseModel
 {
     protected $table = 'Historial_Estado_Proveedor';
     protected $primaryKey = 'Id_Historial';

@@ -3,10 +3,10 @@
 namespace App\Modules\Ficha_Productos\Models;
 
 use App\Modules\Documentos_Proveedor\Models\Archivo;
-use Illuminate\Database\Eloquent\Model;
+use App\Models\BaseModel;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-class DocumentoProducto extends Model
+class DocumentoProducto extends BaseModel
 {
     protected $table = 'Documento_Producto';
     protected $primaryKey = 'Id_Documento_Producto';

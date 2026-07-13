@@ -3,10 +3,10 @@
 namespace App\Modules\Documentos_Proveedor\Models;
 
 use App\Modules\Proveedores\Models\Proveedor;
-use Illuminate\Database\Eloquent\Model;
+use App\Models\BaseModel;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-class DocumentoProveedor extends Model
+class DocumentoProveedor extends BaseModel
 {
     protected $table = 'Documento_Proveedor';
     protected $primaryKey = 'Id_Documento_Proveedor';

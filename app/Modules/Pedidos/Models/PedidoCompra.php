@@ -4,11 +4,11 @@ namespace App\Modules\Pedidos\Models;
 
 use App\Models\Empresa;
 use App\Modules\Proveedores\Models\Proveedor;
-use Illuminate\Database\Eloquent\Model;
+use App\Models\BaseModel;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-class PedidoCompra extends Model
+class PedidoCompra extends BaseModel
 {
     protected $table = 'Pedido_Compra';
     protected $primaryKey = 'Id_Pedido_Compra';

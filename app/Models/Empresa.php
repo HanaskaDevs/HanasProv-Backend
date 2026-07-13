@@ -5,11 +5,10 @@ namespace App\Models;
 use App\Modules\Auth\Models\Usuario;
 use App\Modules\Auth\Models\UsuarioEmpresa;
 use App\Modules\Proveedores\Models\Proveedor;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-class Empresa extends Model
+class Empresa extends BaseModel
 {
     protected $table = 'Empresa';
     protected $primaryKey = 'Id_Empresa';

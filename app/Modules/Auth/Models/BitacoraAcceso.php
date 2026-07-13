@@ -2,10 +2,10 @@
 
 namespace App\Modules\Auth\Models;
 
-use Illuminate\Database\Eloquent\Model;
+use App\Models\BaseModel;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-class BitacoraAcceso extends Model
+class BitacoraAcceso extends BaseModel
 {
     protected $table = 'Bitacora_Acceso';
     protected $primaryKey = 'Id_Bitacora';

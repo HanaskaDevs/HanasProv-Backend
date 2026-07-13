@@ -4,11 +4,10 @@ namespace App\Models;
 
 use App\Modules\Auth\Models\Usuario;
 use App\Modules\Auth\Models\UsuarioEmpresa;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-class Rol extends Model
+class Rol extends BaseModel
 {
     protected $table = 'Rol';
     protected $primaryKey = 'Id_Rol';
