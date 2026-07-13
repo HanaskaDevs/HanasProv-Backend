@@ -4,10 +4,10 @@ namespace App\Modules\Documentos_Proveedor\Models;
 
 use App\Modules\Auth\Models\Usuario;
 use App\Modules\Proveedores\Models\Proveedor;
-use Illuminate\Database\Eloquent\Model;
+use App\Models\BaseModel;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-class Archivo extends Model
+class Archivo extends BaseModel
 {
     protected $table = 'Archivo';
     protected $primaryKey = 'Id_Archivo';

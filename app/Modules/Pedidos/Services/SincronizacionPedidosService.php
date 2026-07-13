@@ -45,8 +45,14 @@ class SincronizacionPedidosService
 
         $empresaBc = trim($empresa->Empresa_BC);
 
-        $fechaDesde = now()->subDays(3)->toDateString();
-        $fechaHasta = now()->toDateString();
+        // Formato ISO 8601 con separador "T": SQL Server SIEMPRE lo interpreta
+        // como año-mes-día, sin importar el DATEFORMAT/idioma de la sesión
+        // (a diferencia de "Y-m-d" con guiones, que sí depende de esa config
+        // y es justamente lo que causaba el error de conversión de fechas).
+        $fechaDesde = now()->subDays(3)->startOfDay()->format('Y-m-d\TH:i:s');
+        // endOfDay() para no excluir los pedidos registrados hoy (Fecha_Registro_BC
+        // trae hora, así que un límite superior a medianoche los dejaba fuera).
+        $fechaHasta = now()->endOfDay()->format('Y-m-d\TH:i:s');
 
         $nroPedidosExistentes = PedidoCompra::where('Id_Empresa', $idEmpresa)
             ->pluck('Nro_Pedido')

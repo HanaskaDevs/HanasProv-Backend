@@ -4,12 +4,12 @@ namespace App\Modules\Proveedores\Models;
 
 use App\Models\Empresa;
 use App\Modules\Auth\Models\Usuario;
-use Illuminate\Database\Eloquent\Model;
+use App\Models\BaseModel;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-class Proveedor extends Model
+class Proveedor extends BaseModel
 {
     protected $table = 'Proveedor';
     protected $primaryKey = 'Id_Proveedor';

@@ -3,10 +3,10 @@
 namespace App\Modules\Auth\Models;
 
 use App\Models\Empresa;
-use Illuminate\Database\Eloquent\Model;
+use App\Models\BaseModel;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-class Sesion extends Model
+class Sesion extends BaseModel
 {
     protected $table = 'Sesion';
     protected $primaryKey = 'Id_Sesion';

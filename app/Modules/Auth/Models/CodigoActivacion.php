@@ -3,10 +3,10 @@
 namespace App\Modules\Auth\Models;
 
 use App\Modules\Proveedores\Models\Proveedor;
-use Illuminate\Database\Eloquent\Model;
+use App\Models\BaseModel;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-class CodigoActivacion extends Model
+class CodigoActivacion extends BaseModel
 {
     protected $table = 'Codigo_Activacion';
     protected $primaryKey = 'Id_Codigo_Activacion';

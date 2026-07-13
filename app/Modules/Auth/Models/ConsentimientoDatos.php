@@ -2,10 +2,10 @@
 
 namespace App\Modules\Auth\Models;
 
-use Illuminate\Database\Eloquent\Model;
+use App\Models\BaseModel;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-class ConsentimientoDatos extends Model
+class ConsentimientoDatos extends BaseModel
 {
     protected $table = 'Consentimiento_Datos';
     protected $primaryKey = 'Id_Consentimiento';

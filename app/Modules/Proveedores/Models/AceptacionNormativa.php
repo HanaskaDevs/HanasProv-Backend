@@ -3,10 +3,10 @@
 namespace App\Modules\Proveedores\Models;
 
 use App\Modules\Auth\Models\Usuario;
-use Illuminate\Database\Eloquent\Model;
+use App\Models\BaseModel;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-class AceptacionNormativa extends Model
+class AceptacionNormativa extends BaseModel
 {
     protected $table = 'Aceptacion_Normativa';
     protected $primaryKey = 'Id_Aceptacion_Normativa';
