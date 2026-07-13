@@ -6,7 +6,6 @@ use Illuminate\Support\ServiceProvider;
 use Laravel\Sanctum\Sanctum;
 use App\Modules\Auth\Models\PersonalAccessToken;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -17,21 +16,14 @@ class AppServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
-        DB::listen(function ($query) {
-            $sql = $query->sql;
-            foreach ($query->bindings as $binding) {
-                // Si es un objeto de fecha (Carbon), ver cómo lo está convirtiendo Laravel
-                if ($binding instanceof \DateTimeInterface) {
-                    $value = $binding->format('Y-m-d H:i:s.v');
-                } else {
-                    $value = $binding;
-                }
-                $value = is_string($value) ? "'$value'" : $value;
-                $sql = preg_replace('/(\?)/', $value, $sql, 1);
-            }
+        Sanctum::usePersonalAccessTokenModel(PersonalAccessToken::class);
 
-            // Esto escribirá la query idéntica en storage/logs/laravel.log
-            Log::debug("DIAGNÓSTICO SQL [Conexión: {$query->connectionName}]: " . $sql);
-        });
+        // EJECUTAR SET DATEFORMAT DIRECTAMENTE AL ABRIR LA CONEXIÓN
+        try {
+            DB::connection('sqlsrv')->statement("SET DATEFORMAT ymd;");
+            DB::connection('sqlsrv_bc')->statement("SET DATEFORMAT ymd;");
+        } catch (\Exception $e) {
+            // Evita caídas si corres comandos artisan sin conexión activa
+        }
     }
 }
