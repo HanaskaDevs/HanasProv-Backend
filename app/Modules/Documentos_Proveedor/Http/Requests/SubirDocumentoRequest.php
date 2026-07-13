@@ -14,7 +14,7 @@ class SubirDocumentoRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'archivo' => ['required', 'file', 'mimes:pdf,jpg,jpeg,png', 'max:10240'],
+            'archivo' => ['required', 'file', 'mimes:pdf', 'max:4096'],
             'fecha_caducidad' => ['nullable', 'date'],
         ];
     }
