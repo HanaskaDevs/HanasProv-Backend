@@ -3,8 +3,7 @@
 namespace App\Modules\Documentos_Proveedor\Models;
 
 use Illuminate\Database\Eloquent\Model;
-
-
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class TipoDocumento extends Model
 {
@@ -25,5 +24,9 @@ class TipoDocumento extends Model
         'Requiere_Solo_Quito' => 'boolean',
         'Activo' => 'boolean',
     ];
-    
+
+    public function documentosProveedor(): HasMany
+    {
+        return $this->hasMany(DocumentoProveedor::class, 'Id_Tipo_Documento');
+    }
 }

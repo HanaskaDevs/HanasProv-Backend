@@ -26,8 +26,18 @@ class DocumentoProveedorService
    public function obtenerChecklist(Usuario $usuario, int $idEmpresaActiva): array
 {
     $proveedor = $this->miProveedor($usuario, $idEmpresaActiva);
+    $esQuito = strcasecmp((string) $proveedor->Ciudad, 'Quito') === 0;
 
     $tipos = TipoDocumento::where('Activo', 1)
+        // Los documentos "solo Quito" (ej. LUAE) ni siquiera se listan
+        // para proveedores de otras ciudades -> no solo se marcan como
+        // no obligatorios, desaparecen del checklist por completo.
+        ->where(function ($query) use ($esQuito) {
+            $query->where('Requiere_Solo_Quito', 0);
+            if ($esQuito) {
+                $query->orWhere('Requiere_Solo_Quito', 1);
+            }
+        })
         ->with(['documentosProveedor' => function ($query) use ($proveedor) {
             $query->where('Id_Proveedor', $proveedor->Id_Proveedor)
                 ->where('Activo', 1)
@@ -36,16 +46,12 @@ class DocumentoProveedorService
         ->orderBy('Categoria')
         ->get();
 
-    return $tipos->map(function (TipoDocumento $tipo) use ($proveedor) {
-        $obligatorio = $tipo->Requiere_Solo_Quito
-            ? strcasecmp((string) $proveedor->Ciudad, 'Quito') === 0
-            : $tipo->Obligatorio;
-
+    return $tipos->map(function (TipoDocumento $tipo) {
         return [
             'id_tipo_documento' => $tipo->Id_Tipo_Documento,
             'categoria' => $tipo->Categoria,
             'nombre_documento' => $tipo->Nombre_Documento,
-            'obligatorio' => $obligatorio,
+            'obligatorio' => $tipo->Obligatorio,
             'permite_multiples' => $tipo->Permite_Multiples,
             'requiere_fecha_caducidad' => $tipo->Requiere_Fecha_Caducidad,
             'documentos' => $tipo->documentosProveedor->map(fn (DocumentoProveedor $doc) => [

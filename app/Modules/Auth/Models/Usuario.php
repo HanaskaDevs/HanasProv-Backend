@@ -18,11 +18,14 @@ class Usuario extends Authenticatable
     protected $primaryKey = 'Id_Usuario';
     public $timestamps = false;
 
+    // SOLUCIÓN: Forza el formato ISO sin guiones que SQL Server acepta en cualquier idioma/BD
+    protected $dateFormat = 'Ymd H:i:s'; 
+
     protected $authPasswordName = 'Password_Hash';
 
     protected $fillable = [
         'Email', 'Password_Hash', 'Nombre_Completo', 'Cargo',
-        'Telefono', 'Requiere_Cambio_Password', 'Ultimo_Acceso', 'Activo',
+        'Telefono', 'Requieres_Cambio_Password', 'Ultimo_Acceso', 'Activo',
         'Creado_Por', 'Fecha_Creacion', 'Modificado_Por', 'Fecha_Modificacion',
         'Tipo_Usuario',
     ];
