@@ -12,13 +12,15 @@ class DetallePedidoCompra extends Model
     public $timestamps = false;
 
     protected $fillable = [
-        'Id_Pedido_Compra', 'Nro_Linea', 'Codigo_Producto',
-        'Descripcion', 'Cantidad', 'Fecha_Recepcion_Esperada',
+        'Id_Pedido_Compra',
+        'Nro_Linea',
+        'Codigo_Producto',
+        'Descripcion',
+        'Cantidad',
     ];
 
     protected $casts = [
         'Cantidad' => 'decimal:4',
-        'Fecha_Recepcion_Esperada' => 'date',
     ];
 
     public function pedido(): BelongsTo

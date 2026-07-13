@@ -10,9 +10,7 @@ use Illuminate\Http\Request;
 
 class PedidoController extends Controller
 {
-    public function __construct(protected PedidoService $pedidoService)
-    {
-    }
+    public function __construct(protected PedidoService $pedidoService) {}
 
     public function abiertos(Request $request): JsonResponse
     {
@@ -46,5 +44,32 @@ class PedidoController extends Controller
         $this->pedidoService->cerrar($pedido, $request->user());
 
         return response()->json(['message' => 'Pedido marcado como cerrado.']);
+    }
+
+    public function descargarPdf(Request $request)
+    {
+        $data = $request->validate([
+            'ids' => ['required', 'array', 'min:1'],
+            'ids.*' => ['integer'],
+        ]);
+
+        $idEmpresaActiva = (int) $request->attributes->get('id_empresa_activa');
+        $pedidos = $this->pedidoService->obtenerParaPdf($request->user(), $idEmpresaActiva, $data['ids']);
+
+        if ($pedidos->isEmpty()) {
+            abort(404, 'No se encontraron pedidos para descargar.');
+        }
+
+        $pdf = \Barryvdh\DomPDF\Facade\Pdf::loadView('pdf.pedidos', [
+            'pedidos' => $pedidos,
+            'nombreEmpresa' => $pedidos->first()->empresa->Razon_Social,
+            'fechaGeneracion' => now()->format('Y-m-d H:i'),
+        ]);
+
+        $nombreArchivo = $pedidos->count() === 1
+            ? "pedido-{$pedidos->first()->Nro_Pedido}.pdf"
+            : 'pedidos-' . now()->format('Ymd_His') . '.pdf';
+
+        return $pdf->download($nombreArchivo);
     }
 }

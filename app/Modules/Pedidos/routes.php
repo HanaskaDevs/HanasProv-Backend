@@ -11,4 +11,5 @@ Route::prefix('pedidos')
         Route::get('/cerrados', [PedidoController::class, 'cerrados']);
         Route::post('/actualizar', [PedidoController::class, 'actualizar']);
         Route::patch('/{pedido}/cerrar', [PedidoController::class, 'cerrar']);
+        Route::post('/descargar-pdf', [PedidoController::class, 'descargarPdf']);
     });
