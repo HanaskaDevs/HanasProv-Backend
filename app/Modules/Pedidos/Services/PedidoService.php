@@ -9,11 +9,10 @@ use Illuminate\Database\Eloquent\Collection;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
+
 class PedidoService
 {
-    public function __construct(protected SincronizacionPedidosService $sincronizacion)
-    {
-    }
+    public function __construct(protected SincronizacionPedidosService $sincronizacion) {}
 
     public function listar(Usuario $usuario, int $idEmpresaActiva, string $estado): Collection
     {
@@ -68,5 +67,16 @@ class PedidoService
         }
 
         return $proveedor;
+    }
+
+    public function obtenerParaPdf(Usuario $usuario, int $idEmpresaActiva, array $ids): Collection
+    {
+        $proveedor = $this->miProveedor($usuario, $idEmpresaActiva);
+
+        return PedidoCompra::where('Id_Proveedor', $proveedor->Id_Proveedor)
+            ->whereIn('Id_Pedido_Compra', $ids)
+            ->with('lineas')
+            ->orderByDesc('Fecha_Registro_BC')
+            ->get();
     }
 }
