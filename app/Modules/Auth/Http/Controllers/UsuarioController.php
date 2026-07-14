@@ -11,12 +11,11 @@ use App\Modules\Auth\Models\Usuario;
 use App\Modules\Auth\Services\UsuarioService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use App\Modules\Auth\Http\Resources\UsuarioDetalleResource;
 
 class UsuarioController extends Controller
 {
-    public function __construct(protected UsuarioService $usuarioService)
-    {
-    }
+    public function __construct(protected UsuarioService $usuarioService) {}
 
     /**
      * Panel de usuarios internos: solo visible para rol Sistemas.
@@ -30,14 +29,14 @@ class UsuarioController extends Controller
         return response()->json(UsuarioInternoResource::collection($usuarios));
     }
 
-    public function showInterno(Request $request, Usuario $usuario): JsonResponse
+   public function showInterno(Request $request, Usuario $usuario): JsonResponse
     {
         $idEmpresa = (int) $request->attributes->get('id_empresa_activa');
 
         $this->usuarioService->verificarAccesoPanelInternos($request->user(), $idEmpresa);
 
         return response()->json(
-            new UsuarioInternoResource($usuario->load('usuarioEmpresas.rol'))
+            new UsuarioDetalleResource($usuario->load('usuarioEmpresas.rol', 'usuarioEmpresas.empresa'))
         );
     }
 
@@ -52,7 +51,6 @@ class UsuarioController extends Controller
         $usuario = $this->usuarioService->crearUsuarioInterno(
             data: $request->validated(),
             creador: $request->user(),
-            idEmpresaActiva: $idEmpresaActiva,
         );
 
         return response()->json(new UsuarioInternoResource($usuario->load('usuarioEmpresas.rol')), 201);
@@ -77,7 +75,7 @@ class UsuarioController extends Controller
         $this->usuarioService->verificarAccesoPanelExternos($request->user(), $idEmpresa);
 
         return response()->json(
-            new UsuarioExternoResource($usuario->load(['usuarioEmpresas.rol', 'proveedores']))
+            new UsuarioDetalleResource($usuario->load('usuarioEmpresas.rol', 'usuarioEmpresas.empresa'))
         );
     }
 
@@ -93,7 +91,6 @@ class UsuarioController extends Controller
         $usuario = $this->usuarioService->crearUsuarioProveedor(
             data: $request->validated(),
             creador: $request->user(),
-            idEmpresaActiva: $idEmpresaActiva,
         );
 
         return response()->json(new UsuarioExternoResource($usuario->load('usuarioEmpresas.rol')), 201);
@@ -115,5 +112,49 @@ class UsuarioController extends Controller
         $this->usuarioService->inactivar($usuario, $request->user(), $idEmpresa);
 
         return response()->json(['message' => 'Usuario inactivado correctamente.']);
+    }
+    public function reactivar(Request $request, Usuario $usuario): JsonResponse
+    {
+        $idEmpresa = (int) $request->attributes->get('id_empresa_activa');
+
+        $this->usuarioService->reactivar($usuario, $request->user(), $idEmpresa);
+
+        return response()->json(['message' => 'Usuario reactivado correctamente.']);
+    }
+
+    public function agregarEmpresa(Request $request, Usuario $usuario): JsonResponse
+    {
+        $idEmpresa = (int) $request->validate(['id_empresa' => ['required', 'integer']])['id_empresa'];
+        $idRol = $request->input('id_rol') ? (int) $request->input('id_rol') : null;
+
+        $this->usuarioService->otorgarAccesoEmpresa($usuario, $idEmpresa, $request->user(), $idRol);
+
+        return response()->json(['message' => 'Acceso otorgado correctamente.']);
+    }
+
+    public function actualizarEmail(Request $request, Usuario $usuario): JsonResponse
+    {
+        $idEmpresa = (int) $request->attributes->get('id_empresa_activa');
+        $nuevoEmail = $request->validate(['email' => ['required', 'email', 'max:150']])['email'];
+
+        $this->usuarioService->actualizarEmail($usuario, $nuevoEmail, $request->user(), $idEmpresa);
+
+        return response()->json(['message' => 'Correo actualizado correctamente.']);
+    }
+
+    public function actualizarRolEnEmpresa(Request $request, Usuario $usuario, int $empresa): JsonResponse
+    {
+        $idRol = (int) $request->validate(['id_rol' => ['required', 'integer']])['id_rol'];
+
+        $this->usuarioService->actualizarRolEnEmpresa($usuario, $empresa, $idRol, $request->user());
+
+        return response()->json(['message' => 'Rol actualizado correctamente.']);
+    }
+
+    public function quitarAccesoEmpresa(Request $request, Usuario $usuario, int $empresa): JsonResponse
+    {
+        $this->usuarioService->quitarAccesoEmpresa($usuario, $empresa, $request->user());
+
+        return response()->json(['message' => 'Acceso removido correctamente.']);
     }
 }

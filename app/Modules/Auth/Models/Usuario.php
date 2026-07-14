@@ -118,4 +118,28 @@ class Usuario extends Authenticatable
     {
         return $this->tieneRolEnEmpresa($idEmpresa, 'Admin');
     }
+
+   public function esCompras(int $idEmpresa): bool
+    {
+        return $this->tieneRolEnEmpresa($idEmpresa, 'Compras');
+    }
+
+    public function puedeGestionarRecepciones(int $idEmpresa): bool
+    {
+        return $this->esSistemas($idEmpresa) || $this->esAdmin($idEmpresa) || $this->esCompras($idEmpresa);
+    }
+
+    /**
+     * ¿Este usuario tiene rol "Sistemas" en AL MENOS UNA empresa? Se usa como
+     * permiso "global" para crear/gestionar usuarios internos, gestionar
+     * empresas, y ver el catálogo completo de empresas, sin importar la
+     * empresa activa actual de la sesión.
+     */
+    public function esSistemasGlobal(): bool
+    {
+        return $this->usuarioEmpresas()
+            ->where('Activo', true)
+            ->whereHas('rol', fn ($q) => $q->where('Nombre_Rol', 'Sistemas'))
+            ->exists();
+    }
 }
