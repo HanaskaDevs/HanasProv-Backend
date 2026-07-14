@@ -31,7 +31,8 @@ class DocumentoProveedorController extends Controller
             $idEmpresa,
             $tipoDocumento,
             $request->file('archivo'),
-            $request->validated('fecha_caducidad')
+            $request->validated('fecha_caducidad'),
+            $request->validated('nombre_documento')
         );
 
         return response()->json(new DocumentoProveedorResource($documento), 201);
@@ -42,5 +43,39 @@ class DocumentoProveedorController extends Controller
         $idEmpresa = (int) $request->attributes->get('id_empresa_activa');
 
         return $this->documentoService->descargar($request->user(), $idEmpresa, $documentoProveedor);
+    }
+
+    public function registrar(Request $request): JsonResponse
+    {
+        $idEmpresa = (int) $request->attributes->get('id_empresa_activa');
+
+        $this->documentoService->registrar($request->user(), $idEmpresa);
+
+        return response()->json(['message' => 'Documentación registrada correctamente.']);
+    }
+
+    public function reemplazar(SubirDocumentoRequest $request, int $documentoProveedor): JsonResponse
+    {
+        $idEmpresa = (int) $request->attributes->get('id_empresa_activa');
+
+        $documento = $this->documentoService->reemplazarDocumento(
+            $request->user(),
+            $idEmpresa,
+            $documentoProveedor,
+            $request->file('archivo'),
+            $request->validated('fecha_caducidad'),
+            $request->validated('nombre_documento')
+        );
+
+        return response()->json(new DocumentoProveedorResource($documento), 201);
+    }
+
+    public function borrar(Request $request, int $documentoProveedor): JsonResponse
+    {
+        $idEmpresa = (int) $request->attributes->get('id_empresa_activa');
+
+        $this->documentoService->borrarDocumento($request->user(), $idEmpresa, $documentoProveedor);
+
+        return response()->json(['message' => 'Documento eliminado correctamente.']);
     }
 }

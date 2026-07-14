@@ -16,6 +16,7 @@ class SubirDocumentoRequest extends FormRequest
         return [
             'archivo' => ['required', 'file', 'mimes:pdf', 'max:4096'],
             'fecha_caducidad' => ['nullable', 'date'],
+            'nombre_documento' => ['nullable', 'string', 'max:150'],
         ];
     }
 }
