@@ -16,14 +16,18 @@ class Producto extends BaseModel
     protected $fillable = [
         'Id_Proveedor', 'Id_Unidad_Presentacion', 'Nombre_Producto',
         'Codigo_Barras', 'Precio', 'Activo',
+        'Bloqueado', 'Estado_Calificacion', 'Comentario_Calificacion',
+        'Calificado_Por', 'Fecha_Calificacion',
         'Creado_Por', 'Fecha_Creacion', 'Modificado_Por', 'Fecha_Modificacion',
     ];
 
     protected $casts = [
         'Precio' => 'decimal:2',
         'Activo' => 'boolean',
+        'Bloqueado' => 'boolean',
         'Fecha_Creacion' => 'datetime',
         'Fecha_Modificacion' => 'datetime',
+        'Fecha_Calificacion' => 'datetime',
     ];
 
     public function proveedor(): BelongsTo

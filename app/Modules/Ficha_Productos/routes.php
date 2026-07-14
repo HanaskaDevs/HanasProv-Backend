@@ -13,4 +13,6 @@ Route::prefix('mis-productos')
         Route::get('/unidades-presentacion', [UnidadPresentacionController::class, 'index']);
         Route::get('/documentos/{documentoProducto}/ver', [ProductoController::class, 'descargarDocumento']);
         Route::post('/{producto}/documentos/{tipoDocumento}', [ProductoController::class, 'subirDocumento']);
+        Route::get('/resumen-registro', [ProductoController::class, 'resumenRegistro']);
+        Route::post('/registrar', [ProductoController::class, 'registrar']);
     });

@@ -12,9 +12,7 @@ use Illuminate\Http\Request;
 
 class ProductoController extends Controller
 {
-    public function __construct(protected ProductoService $productoService)
-    {
-    }
+    public function __construct(protected ProductoService $productoService) {}
 
     public function index(Request $request): JsonResponse
     {
@@ -50,9 +48,30 @@ class ProductoController extends Controller
     }
 
     public function descargarDocumento(Request $request, int $documentoProducto)
-{
-    $idEmpresaActiva = (int) $request->attributes->get('id_empresa_activa');
+    {
+        $idEmpresaActiva = (int) $request->attributes->get('id_empresa_activa');
 
-    return $this->productoService->descargarDocumento($request->user(), $idEmpresaActiva, $documentoProducto);
-}
+        return $this->productoService->descargarDocumento($request->user(), $idEmpresaActiva, $documentoProducto);
+    }
+
+    public function resumenRegistro(Request $request): JsonResponse
+    {
+        $idEmpresaActiva = (int) $request->attributes->get('id_empresa_activa');
+
+        return response()->json(
+            $this->productoService->resumenRegistro($request->user(), $idEmpresaActiva)
+        );
+    }
+
+    public function registrar(Request $request): JsonResponse
+    {
+        $idEmpresaActiva = (int) $request->attributes->get('id_empresa_activa');
+
+        $total = $this->productoService->registrar($request->user(), $idEmpresaActiva);
+
+        return response()->json([
+            'message' => "Se registraron {$total} producto(s) para calificación.",
+            'total' => $total,
+        ]);
+    }
 }
