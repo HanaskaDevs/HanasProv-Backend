@@ -10,6 +10,7 @@ use App\Modules\Proveedores\Models\Proveedor;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
@@ -108,7 +109,7 @@ class DocumentoProveedorService
             ]);
         }
 
-        $nombreFinal = $this->nombreArchivoFinal($tipo, $archivo, $nombreDocumento);
+        $nombreFinal = $this->nombreArchivoFinal($tipo, $proveedor, $archivo, $nombreDocumento);
 
         return DB::transaction(function () use ($usuario, $proveedor, $tipo, $archivo, $fechaCaducidad, $nombreFinal) {
             $registroArchivo = $this->guardarArchivoFisico($usuario, $proveedor, $tipo, $archivo, $nombreFinal);
@@ -175,7 +176,7 @@ class DocumentoProveedorService
             ]);
         }
 
-        $nombreFinal = $this->nombreArchivoFinal($tipo, $archivo, $nombreDocumento);
+        $nombreFinal = $this->nombreArchivoFinal($tipo, $proveedor, $archivo, $nombreDocumento);
 
         return DB::transaction(function () use ($usuario, $proveedor, $tipo, $documentoActual, $archivo, $fechaCaducidad, $nombreFinal) {
             $registroArchivo = $this->guardarArchivoFisico($usuario, $proveedor, $tipo, $archivo, $nombreFinal);
@@ -225,13 +226,40 @@ class DocumentoProveedorService
      *   varios del mismo tipo, tienen que distinguirse entre sí).
      * - Un solo archivo posible: siempre el Nombre_Documento del catálogo
      *   (ej. "RUC"), sin importar cómo se llamaba el PDF original.
+     * A eso se le agrega SIEMPRE la Razón Social del proveedor y la fecha
+     * de carga, para que el archivo sea identificable por sí solo si
+     * alguien lo descarga suelto (ej. "RUC_CANODROS_CL_20260714.pdf").
      */
-    protected function nombreArchivoFinal(TipoDocumento $tipo, UploadedFile $archivo, ?string $nombreDocumento): string
+    protected function nombreArchivoFinal(TipoDocumento $tipo, Proveedor $proveedor, UploadedFile $archivo, ?string $nombreDocumento): string
     {
         $extension = $archivo->getClientOriginalExtension() ?: 'pdf';
         $base = $tipo->Permite_Multiples ? trim($nombreDocumento) : $tipo->Nombre_Documento;
 
-        return "{$base}.{$extension}";
+        $partes = [
+            $this->sanitizarNombreArchivo($base),
+            $this->sanitizarNombreArchivo($proveedor->Razon_Social),
+            now()->format('Ymd'),
+        ];
+
+        return implode('_', array_filter($partes)).".{$extension}";
+    }
+
+    /**
+     * Deja el texto seguro para usarlo como nombre de archivo: sin tildes/ñ
+     * (transliterado a ASCII), sin caracteres que rompan rutas o headers
+     * HTTP (/, \, comillas, etc.), y espacios colapsados en "_".
+     */
+    protected function sanitizarNombreArchivo(?string $texto): string
+    {
+        if (! $texto) {
+            return '';
+        }
+
+        $texto = Str::ascii($texto);
+        $texto = preg_replace('/[^A-Za-z0-9 _-]/', '', $texto) ?? $texto;
+        $texto = trim(preg_replace('/\s+/', ' ', $texto) ?? $texto);
+
+        return str_replace(' ', '_', $texto);
     }
 
     /**
