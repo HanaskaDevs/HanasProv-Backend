@@ -10,18 +10,17 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Trae pedidos "Released" desde RAW_BC (Cab_Pedido_Compra / Det_Pedido_Compra,
- * solo lectura) y los guarda en las tablas locales Pedido_Compra /
- * Detalle_Pedido_Compra. Nunca escribe nada en RAW_BC.
+ * Trae pedidos "Released" desde las tablas locales de staging BC_Cab_Pedido_Compra
+ * / BC_Det_Pedido_Compra (alimentadas por un proceso externo, solo lectura para
+ * este servicio) y los guarda en las tablas de negocio Pedido_Compra /
+ * Detalle_Pedido_Compra. Nunca escribe nada en las tablas BC_*.
  *
  * Matching:
- *  - Empresa local <-> Cab_Pedido_Compra.Empresa / Det_Pedido_Compra.Empresa
- *    vía Empresa.Empresa_BC (el Nro_Pedido NO es único entre empresas en BC,
- *    así que TODA consulta a BC debe ir filtrada también por Empresa).
- *    Empresa_BC es NCHAR(50) -> viene con espacios de relleno, hay que
- *    limpiarlo con trim() antes de comparar.
- *  - Cab_Pedido_Compra.Nro_Proveedor -> RAW_BC.Proveedores.Codigo_Proveedor
- *  - RAW_BC.Proveedores.Nro_Identificacion -> Proveedor.Ruc (local, misma empresa)
+ *  - Empresa local <-> BC_Cab_Pedido_Compra.Empresa / BC_Det_Pedido_Compra.Empresa
+ *    vía Empresa.Empresa_BC (el Nro_Pedido NO es único entre empresas, así que
+ *    TODA consulta debe ir filtrada también por Empresa).
+ *  - BC_Cab_Pedido_Compra.Nro_Proveedor -> BC_Ficha_Proveedor.Nro_Proveedor
+ *  - BC_Ficha_Proveedor.Nro_Identificacion -> Proveedor.Ruc (local, misma empresa)
  *
  * Ventana móvil de 3 días sobre Fecha_Registro_BC. Los pedidos que ya
  * existen localmente (Abiertos o Cerrados) se excluyen por completo,
@@ -45,22 +44,15 @@ class SincronizacionPedidosService
 
         $empresaBc = trim($empresa->Empresa_BC);
 
-        // Formato ISO 8601 con separador "T": SQL Server SIEMPRE lo interpreta
-        // como año-mes-día, sin importar el DATEFORMAT/idioma de la sesión
-        // (a diferencia de "Y-m-d" con guiones, que sí depende de esa config
-        // y es justamente lo que causaba el error de conversión de fechas).
         $fechaDesde = now()->subDays(3)->startOfDay()->format('Y-m-d\TH:i:s');
-        // endOfDay() para no excluir los pedidos registrados hoy (Fecha_Registro_BC
-        // trae hora, así que un límite superior a medianoche los dejaba fuera).
         $fechaHasta = now()->endOfDay()->format('Y-m-d\TH:i:s');
 
         $nroPedidosExistentes = PedidoCompra::where('Id_Empresa', $idEmpresa)
             ->pluck('Nro_Pedido')
             ->all();
 
-        $query = DB::connection('sqlsrv_bc')
-            ->table('Cab_Pedido_Compra as c')
-            ->join('Proveedores as p', 'p.Codigo_Proveedor', '=', 'c.Nro_Proveedor')
+        $query = DB::table('BC_Cab_Pedido_Compra as c')
+            ->join('BC_Ficha_Proveedor as p', 'p.Nro_Proveedor', '=', 'c.Nro_Proveedor')
             ->where('c.Empresa', $empresaBc)
             ->where('c.Estado_Pedido', 'Released')
             ->whereBetween('c.Fecha_Registro_BC', [$fechaDesde, $fechaHasta])
@@ -87,8 +79,8 @@ class SincronizacionPedidosService
 
         $pedidosBC = $query->get();
 
-        $pedidosBC = $query->get();
-        \Illuminate\Support\Facades\Log::info('Diagnostico sync', ['total_bc' => $pedidosBC->count()]);
+        Log::info('Diagnostico sync', ['total_bc' => $pedidosBC->count()]);
+
         $totalSincronizados = 0;
 
         foreach ($pedidosBC as $pedidoBC) {
@@ -113,8 +105,7 @@ class SincronizacionPedidosService
                     'Activo' => 1,
                 ]);
 
-                $lineasBC = DB::connection('sqlsrv_bc')
-                    ->table('Det_Pedido_Compra')
+                $lineasBC = DB::table('BC_Det_Pedido_Compra')
                     ->where('Nro_Pedido', $pedidoBC->Nro_Pedido)
                     ->where('Empresa', $empresaBc)
                     ->select('Nro_Linea', 'Nro_Producto', 'Descripcion', 'Cantidad')

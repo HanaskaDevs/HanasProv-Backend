@@ -124,10 +124,6 @@ class Usuario extends Authenticatable
         return $this->tieneRolEnEmpresa($idEmpresa, 'Compras');
     }
 
-    public function puedeGestionarRecepciones(int $idEmpresa): bool
-    {
-        return $this->esSistemas($idEmpresa) || $this->esAdmin($idEmpresa) || $this->esCompras($idEmpresa);
-    }
 
     /**
      * ¿Este usuario tiene rol "Sistemas" en AL MENOS UNA empresa? Se usa como
