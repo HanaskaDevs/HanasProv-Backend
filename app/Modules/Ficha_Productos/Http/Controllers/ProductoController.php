@@ -74,4 +74,32 @@ class ProductoController extends Controller
             'total' => $total,
         ]);
     }
+
+    public function destroy(Request $request, int $producto): JsonResponse
+    {
+        $idEmpresaActiva = (int) $request->attributes->get('id_empresa_activa');
+
+        $this->productoService->eliminar($request->user(), $idEmpresaActiva, $producto);
+
+        return response()->json(['message' => 'Producto eliminado correctamente.']);
+    }
+
+    public function destroyMasivo(Request $request): JsonResponse
+    {
+        $idEmpresaActiva = (int) $request->attributes->get('id_empresa_activa');
+        $ids = $request->validate(['ids' => ['required', 'array', 'min:1'], 'ids.*' => ['integer']])['ids'];
+
+        $total = $this->productoService->eliminarMasivo($request->user(), $idEmpresaActiva, $ids);
+
+        return response()->json(['message' => "Se eliminaron {$total} producto(s).", 'total' => $total]);
+    }
+
+    public function destroyDocumento(Request $request, int $documentoProducto): JsonResponse
+    {
+        $idEmpresaActiva = (int) $request->attributes->get('id_empresa_activa');
+
+        $this->productoService->eliminarDocumento($request->user(), $idEmpresaActiva, $documentoProducto);
+
+        return response()->json(['message' => 'Documento eliminado correctamente.']);
+    }
 }

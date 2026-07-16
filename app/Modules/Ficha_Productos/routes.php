@@ -15,4 +15,7 @@ Route::prefix('mis-productos')
         Route::post('/{producto}/documentos/{tipoDocumento}', [ProductoController::class, 'subirDocumento']);
         Route::get('/resumen-registro', [ProductoController::class, 'resumenRegistro']);
         Route::post('/registrar', [ProductoController::class, 'registrar']);
+        Route::delete('/masivo', [ProductoController::class, 'destroyMasivo']);
+        Route::delete('/{producto}', [ProductoController::class, 'destroy']);
+        Route::delete('/documentos/{documentoProducto}', [ProductoController::class, 'destroyDocumento']);
     });

@@ -18,6 +18,7 @@ class Producto extends BaseModel
         'Codigo_Barras', 'Precio', 'Activo',
         'Bloqueado', 'Estado_Calificacion', 'Comentario_Calificacion',
         'Calificado_Por', 'Fecha_Calificacion',
+        'Bc_Nro_Producto',
         'Creado_Por', 'Fecha_Creacion', 'Modificado_Por', 'Fecha_Modificacion',
     ];
 
