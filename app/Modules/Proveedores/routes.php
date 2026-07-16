@@ -1,6 +1,7 @@
 <?php
 
 use App\Modules\Auth\Http\Middleware\EmpresaActiva;
+use App\Modules\Proveedores\Http\Controllers\CalificacionProveedorController;
 use App\Modules\Proveedores\Http\Controllers\CatalogoController;
 use App\Modules\Proveedores\Http\Controllers\FichaProveedorController;
 use App\Modules\Proveedores\Http\Controllers\ProveedorController;
@@ -12,6 +13,14 @@ Route::prefix('proveedores')
         Route::get('/', [ProveedorController::class, 'index']);
         Route::post('/', [ProveedorController::class, 'store']);
         Route::get('/{proveedor}', [ProveedorController::class, 'show']);
+
+        // Calificación (Admin/Sistemas) -> validado dentro del Service,
+        // no solo por estar en este grupo de rutas.
+        Route::get('/{proveedor}/ficha-calificacion', [CalificacionProveedorController::class, 'mostrarFicha']);
+        Route::post('/{proveedor}/ficha-calificacion', [CalificacionProveedorController::class, 'calificarFicha']);
+        Route::get('/{proveedor}/documentos-calificacion', [CalificacionProveedorController::class, 'mostrarDocumentos']);
+        Route::post('/documentos-calificacion/{documentoProveedor}', [CalificacionProveedorController::class, 'calificarDocumento']);
+        Route::get('/documentos-calificacion/{documentoProveedor}/ver', [CalificacionProveedorController::class, 'verDocumento']);
     });
 
 // Ficha de Proveedor progresiva: exclusiva del propio usuario externo.
