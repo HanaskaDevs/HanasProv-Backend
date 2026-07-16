@@ -25,6 +25,8 @@ class Proveedor extends BaseModel
         'Contacto_Contabilidad', 'Correo_Contabilidad', 'Telefono_Contabilidad',
         'Seccion_Actual', 'Porcentaje_Completado_Ficha',
         'Fecha_Registro_Documentacion',
+        'Estado_Calificacion_Ficha', 'Comentario_Calificacion_Ficha',
+        'Calificado_Por_Ficha', 'Fecha_Calificacion_Ficha',
         'Fecha_Postulacion', 'Fecha_Aprobacion',
         'Activo', 'Creado_Por', 'Fecha_Creacion', 'Modificado_Por', 'Fecha_Modificacion',
     ];
@@ -34,6 +36,7 @@ class Proveedor extends BaseModel
         'Latitud' => 'decimal:7',
         'Longitud' => 'decimal:7',
         'Fecha_Registro_Documentacion' => 'datetime',
+        'Fecha_Calificacion_Ficha' => 'datetime',
         'Fecha_Postulacion' => 'datetime',
         'Fecha_Aprobacion' => 'datetime',
         'Fecha_Creacion' => 'datetime',

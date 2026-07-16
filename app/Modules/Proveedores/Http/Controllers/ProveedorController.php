@@ -43,7 +43,7 @@ class ProveedorController extends Controller
     public function show(Proveedor $proveedor): JsonResponse
     {
         return response()->json(
-            new ProveedorResource($proveedor->load(['estado', 'clases.clase', 'certificaciones.tipo']))
+            new ProveedorResource($proveedor->load(['estado', 'clases', 'categoriasProducto']))
         );
     }
 }

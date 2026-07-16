@@ -1,0 +1,196 @@
+<?php
+
+namespace App\Modules\Proveedores\Services;
+
+use App\Modules\Auth\Models\Usuario;
+use App\Modules\Documentos_Proveedor\Models\DocumentoProveedor;
+use App\Modules\Documentos_Proveedor\Models\TipoDocumento;
+use App\Modules\Proveedores\Models\Proveedor;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
+use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
+use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
+
+/**
+ * Calificación de proveedores por un usuario interno (Admin/Sistemas):
+ * la Ficha se califica como un todo (Aprobado=100 / Rechazado=0 +
+ * observación si se rechaza), y cada documento cargado se califica de
+ * forma individual (mismo esquema Aprobado/Rechazado + observación).
+ *
+ * Deliberadamente separado de FichaProveedorService/DocumentoProveedorService:
+ * esos dos son exclusivos del propio usuario Proveedor sobre SU PROPIA
+ * ficha/documentación (resuelven todo desde el usuario autenticado). Este
+ * servicio es lo opuesto: un usuario interno viendo/calificando la ficha
+ * de CUALQUIER proveedor de su empresa, recibiendo el Id_Proveedor
+ * explícito. Mezclar ambos hubiera significado parchear cada método con
+ * "si es admin, salta esta validación" por todos lados.
+ */
+class CalificacionProveedorService
+{
+    protected const DISCO = 'repositorio_proveedores';
+
+    public function obtenerFicha(Usuario $admin, int $idEmpresaActiva, int $idProveedor): Proveedor
+    {
+        $this->verificarEsAdmin($admin, $idEmpresaActiva);
+
+        return $this->proveedorDeLaEmpresa($idEmpresaActiva, $idProveedor)
+            ->load(['clases', 'categoriasProducto', 'estado']);
+    }
+
+    public function calificarFicha(
+        Usuario $admin,
+        int $idEmpresaActiva,
+        int $idProveedor,
+        bool $aprobado,
+        ?string $observacion
+    ): Proveedor {
+        $this->verificarEsAdmin($admin, $idEmpresaActiva);
+
+        $proveedor = $this->proveedorDeLaEmpresa($idEmpresaActiva, $idProveedor);
+
+        $proveedor->forceFill([
+            'Estado_Calificacion_Ficha' => $aprobado ? 'Aprobado' : 'Rechazado',
+            'Comentario_Calificacion_Ficha' => $observacion,
+            'Calificado_Por_Ficha' => $admin->Id_Usuario,
+            'Fecha_Calificacion_Ficha' => now(),
+        ])->save();
+
+        return $proveedor->fresh(['clases', 'categoriasProducto', 'estado']);
+    }
+
+    /**
+     * Mismo shape que DocumentoProveedorService::obtenerChecklist(), pero
+     * viendo el checklist de CUALQUIER proveedor (no "el mío") y con los
+     * campos de calificación de cada documento incluidos.
+     */
+    public function obtenerChecklistDocumentos(Usuario $admin, int $idEmpresaActiva, int $idProveedor): array
+    {
+        $this->verificarEsAdmin($admin, $idEmpresaActiva);
+
+        $proveedor = $this->proveedorDeLaEmpresa($idEmpresaActiva, $idProveedor);
+        $esQuito = strcasecmp((string) $proveedor->Ciudad, 'Quito') === 0;
+
+        $tipos = TipoDocumento::where('Activo', 1)
+            ->where(function ($query) use ($esQuito) {
+                $query->where('Requiere_Solo_Quito', 0);
+                if ($esQuito) {
+                    $query->orWhere('Requiere_Solo_Quito', 1);
+                }
+            })
+            ->with(['documentosProveedor' => function ($query) use ($proveedor) {
+                $query->where('Id_Proveedor', $proveedor->Id_Proveedor)
+                    ->where('Activo', 1)
+                    ->with('archivo');
+            }])
+            ->orderBy('Categoria')
+            ->get();
+
+        return [
+            'razon_social' => $proveedor->Razon_Social,
+            'documentacion_registrada' => $proveedor->Fecha_Registro_Documentacion !== null,
+            'documentos' => $tipos->map(fn (TipoDocumento $tipo) => [
+                'id_tipo_documento' => $tipo->Id_Tipo_Documento,
+                'categoria' => $tipo->Categoria,
+                'nombre_documento' => $tipo->Nombre_Documento,
+                'obligatorio' => (bool) $tipo->Obligatorio,
+                'documentos' => $tipo->documentosProveedor->map(fn (DocumentoProveedor $doc) => [
+                    'id_documento_proveedor' => $doc->Id_Documento_Proveedor,
+                    'nombre_original' => $doc->archivo->Nombre_Original,
+                    'fecha_caducidad' => $doc->Fecha_Caducidad?->toDateString(),
+                    'estado_calificacion' => $doc->Estado_Calificacion,
+                    'comentario_calificacion' => $doc->Comentario_Calificacion,
+                    'fecha_calificacion' => $doc->Fecha_Calificacion?->toIso8601String(),
+                ])->values(),
+            ])->values(),
+        ];
+    }
+
+    public function calificarDocumento(
+        Usuario $admin,
+        int $idEmpresaActiva,
+        int $idDocumentoProveedor,
+        bool $aprobado,
+        ?string $observacion
+    ): DocumentoProveedor {
+        $this->verificarEsAdmin($admin, $idEmpresaActiva);
+
+        $documento = DocumentoProveedor::whereHas(
+            'proveedor',
+            fn ($q) => $q->where('Id_Empresa', $idEmpresaActiva)
+        )
+            ->where('Activo', 1)
+            ->with('archivo', 'tipoDocumento')
+            ->findOrFail($idDocumentoProveedor);
+
+        $documento->forceFill([
+            'Estado_Calificacion' => $aprobado ? 'Aprobado' : 'Rechazado',
+            'Comentario_Calificacion' => $observacion,
+            'Calificado_Por' => $admin->Id_Usuario,
+            'Fecha_Calificacion' => now(),
+        ])->save();
+
+        return $documento->fresh(['archivo', 'tipoDocumento']);
+    }
+
+    /**
+     * Igual que DocumentoProveedorService::descargar(), pero con
+     * Content-Disposition "inline" en vez de "attachment" -> el navegador
+     * lo muestra directo en el visor de PDF integrado del admin en vez de
+     * forzar la descarga, y sin la restricción de "solo mis documentos".
+     */
+    public function verDocumentoInline(Usuario $admin, int $idEmpresaActiva, int $idDocumentoProveedor)
+    {
+        $this->verificarEsAdmin($admin, $idEmpresaActiva);
+
+        $documento = DocumentoProveedor::whereHas(
+            'proveedor',
+            fn ($q) => $q->where('Id_Empresa', $idEmpresaActiva)
+        )
+            ->with('archivo')
+            ->findOrFail($idDocumentoProveedor);
+
+        $rutaCompleta = Storage::disk(self::DISCO)->path($documento->archivo->Ruta_Almacenamiento);
+
+        if (! is_file($rutaCompleta)) {
+            throw new NotFoundHttpException('El archivo físico no se encuentra en el repositorio.');
+        }
+
+        return response()->file($rutaCompleta, [
+            'Content-Type' => $documento->archivo->Tipo_Mime,
+            'Content-Disposition' => 'inline; filename="'.$documento->archivo->Nombre_Original.'"',
+        ]);
+    }
+
+    protected function proveedorDeLaEmpresa(int $idEmpresaActiva, int $idProveedor): Proveedor
+    {
+        return Proveedor::where('Id_Empresa', $idEmpresaActiva)
+            ->where('Activo', 1)
+            ->findOrFail($idProveedor);
+    }
+
+    /**
+     * Solo Admin/Sistemas pueden calificar. Se resuelve el rol desde el
+     * pivote Usuario_Empresa de la empresa activa (no desde un campo
+     * fijo del usuario), porque el mismo usuario puede tener roles
+     * distintos en distintas empresas. Un solo query con join a Rol
+     * (antes eran 2 consultas separadas: pivote + Rol::find) -> esto se
+     * ejecuta en CADA calificación, así que vale la pena que sea liviano.
+     */
+    protected function verificarEsAdmin(Usuario $usuario, int $idEmpresaActiva): void
+    {
+        if ($usuario->Tipo_Usuario !== 'Interno') {
+            throw new AccessDeniedHttpException('Solo usuarios internos pueden calificar proveedores.');
+        }
+
+        $nombreRol = DB::table('Usuario_Empresa')
+            ->join('Rol', 'Rol.Id_Rol', '=', 'Usuario_Empresa.Id_Rol')
+            ->where('Usuario_Empresa.Id_Usuario', $usuario->Id_Usuario)
+            ->where('Usuario_Empresa.Id_Empresa', $idEmpresaActiva)
+            ->where('Usuario_Empresa.Activo', true)
+            ->value('Rol.Nombre_Rol');
+
+        if (! in_array($nombreRol, ['Admin', 'Sistemas'], true)) {
+            throw new AccessDeniedHttpException('No tienes permisos para calificar proveedores.');
+        }
+    }
+}
