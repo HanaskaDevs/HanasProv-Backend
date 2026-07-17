@@ -3,6 +3,7 @@
 namespace App\Modules\Proveedores\Services;
 
 use App\Modules\Auth\Models\Usuario;
+use App\Modules\Proveedores\Models\CalificacionCampoFicha;
 use App\Modules\Proveedores\Models\Proveedor;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
@@ -22,7 +23,7 @@ class FichaProveedorService
 {
     public function obtenerMiFicha(Usuario $usuario, int $idEmpresaActiva): Proveedor
     {
-        return $this->miProveedor($usuario, $idEmpresaActiva)->load(['clases', 'categoriasProducto', 'estado']);
+        return $this->miProveedor($usuario, $idEmpresaActiva)->load(['clases', 'categoriasProducto', 'estado', 'calificacionesCampos']);
     }
 
     public function guardarSeccion1(Usuario $usuario, int $idEmpresaActiva, array $data): Proveedor
@@ -58,8 +59,9 @@ class FichaProveedorService
         ])->save();
 
         $this->recalcularProgreso($proveedor);
+        $this->reabrirRevisionSiEstabaRechazada($proveedor, CalificacionProveedorService::CAMPOS_SECCION1);
 
-        return $proveedor->fresh(['clases', 'categoriasProducto']);
+        return $proveedor->fresh(['clases', 'categoriasProducto', 'calificacionesCampos']);
     }
 
     public function guardarSeccion2(Usuario $usuario, int $idEmpresaActiva, array $idClases): Proveedor
@@ -74,8 +76,9 @@ class FichaProveedorService
         ])->save();
 
         $this->recalcularProgreso($proveedor);
+        $this->reabrirRevisionSiEstabaRechazada($proveedor, [CalificacionProveedorService::CAMPO_CLASE]);
 
-        return $proveedor->fresh(['clases', 'categoriasProducto']);
+        return $proveedor->fresh(['clases', 'categoriasProducto', 'calificacionesCampos']);
     }
 
     public function guardarSeccion3(Usuario $usuario, int $idEmpresaActiva, array $idCategorias): Proveedor
@@ -90,8 +93,27 @@ class FichaProveedorService
         ])->save();
 
         $this->recalcularProgreso($proveedor);
+        $this->reabrirRevisionSiEstabaRechazada($proveedor, [CalificacionProveedorService::CAMPO_CATEGORIA]);
 
-        return $proveedor->fresh(['clases', 'categoriasProducto']);
+        return $proveedor->fresh(['clases', 'categoriasProducto', 'calificacionesCampos']);
+    }
+
+    /**
+     * Si alguno de los campos de ESTA sección estaba marcado "Rechazado"
+     * por el admin, se borra esa calificación (vuelve a "Sin calificar")
+     * -> como en la vista de corrección solo esos campos son editables,
+     * el hecho de que se haya podido guardar esta sección implica que el
+     * proveedor los tocó, así que corresponde que vuelvan a la cola de
+     * revisión del admin. Los campos ya Aprobados de la misma sección NO
+     * se tocan -> siguen aprobados (el proveedor no pudo haberlos
+     * cambiado, estaban bloqueados en el formulario).
+     */
+    protected function reabrirRevisionSiEstabaRechazada(Proveedor $proveedor, array $camposDeEstaSeccion): void
+    {
+        CalificacionCampoFicha::where('Id_Proveedor', $proveedor->Id_Proveedor)
+            ->whereIn('Nombre_Campo', $camposDeEstaSeccion)
+            ->where('Estado', 'Rechazado')
+            ->delete();
     }
 
     /**

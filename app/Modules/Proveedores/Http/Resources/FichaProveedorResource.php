@@ -15,17 +15,24 @@ class FichaProveedorResource extends JsonResource
             'porcentaje_completado' => $this->Porcentaje_Completado_Ficha,
             'estado' => $this->whenLoaded('estado', fn () => $this->estado?->Nombre_Estado),
 
-            // 100 si Aprobado, 0 si Rechazado, null si todavía no se calificó.
-            'calificacion_ficha' => [
-                'estado' => $this->Estado_Calificacion_Ficha,
-                'puntaje' => match ($this->Estado_Calificacion_Ficha) {
-                    'Aprobado' => 100,
-                    'Rechazado' => 0,
-                    default => null,
-                },
-                'observacion' => $this->Comentario_Calificacion_Ficha,
-                'fecha' => $this->Fecha_Calificacion_Ficha?->toIso8601String(),
-            ],
+            // Calificación CAMPO POR CAMPO: un objeto { nombre_campo:
+            // {estado, observacion, fecha} }, más fácil de consumir en el
+            // front que un array. Y el estado general, derivado de todas
+            // las calificaciones (ver Proveedor::estadoGeneralCalificacionFicha).
+            'calificaciones_campos' => $this->whenLoaded(
+                'calificacionesCampos',
+                fn () => $this->calificacionesCampos->mapWithKeys(fn ($c) => [
+                    $c->Nombre_Campo => [
+                        'estado' => $c->Estado,
+                        'observacion' => $c->Comentario,
+                        'fecha' => $c->Fecha_Calificacion?->toIso8601String(),
+                    ],
+                ])
+            ),
+            'estado_calificacion_general' => $this->whenLoaded(
+                'calificacionesCampos',
+                fn () => $this->estadoGeneralCalificacionFicha()
+            ),
 
             'seccion_1' => [
                 'ruc' => $this->Ruc,

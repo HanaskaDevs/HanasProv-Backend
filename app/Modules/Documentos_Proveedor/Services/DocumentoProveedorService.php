@@ -67,6 +67,12 @@ class DocumentoProveedorService
                     'fecha_caducidad' => $doc->Fecha_Caducidad?->toDateString(),
                     'estado' => $doc->Estado,
                     'fecha_creacion' => $doc->Fecha_Creacion,
+                    // Lo que calificó el admin sobre ESTE archivo puntual.
+                    // El proveedor necesita verlo para saber si algo fue
+                    // rechazado y por qué (comentario_calificacion).
+                    'estado_calificacion' => $doc->Estado_Calificacion,
+                    'comentario_calificacion' => $doc->Comentario_Calificacion,
+                    'fecha_calificacion' => $doc->Fecha_Calificacion?->toIso8601String(),
                 ])->values(),
             ];
         })->values(),
@@ -151,16 +157,23 @@ class DocumentoProveedorService
     ): DocumentoProveedor {
         $proveedor = $this->miProveedor($usuario, $idEmpresaActiva);
 
-        if ($proveedor->Fecha_Registro_Documentacion !== null) {
-            throw ValidationException::withMessages([
-                'archivo' => ['Tu documentación ya fue registrada y no se puede modificar.'],
-            ]);
-        }
-
         $documentoActual = DocumentoProveedor::where('Id_Proveedor', $proveedor->Id_Proveedor)
             ->where('Activo', 1)
             ->with('tipoDocumento')
             ->findOrFail($idDocumentoProveedor);
+
+        // La documentación bloqueada (ya registrada) normalmente no se
+        // puede tocar -> EXCEPTO si el admin rechazó justo ESTE archivo:
+        // ahí sí se deja reemplazarlo puntualmente, para que el proveedor
+        // pueda corregir lo que le señalaron sin tener que reabrir todo
+        // el proceso de documentación.
+        $puedeCorregirRechazo = $documentoActual->Estado_Calificacion === 'Rechazado';
+
+        if ($proveedor->Fecha_Registro_Documentacion !== null && ! $puedeCorregirRechazo) {
+            throw ValidationException::withMessages([
+                'archivo' => ['Tu documentación ya fue registrada y no se puede modificar.'],
+            ]);
+        }
 
         $tipo = $documentoActual->tipoDocumento;
 
