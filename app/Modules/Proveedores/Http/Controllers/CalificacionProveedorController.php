@@ -24,14 +24,15 @@ class CalificacionProveedorController extends Controller
         return response()->json(new FichaProveedorResource($ficha));
     }
 
-    public function calificarFicha(CalificarRequest $request, int $proveedor): JsonResponse
+    public function calificarCampoFicha(CalificarRequest $request, int $proveedor, string $campo): JsonResponse
     {
         $idEmpresa = (int) $request->attributes->get('id_empresa_activa');
 
-        $ficha = $this->calificacionService->calificarFicha(
+        $ficha = $this->calificacionService->calificarCampoFicha(
             $request->user(),
             $idEmpresa,
             $proveedor,
+            $campo,
             $request->boolean('aprobado'),
             $request->validated('observacion')
         );

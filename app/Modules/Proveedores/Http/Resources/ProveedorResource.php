@@ -20,7 +20,10 @@ class ProveedorResource extends JsonResource
             'fecha_postulacion' => $this->Fecha_Postulacion,
 
             'documentacion_registrada' => $this->Fecha_Registro_Documentacion !== null,
-            'estado_calificacion_ficha' => $this->Estado_Calificacion_Ficha,
+            'estado_calificacion_ficha' => $this->whenLoaded(
+                'calificacionesCampos',
+                fn () => $this->estadoGeneralCalificacionFicha()
+            ),
             'documentos_totales' => $this->whenCounted('documentos_totales_count'),
             'documentos_pendientes_calificar' => $this->whenCounted('documentos_pendientes_calificar_count'),
         ];

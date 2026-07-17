@@ -89,6 +89,15 @@ class Proveedor extends BaseModel
         )->withPivot(['Activo', 'Id_Proveedor_Categoria']);
     }
 
+    /**
+     * Calificación campo-por-campo de la Ficha (admin). Ver
+     * CalificacionProveedorService para el detalle de cómo se usa.
+     */
+    public function calificacionesCampos(): HasMany
+    {
+        return $this->hasMany(CalificacionCampoFicha::class, 'Id_Proveedor');
+    }
+
    public function documentos(): HasMany
 {
     return $this->hasMany(\App\Modules\Documentos_Proveedor\Models\DocumentoProveedor::class, 'Id_Proveedor');
@@ -113,4 +122,41 @@ class Proveedor extends BaseModel
 {
     return $this->hasMany(\App\Modules\Ficha_Productos\Models\Producto::class, 'Id_Proveedor');
 }
+
+    /**
+     * Estado GENERAL de la ficha, derivado de las calificaciones campo
+     * por campo (ya no existe un solo "Aprobado/Rechazado" para toda la
+     * ficha, se calcula a partir de calificacionesCampos):
+     * - 'Rechazado': al menos un campo fue rechazado.
+     * - 'Aprobado': TODOS los campos calificables ya están calificados y
+     *   ninguno fue rechazado.
+     * - null: todavía no se calificó nada, o está parcialmente calificada
+     *   (algunos campos sí, otros no, sin ningún rechazo) -> se trata
+     *   como "en revisión" en el front.
+     * Requiere que 'calificacionesCampos' venga cargado (eager load),
+     * si no, dispara una query lazy por cada Proveedor listado.
+     */
+    public function estadoGeneralCalificacionFicha(): ?string
+    {
+        $calificaciones = $this->calificacionesCampos;
+
+        if ($calificaciones->isEmpty()) {
+            return null;
+        }
+
+        if ($calificaciones->contains(fn (CalificacionCampoFicha $c) => $c->Estado === 'Rechazado')) {
+            return 'Rechazado';
+        }
+
+        $totalCamposCalificables = count(\App\Modules\Proveedores\Services\CalificacionProveedorService::CAMPOS_SECCION1) + 2;
+
+        if (
+            $calificaciones->count() >= $totalCamposCalificables
+            && $calificaciones->every(fn (CalificacionCampoFicha $c) => $c->Estado === 'Aprobado')
+        ) {
+            return 'Aprobado';
+        }
+
+        return null;
+    }
 }

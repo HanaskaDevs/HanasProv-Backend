@@ -5,6 +5,7 @@ namespace App\Modules\Proveedores\Services;
 use App\Modules\Auth\Models\Usuario;
 use App\Modules\Documentos_Proveedor\Models\DocumentoProveedor;
 use App\Modules\Documentos_Proveedor\Models\TipoDocumento;
+use App\Modules\Proveedores\Models\CalificacionCampoFicha;
 use App\Modules\Proveedores\Models\Proveedor;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -13,9 +14,10 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 /**
  * Calificación de proveedores por un usuario interno (Admin/Sistemas):
- * la Ficha se califica como un todo (Aprobado=100 / Rechazado=0 +
- * observación si se rechaza), y cada documento cargado se califica de
- * forma individual (mismo esquema Aprobado/Rechazado + observación).
+ * la Ficha se califica CAMPO POR CAMPO (cada dato tiene su propio
+ * Aprobado/Rechazado + observación si se rechaza -> ver
+ * calificarCampoFicha), y cada documento cargado se califica de forma
+ * individual también (mismo esquema, ver calificarDocumento).
  *
  * Deliberadamente separado de FichaProveedorService/DocumentoProveedorService:
  * esos dos son exclusivos del propio usuario Proveedor sobre SU PROPIA
@@ -29,33 +31,67 @@ class CalificacionProveedorService
 {
     protected const DISCO = 'repositorio_proveedores';
 
+    /**
+     * Campos calificables de la Ficha (Sección 1) uno por uno + las 2
+     * secciones que son de selección múltiple, esas se califican como
+     * bloque completo (no tendría sentido calificar cada clase/categoría
+     * marcada por separado). Esta lista es la fuente de verdad de qué
+     * "Nombre_Campo" son válidos -> el front usa la misma lista (ver
+     * CAMPOS_CALIFICABLES en el módulo de proveedores del front).
+     */
+    public const CAMPOS_SECCION1 = [
+        'ruc', 'clase_contribuyente', 'razon_social', 'nombre_comercial',
+        'email', 'telefono', 'direccion', 'ciudad', 'pagina_web',
+        'representante_legal', 'correo_representante', 'telefono_representante',
+        'contacto_venta', 'correo_venta', 'telefono_contacto_venta',
+        'contacto_calidad', 'correo_calidad', 'telefono_contacto_calidad',
+        'contacto_contabilidad', 'correo_contabilidad', 'telefono_contabilidad',
+    ];
+
+    public const CAMPO_CLASE = 'clase_proveedor';
+    public const CAMPO_CATEGORIA = 'categoria_productos';
+
     public function obtenerFicha(Usuario $admin, int $idEmpresaActiva, int $idProveedor): Proveedor
     {
         $this->verificarEsAdmin($admin, $idEmpresaActiva);
 
         return $this->proveedorDeLaEmpresa($idEmpresaActiva, $idProveedor)
-            ->load(['clases', 'categoriasProducto', 'estado']);
+            ->load(['clases', 'categoriasProducto', 'estado', 'calificacionesCampos']);
     }
 
-    public function calificarFicha(
+    /**
+     * Califica UN campo puntual de la ficha (o una de las 2 secciones de
+     * selección múltiple, tratadas como bloque). Upsert: si ya existía
+     * una calificación para ese campo, se actualiza en vez de acumular
+     * historial -> solo importa el estado ACTUAL de cada campo.
+     */
+    public function calificarCampoFicha(
         Usuario $admin,
         int $idEmpresaActiva,
         int $idProveedor,
+        string $campo,
         bool $aprobado,
         ?string $observacion
     ): Proveedor {
         $this->verificarEsAdmin($admin, $idEmpresaActiva);
 
+        if (! in_array($campo, [...self::CAMPOS_SECCION1, self::CAMPO_CLASE, self::CAMPO_CATEGORIA], true)) {
+            throw new NotFoundHttpException("\"{$campo}\" no es un campo calificable de la ficha.");
+        }
+
         $proveedor = $this->proveedorDeLaEmpresa($idEmpresaActiva, $idProveedor);
 
-        $proveedor->forceFill([
-            'Estado_Calificacion_Ficha' => $aprobado ? 'Aprobado' : 'Rechazado',
-            'Comentario_Calificacion_Ficha' => $observacion,
-            'Calificado_Por_Ficha' => $admin->Id_Usuario,
-            'Fecha_Calificacion_Ficha' => now(),
-        ])->save();
+        CalificacionCampoFicha::updateOrCreate(
+            ['Id_Proveedor' => $proveedor->Id_Proveedor, 'Nombre_Campo' => $campo],
+            [
+                'Estado' => $aprobado ? 'Aprobado' : 'Rechazado',
+                'Comentario' => $observacion,
+                'Calificado_Por' => $admin->Id_Usuario,
+                'Fecha_Calificacion' => now(),
+            ]
+        );
 
-        return $proveedor->fresh(['clases', 'categoriasProducto', 'estado']);
+        return $proveedor->fresh(['clases', 'categoriasProducto', 'estado', 'calificacionesCampos']);
     }
 
     /**

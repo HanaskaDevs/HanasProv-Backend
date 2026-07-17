@@ -13,7 +13,7 @@ class ProveedorService
     {
         return Proveedor::where('Id_Empresa', $idEmpresa)
             ->where('Activo', true)
-            ->with(['estado', 'clases'])
+            ->with(['estado', 'clases', 'calificacionesCampos'])
             ->withCount([
                 // Documentos ya cargados (Activo) que todavía no tienen
                 // Estado_Calificacion -> lo que el admin tiene pendiente de
