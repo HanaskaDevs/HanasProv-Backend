@@ -53,6 +53,12 @@ class DocumentoProveedorService
         // y el back lo vuelve a validar en subirDocumento() por si acaso.
         'registrado' => $proveedor->Fecha_Registro_Documentacion !== null,
         'fecha_registro' => $proveedor->Fecha_Registro_Documentacion?->toIso8601String(),
+        // true = hay (o hubo) documentos rechazados que el proveedor
+        // todavía no confirmó haber corregido -> mientras esté en true,
+        // los documentos no-Aprobados quedan editables aunque
+        // "registrado" sea true. Se apaga con "Registrar documentación
+        // actualizada" (ver confirmarCorreccionesDocumentos).
+        'correcciones_pendientes' => (bool) $proveedor->Correcciones_Pendientes,
         'documentos' => $tipos->map(function (TipoDocumento $tipo) {
             return [
                 'id_tipo_documento' => $tipo->Id_Tipo_Documento,
@@ -163,15 +169,17 @@ class DocumentoProveedorService
             ->findOrFail($idDocumentoProveedor);
 
         // La documentación bloqueada (ya registrada) normalmente no se
-        // puede tocar -> EXCEPTO si el admin rechazó justo ESTE archivo:
-        // ahí sí se deja reemplazarlo puntualmente, para que el proveedor
-        // pueda corregir lo que le señalaron sin tener que reabrir todo
-        // el proceso de documentación.
-        $puedeCorregirRechazo = $documentoActual->Estado_Calificacion === 'Rechazado';
+        // puede tocar -> EXCEPTO mientras haya correcciones pendientes de
+        // confirmar (el admin rechazó algo y el proveedor no dijo "ya
+        // terminé de corregir" todavía) Y este archivo puntual no esté ya
+        // Aprobado. Esto cubre tanto el rechazo original como el caso de
+        // que el proveedor se haya equivocado de archivo al reemplazar:
+        // mientras no confirme, se puede seguir corrigiendo.
+        $puedeEditarAunqueEsteRegistrada = $proveedor->Correcciones_Pendientes && $documentoActual->Estado_Calificacion !== 'Aprobado';
 
-        if ($proveedor->Fecha_Registro_Documentacion !== null && ! $puedeCorregirRechazo) {
+        if ($proveedor->Fecha_Registro_Documentacion !== null && ! $puedeEditarAunqueEsteRegistrada) {
             throw ValidationException::withMessages([
-                'archivo' => ['Tu documentación ya fue registrada y no se puede modificar.'],
+                'archivo' => ['Este documento ya fue aprobado y no se puede modificar.'],
             ]);
         }
 
@@ -190,15 +198,16 @@ class DocumentoProveedorService
         }
 
         $nombreFinal = $this->nombreArchivoFinal($tipo, $proveedor, $archivo, $nombreDocumento);
+        $estabaRechazado = $documentoActual->Estado_Calificacion === 'Rechazado';
 
-        return DB::transaction(function () use ($usuario, $proveedor, $tipo, $documentoActual, $archivo, $fechaCaducidad, $nombreFinal) {
+        return DB::transaction(function () use ($usuario, $proveedor, $tipo, $documentoActual, $archivo, $fechaCaducidad, $nombreFinal, $estabaRechazado) {
             $registroArchivo = $this->guardarArchivoFisico($usuario, $proveedor, $tipo, $archivo, $nombreFinal);
 
             // Solo se desactiva ESTE documento puntual -> los demás archivos
             // del mismo tipo (si Permite_Multiples) quedan intactos.
             $documentoActual->update(['Activo' => 0]);
 
-            return DocumentoProveedor::create([
+            $nuevoDocumento = DocumentoProveedor::create([
                 'Id_Proveedor' => $proveedor->Id_Proveedor,
                 'Id_Tipo_Documento' => $tipo->Id_Tipo_Documento,
                 'Id_Archivo' => $registroArchivo->Id_Archivo,
@@ -207,7 +216,17 @@ class DocumentoProveedorService
                 'Activo' => 1,
                 'Creado_Por' => $usuario->Id_Usuario,
                 'Fecha_Creacion' => now(),
-            ])->load('archivo', 'tipoDocumento');
+            ]);
+
+            // Si estaba rechazado y el admin ya había "Registrado" la
+            // calificación de documentos completa, esa confirmación
+            // queda obsoleta (hay un documento nuevo sin calificar) ->
+            // se reabre para que vuelva a aparecer en su cola de revisión.
+            if ($estabaRechazado && $proveedor->Fecha_Registro_Calificacion_Documentos !== null) {
+                $proveedor->forceFill(['Fecha_Registro_Calificacion_Documentos' => null])->save();
+            }
+
+            return $nuevoDocumento->load('archivo', 'tipoDocumento');
         });
     }
 
@@ -220,17 +239,29 @@ class DocumentoProveedorService
     {
         $proveedor = $this->miProveedor($usuario, $idEmpresaActiva);
 
-        if ($proveedor->Fecha_Registro_Documentacion !== null) {
-            throw ValidationException::withMessages([
-                'archivo' => ['Tu documentación ya fue registrada y no se puede modificar.'],
-            ]);
-        }
-
         $documento = DocumentoProveedor::where('Id_Proveedor', $proveedor->Id_Proveedor)
             ->where('Activo', 1)
             ->findOrFail($idDocumentoProveedor);
 
-        $documento->update(['Activo' => 0]);
+        // Misma regla que reemplazarDocumento: se puede borrar mientras
+        // haya correcciones pendientes de confirmar y no esté Aprobado.
+        $puedeEditarAunqueEsteRegistrada = $proveedor->Correcciones_Pendientes && $documento->Estado_Calificacion !== 'Aprobado';
+
+        if ($proveedor->Fecha_Registro_Documentacion !== null && ! $puedeEditarAunqueEsteRegistrada) {
+            throw ValidationException::withMessages([
+                'archivo' => ['Este documento ya fue aprobado y no se puede modificar.'],
+            ]);
+        }
+
+        $estabaRechazado = $documento->Estado_Calificacion === 'Rechazado';
+
+        DB::transaction(function () use ($documento, $proveedor, $estabaRechazado) {
+            $documento->update(['Activo' => 0]);
+
+            if ($estabaRechazado && $proveedor->Fecha_Registro_Calificacion_Documentos !== null) {
+                $proveedor->forceFill(['Fecha_Registro_Calificacion_Documentos' => null])->save();
+            }
+        });
     }
 
     /**
@@ -353,6 +384,38 @@ class DocumentoProveedorService
         }
 
         $proveedor->update(['Fecha_Registro_Documentacion' => now()]);
+    }
+
+    /**
+     * "Registrar documentación actualizada": el proveedor confirma que ya
+     * corrigió todo lo que el admin había rechazado. Exige que no quede
+     * NINGÚN documento activo en estado "Rechazado" (si queda alguno sin
+     * corregir, se rechaza indicando cuántos faltan) -> recién ahí apaga
+     * Correcciones_Pendientes, y todo vuelve a quedar bloqueado (solo
+     * lectura) hasta que el admin dé su retroalimentación de nuevo.
+     */
+    public function confirmarCorrecciones(Usuario $usuario, int $idEmpresaActiva): void
+    {
+        $proveedor = $this->miProveedor($usuario, $idEmpresaActiva);
+
+        if (! $proveedor->Correcciones_Pendientes) {
+            throw ValidationException::withMessages([
+                'documentacion' => ['No tienes correcciones pendientes de confirmar.'],
+            ]);
+        }
+
+        $pendientes = DocumentoProveedor::where('Id_Proveedor', $proveedor->Id_Proveedor)
+            ->where('Activo', 1)
+            ->where('Estado_Calificacion', 'Rechazado')
+            ->count();
+
+        if ($pendientes > 0) {
+            throw ValidationException::withMessages([
+                'documentacion' => ["Todavía te falta corregir {$pendientes} documento(s) rechazado(s)."],
+            ]);
+        }
+
+        $proveedor->forceFill(['Correcciones_Pendientes' => false])->save();
     }
 
     public function descargar(Usuario $usuario, int $idEmpresaActiva, int $idDocumentoProveedor)

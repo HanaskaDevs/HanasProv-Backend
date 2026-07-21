@@ -54,6 +54,15 @@ class DocumentoProveedorController extends Controller
         return response()->json(['message' => 'Documentación registrada correctamente.']);
     }
 
+    public function confirmarCorrecciones(Request $request): JsonResponse
+    {
+        $idEmpresa = (int) $request->attributes->get('id_empresa_activa');
+
+        $this->documentoService->confirmarCorrecciones($request->user(), $idEmpresa);
+
+        return response()->json(['message' => 'Documentación actualizada registrada correctamente.']);
+    }
+
     public function reemplazar(SubirDocumentoRequest $request, int $documentoProveedor): JsonResponse
     {
         $idEmpresa = (int) $request->attributes->get('id_empresa_activa');

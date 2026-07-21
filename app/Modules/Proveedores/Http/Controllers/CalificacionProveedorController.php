@@ -3,6 +3,7 @@
 namespace App\Modules\Proveedores\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\Proveedores\Http\Requests\CalificarFichaGeneralRequest;
 use App\Modules\Proveedores\Http\Requests\CalificarRequest;
 use App\Modules\Proveedores\Http\Resources\FichaProveedorResource;
 use App\Modules\Proveedores\Services\CalificacionProveedorService;
@@ -24,17 +25,16 @@ class CalificacionProveedorController extends Controller
         return response()->json(new FichaProveedorResource($ficha));
     }
 
-    public function calificarCampoFicha(CalificarRequest $request, int $proveedor, string $campo): JsonResponse
+    public function calificarFichaGeneral(CalificarFichaGeneralRequest $request, int $proveedor): JsonResponse
     {
         $idEmpresa = (int) $request->attributes->get('id_empresa_activa');
 
-        $ficha = $this->calificacionService->calificarCampoFicha(
+        $ficha = $this->calificacionService->calificarFichaGeneral(
             $request->user(),
             $idEmpresa,
             $proveedor,
-            $campo,
             $request->boolean('aprobado'),
-            $request->validated('observacion')
+            $request->validated('campos_rechazados', [])
         );
 
         return response()->json(new FichaProveedorResource($ficha));
@@ -74,5 +74,14 @@ class CalificacionProveedorController extends Controller
         $idEmpresa = (int) $request->attributes->get('id_empresa_activa');
 
         return $this->calificacionService->verDocumentoInline($request->user(), $idEmpresa, $documentoProveedor);
+    }
+
+    public function registrarCalificacionDocumentos(Request $request, int $proveedor): JsonResponse
+    {
+        $idEmpresa = (int) $request->attributes->get('id_empresa_activa');
+
+        $this->calificacionService->registrarCalificacionDocumentos($request->user(), $idEmpresa, $proveedor);
+
+        return response()->json(['message' => 'Calificación de documentos registrada correctamente.']);
     }
 }

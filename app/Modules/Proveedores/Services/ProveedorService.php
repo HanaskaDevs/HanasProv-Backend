@@ -21,6 +21,9 @@ class ProveedorService
                 'documentos as documentos_pendientes_calificar_count' => function ($query) {
                     $query->where('Activo', 1)->whereNull('Estado_Calificacion');
                 },
+                'documentos as documentos_rechazados_count' => function ($query) {
+                    $query->where('Activo', 1)->where('Estado_Calificacion', 'Rechazado');
+                },
                 'documentos as documentos_totales_count' => function ($query) {
                     $query->where('Activo', 1);
                 },
