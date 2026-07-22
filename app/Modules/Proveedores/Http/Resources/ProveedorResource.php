@@ -26,6 +26,30 @@ class ProveedorResource extends JsonResource
             ),
             'documentos_totales' => $this->whenCounted('documentos_totales_count'),
             'documentos_pendientes_calificar' => $this->whenCounted('documentos_pendientes_calificar_count'),
+            'documentos_rechazados' => $this->whenCounted('documentos_rechazados_count'),
+
+            // Mismo criterio que estado_calificacion_ficha, pero para los
+            // documentos: 'Rechazado' si algún documento fue rechazado,
+            // 'Aprobado' solo si TODOS los documentos cargados ya están
+            // calificados y ninguno fue rechazado, null (sin calificar /
+            // en revisión) en cualquier otro caso -> incluye "todavía no
+            // cargó nada".
+            'estado_calificacion_documentacion' => $this->when(
+                $this->documentos_totales_count !== null,
+                function () {
+                    if ($this->documentos_totales_count === 0) {
+                        return null;
+                    }
+                    if ($this->documentos_rechazados_count > 0) {
+                        return 'Rechazado';
+                    }
+                    if ($this->documentos_pendientes_calificar_count === 0) {
+                        return 'Aprobado';
+                    }
+
+                    return null;
+                }
+            ),
         ];
     }
 }

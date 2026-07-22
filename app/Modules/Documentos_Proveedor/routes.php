@@ -9,6 +9,7 @@ Route::prefix('mi-documentos')
     ->group(function () {
         Route::get('/', [DocumentoProveedorController::class, 'index']);
         Route::post('/registrar', [DocumentoProveedorController::class, 'registrar']);
+        Route::post('/confirmar-correcciones', [DocumentoProveedorController::class, 'confirmarCorrecciones']);
         Route::post('/documento/{documentoProveedor}/reemplazar', [DocumentoProveedorController::class, 'reemplazar']);
         Route::delete('/documento/{documentoProveedor}', [DocumentoProveedorController::class, 'borrar']);
         Route::post('/{tipoDocumento}', [DocumentoProveedorController::class, 'subir']);

@@ -9,6 +9,7 @@ use App\Modules\Proveedores\Models\CalificacionCampoFicha;
 use App\Modules\Proveedores\Models\Proveedor;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
@@ -60,40 +61,72 @@ class CalificacionProveedorService
     }
 
     /**
-     * Califica UN campo puntual de la ficha (o una de las 2 secciones de
-     * selección múltiple, tratadas como bloque). Upsert: si ya existía
-     * una calificación para ese campo, se actualiza en vez de acumular
-     * historial -> solo importa el estado ACTUAL de cada campo.
+     * Calificación GENERAL de la ficha, en un solo envío: Aprobar (todos
+     * los campos quedan Aprobados) o Rechazar (el admin marcó ciertos
+     * campos como inválidos, cada uno con su observación -> esos quedan
+     * Rechazados, TODO el resto de campos que no se marcó queda
+     * Aprobado, ya que el admin los revisó y no los señaló como
+     * problema).
+     *
+     * Después de esto, la ficha queda "calificada" (Aprobada o
+     * Rechazada) y el admin ya no puede volver a tocar nada acá hasta
+     * que el proveedor corrija los campos rechazados -> eso reabre
+     * automáticamente esos campos (ver FichaProveedorService::
+     * reabrirRevisionSiEstabaRechazada), y ahí sí vuelve a estar
+     * disponible para calificar de nuevo.
      */
-    public function calificarCampoFicha(
+    public function calificarFichaGeneral(
         Usuario $admin,
         int $idEmpresaActiva,
         int $idProveedor,
-        string $campo,
         bool $aprobado,
-        ?string $observacion
+        array $camposRechazados = []
     ): Proveedor {
         $this->verificarEsAdmin($admin, $idEmpresaActiva);
 
-        if (! in_array($campo, [...self::CAMPOS_SECCION1, self::CAMPO_CLASE, self::CAMPO_CATEGORIA], true)) {
-            throw new NotFoundHttpException("\"{$campo}\" no es un campo calificable de la ficha.");
-        }
-
         $proveedor = $this->proveedorDeLaEmpresa($idEmpresaActiva, $idProveedor);
 
-        CalificacionCampoFicha::updateOrCreate(
-            ['Id_Proveedor' => $proveedor->Id_Proveedor, 'Nombre_Campo' => $campo],
-            [
-                'Estado' => $aprobado ? 'Aprobado' : 'Rechazado',
-                'Comentario' => $observacion,
-                'Calificado_Por' => $admin->Id_Usuario,
-                'Fecha_Calificacion' => now(),
-            ]
-        );
+        if ($this->yaEstaCalificada($proveedor)) {
+            throw ValidationException::withMessages([
+                'ficha' => ['Esta ficha ya está calificada. Solo se puede volver a calificar cuando el proveedor corrija lo señalado.'],
+            ]);
+        }
+
+        $todosLosCampos = [...self::CAMPOS_SECCION1, self::CAMPO_CLASE, self::CAMPO_CATEGORIA];
+        $mapaRechazados = collect($camposRechazados)->keyBy('campo');
+
+        foreach ($todosLosCampos as $campo) {
+            $rechazo = $mapaRechazados->get($campo);
+
+            CalificacionCampoFicha::updateOrCreate(
+                ['Id_Proveedor' => $proveedor->Id_Proveedor, 'Nombre_Campo' => $campo],
+                [
+                    'Estado' => $rechazo ? 'Rechazado' : 'Aprobado',
+                    'Comentario' => $rechazo['observacion'] ?? null,
+                    'Calificado_Por' => $admin->Id_Usuario,
+                    'Fecha_Calificacion' => now(),
+                ]
+            );
+        }
 
         return $proveedor->fresh(['clases', 'categoriasProducto', 'estado', 'calificacionesCampos']);
     }
 
+    /**
+     * true si la ficha ya tiene una calificación general puesta
+     * (Aprobada o Rechazada) -> mientras sea así, calificarFichaGeneral()
+     * se bloquea: el admin ya tomó una decisión, no hay nada más que
+     * hacer hasta que el proveedor corrija.
+     */
+    protected function yaEstaCalificada(Proveedor $proveedor): bool
+    {
+        return $proveedor->fresh('calificacionesCampos')->estadoGeneralCalificacionFicha() !== null;
+    }
+
+    /**
+     * Califica UN campo puntual de la ficha (o una de las 2 secciones de
+     * selección múltiple, tratadas como bloque). Upsert: si ya existía
+     * una calificación para ese campo, se actualiza en vez de acumular
     /**
      * Mismo shape que DocumentoProveedorService::obtenerChecklist(), pero
      * viendo el checklist de CUALQUIER proveedor (no "el mío") y con los
@@ -124,6 +157,11 @@ class CalificacionProveedorService
         return [
             'razon_social' => $proveedor->Razon_Social,
             'documentacion_registrada' => $proveedor->Fecha_Registro_Documentacion !== null,
+            // true = ya se calificaron todos y el admin confirmó con
+            // "Registrar calificación" -> queda de solo lectura hasta que
+            // el proveedor corrija algún documento rechazado (eso resetea
+            // este campo, ver DocumentoProveedorService::reemplazarDocumento).
+            'calificacion_documentos_registrada' => $proveedor->Fecha_Registro_Calificacion_Documentos !== null,
             'documentos' => $tipos->map(fn (TipoDocumento $tipo) => [
                 'id_tipo_documento' => $tipo->Id_Tipo_Documento,
                 'categoria' => $tipo->Categoria,
@@ -133,6 +171,7 @@ class CalificacionProveedorService
                     'id_documento_proveedor' => $doc->Id_Documento_Proveedor,
                     'nombre_original' => $doc->archivo->Nombre_Original,
                     'fecha_caducidad' => $doc->Fecha_Caducidad?->toDateString(),
+                    'fecha_subida' => $doc->Fecha_Creacion?->toIso8601String(),
                     'estado_calificacion' => $doc->Estado_Calificacion,
                     'comentario_calificacion' => $doc->Comentario_Calificacion,
                     'fecha_calificacion' => $doc->Fecha_Calificacion?->toIso8601String(),
@@ -155,8 +194,14 @@ class CalificacionProveedorService
             fn ($q) => $q->where('Id_Empresa', $idEmpresaActiva)
         )
             ->where('Activo', 1)
-            ->with('archivo', 'tipoDocumento')
+            ->with('archivo', 'tipoDocumento', 'proveedor')
             ->findOrFail($idDocumentoProveedor);
+
+        if ($documento->proveedor->Fecha_Registro_Calificacion_Documentos !== null) {
+            throw ValidationException::withMessages([
+                'documento' => ['Ya registraste la calificación de documentos. Solo se puede volver a calificar cuando el proveedor corrija algo rechazado.'],
+            ]);
+        }
 
         $documento->forceFill([
             'Estado_Calificacion' => $aprobado ? 'Aprobado' : 'Rechazado',
@@ -165,7 +210,58 @@ class CalificacionProveedorService
             'Fecha_Calificacion' => now(),
         ])->save();
 
+        // Mientras el proveedor no confirme que ya corrigió TODO lo
+        // rechazado (con "Registrar documentación actualizada"), este
+        // documento y cualquier otro no-Aprobado quedan editables para
+        // él -> ver DocumentoProveedorService::puedeEditarDocumento().
+        if (! $aprobado) {
+            $documento->proveedor->forceFill(['Correcciones_Pendientes' => true])->save();
+        }
+
         return $documento->fresh(['archivo', 'tipoDocumento']);
+    }
+
+    /**
+     * Confirma la calificación de documentos: exige que TODOS los
+     * documentos activos del proveedor ya tengan Estado_Calificacion
+     * puesto (no puede quedar ninguno "Pendiente"). Después de esto, la
+     * sección pasa a ser de solo consulta -> ver
+     * calificacion_documentos_registrada en obtenerChecklistDocumentos.
+     */
+    public function registrarCalificacionDocumentos(Usuario $admin, int $idEmpresaActiva, int $idProveedor): void
+    {
+        $this->verificarEsAdmin($admin, $idEmpresaActiva);
+
+        $proveedor = $this->proveedorDeLaEmpresa($idEmpresaActiva, $idProveedor);
+
+        if ($proveedor->Fecha_Registro_Calificacion_Documentos !== null) {
+            throw ValidationException::withMessages([
+                'documentos' => ['Ya habías registrado esta calificación.'],
+            ]);
+        }
+
+        $totalDocumentos = DocumentoProveedor::where('Id_Proveedor', $proveedor->Id_Proveedor)
+            ->where('Activo', 1)
+            ->count();
+
+        if ($totalDocumentos === 0) {
+            throw ValidationException::withMessages([
+                'documentos' => ['El proveedor todavía no cargó ningún documento.'],
+            ]);
+        }
+
+        $pendientes = DocumentoProveedor::where('Id_Proveedor', $proveedor->Id_Proveedor)
+            ->where('Activo', 1)
+            ->whereNull('Estado_Calificacion')
+            ->count();
+
+        if ($pendientes > 0) {
+            throw ValidationException::withMessages([
+                'documentos' => ["Todavía te falta calificar {$pendientes} documento(s)."],
+            ]);
+        }
+
+        $proveedor->forceFill(['Fecha_Registro_Calificacion_Documentos' => now()])->save();
     }
 
     /**

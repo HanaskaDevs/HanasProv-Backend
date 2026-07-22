@@ -17,8 +17,9 @@ Route::prefix('proveedores')
         // Calificación (Admin/Sistemas) -> validado dentro del Service,
         // no solo por estar en este grupo de rutas.
         Route::get('/{proveedor}/ficha-calificacion', [CalificacionProveedorController::class, 'mostrarFicha']);
-        Route::post('/{proveedor}/ficha-calificacion/{campo}', [CalificacionProveedorController::class, 'calificarCampoFicha']);
+        Route::post('/{proveedor}/ficha-calificacion', [CalificacionProveedorController::class, 'calificarFichaGeneral']);
         Route::get('/{proveedor}/documentos-calificacion', [CalificacionProveedorController::class, 'mostrarDocumentos']);
+        Route::post('/{proveedor}/documentos-calificacion/registrar', [CalificacionProveedorController::class, 'registrarCalificacionDocumentos']);
         Route::post('/documentos-calificacion/{documentoProveedor}', [CalificacionProveedorController::class, 'calificarDocumento']);
         Route::get('/documentos-calificacion/{documentoProveedor}/ver', [CalificacionProveedorController::class, 'verDocumento']);
     });
