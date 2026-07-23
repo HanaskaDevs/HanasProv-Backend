@@ -5,6 +5,7 @@ namespace App\Modules\Auth\Services;
 use App\Models\Rol;
 use App\Modules\Auth\Models\CodigoActivacion;
 use App\Modules\Auth\Models\Usuario;
+use App\Modules\Auth\Models\UsuarioBodega;
 use App\Modules\Auth\Models\UsuarioEmpresa;
 use App\Modules\Auth\Notifications\CodigoActivacionNotification;
 use App\Modules\Proveedores\Models\Proveedor;
@@ -191,7 +192,7 @@ if ((int) $data['id_rol'] === (int) $idRolProveedor) {
     ): CodigoActivacion {
         CodigoActivacion::where('Email', $usuario->Email)
             ->where('Usado', false)
-            ->update(['Usado' => true, 'Fecha_Uso' => now()]);
+            ->update(['Usado' => true, 'Fecha_Uso' => now()->format('Y-m-d\TH:i:s')]);
 
         $codigo = $this->generarCodigo();
 
@@ -476,6 +477,60 @@ public function actualizarRolEnEmpresa(Usuario $usuario, int $idEmpresa, int $id
     ])->save();
 }
 
+/**
+ * Reemplaza por completo las bodegas asignadas a un usuario Compras dentro
+ * de una empresa (sync: borra las que ya no vengan en la lista, crea las
+ * nuevas). Solo tiene efecto real sobre el rol Compras -> Admin/Sistemas
+ * ignoran esto (siempre ven las 3 bodegas), pero no se bloquea la llamada
+ * para permitir asignar bodegas ANTES de que Sistemas cambie el rol.
+ */
+public function actualizarBodegasAsignadas(Usuario $usuario, int $idEmpresa, array $codigosBodega, Usuario $ejecutor): void
+{
+    if (! $ejecutor->esSistemas($idEmpresa)) {
+        throw new AccessDeniedHttpException('Solo usuarios con rol Sistemas pueden asignar bodegas.');
+    }
+
+    $vinculo = $usuario->usuarioEmpresas()->where('Id_Empresa', $idEmpresa)->where('Activo', true)->first();
+
+    if (! $vinculo) {
+        throw ValidationException::withMessages([
+            'id_empresa' => ['El usuario no tiene acceso activo a esa empresa.'],
+        ]);
+    }
+
+    $codigosValidos = ['CD-0001', 'CD-0002', 'CD-0003'];
+    $codigosInvalidos = array_diff($codigosBodega, $codigosValidos);
+
+    if (! empty($codigosInvalidos)) {
+        throw ValidationException::withMessages([
+            'codigos_bodega' => ['Código(s) de bodega inválido(s): ' . implode(', ', $codigosInvalidos)],
+        ]);
+    }
+
+    DB::transaction(function () use ($usuario, $idEmpresa, $codigosBodega, $ejecutor) {
+        UsuarioBodega::where('Id_Usuario', $usuario->Id_Usuario)
+            ->where('Id_Empresa', $idEmpresa)
+            ->whereNotIn('Cod_Almacen', $codigosBodega)
+            ->delete();
+
+        $existentes = UsuarioBodega::where('Id_Usuario', $usuario->Id_Usuario)
+            ->where('Id_Empresa', $idEmpresa)
+            ->pluck('Cod_Almacen')
+            ->all();
+
+        foreach (array_diff($codigosBodega, $existentes) as $codigo) {
+            UsuarioBodega::create([
+                'Id_Usuario' => $usuario->Id_Usuario,
+                'Id_Empresa' => $idEmpresa,
+                'Cod_Almacen' => $codigo,
+                'Activo' => true,
+                'Creado_Por' => $ejecutor->Id_Usuario,
+                'Fecha_Creacion' => now(),
+            ]);
+        }
+    });
+}
+
 public function quitarAccesoEmpresa(Usuario $usuario, int $idEmpresa, Usuario $ejecutor): void
 {
     $puedeGestionar = $usuario->Tipo_Usuario === 'Interno'
@@ -538,14 +593,32 @@ public function otorgarAccesoEmpresa(Usuario $usuario, int $idEmpresa, Usuario $
     }
 
     DB::transaction(function () use ($usuario, $idEmpresa, $idRol, $creador) {
-        UsuarioEmpresa::create([
-            'Id_Usuario' => $usuario->Id_Usuario,
-            'Id_Empresa' => $idEmpresa,
-            'Id_Rol' => $idRol,
-            'Activo' => true,
-            'Creado_Por' => $creador->Id_Usuario,
-            'Fecha_Creacion' => now(),
-        ]);
+        // Si ya existía un vínculo INACTIVO (el usuario tuvo acceso antes y
+        // se lo quitaron), lo reactivamos en vez de intentar crear uno
+        // nuevo. quitarAccesoEmpresa() hace soft-delete (Activo=false, la
+        // fila nunca se borra), así que un create() de nuevo siempre choca
+        // con la UNIQUE KEY (Id_Usuario, Id_Empresa).
+        $vinculo = UsuarioEmpresa::where('Id_Usuario', $usuario->Id_Usuario)
+            ->where('Id_Empresa', $idEmpresa)
+            ->first();
+
+        if ($vinculo) {
+            $vinculo->forceFill([
+                'Id_Rol' => $idRol,
+                'Activo' => true,
+                'Modificado_Por' => $creador->Id_Usuario,
+                'Fecha_Modificacion' => now(),
+            ])->save();
+        } else {
+            UsuarioEmpresa::create([
+                'Id_Usuario' => $usuario->Id_Usuario,
+                'Id_Empresa' => $idEmpresa,
+                'Id_Rol' => $idRol,
+                'Activo' => true,
+                'Creado_Por' => $creador->Id_Usuario,
+                'Fecha_Creacion' => now(),
+            ]);
+        }
 
         if ($usuario->Tipo_Usuario === 'Proveedor' && ! $usuario->Requiere_Cambio_Password) {
             $proveedor = Proveedor::create([

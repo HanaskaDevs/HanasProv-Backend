@@ -9,6 +9,7 @@ Route::prefix('pedidos')
     ->group(function () {
         Route::get('/abiertos', [PedidoController::class, 'abiertos']);
         Route::get('/cerrados', [PedidoController::class, 'cerrados']);
+        Route::get('/internos', [PedidoController::class, 'internos']);
         Route::post('/actualizar', [PedidoController::class, 'actualizar']);
         Route::patch('/{pedido}/cerrar', [PedidoController::class, 'cerrar']);
         Route::post('/descargar-pdf', [PedidoController::class, 'descargarPdf']);

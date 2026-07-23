@@ -29,7 +29,7 @@ class UsuarioController extends Controller
         return response()->json(UsuarioInternoResource::collection($usuarios));
     }
 
-   public function showInterno(Request $request, Usuario $usuario): JsonResponse
+    public function showInterno(Request $request, Usuario $usuario): JsonResponse
     {
         $idEmpresa = (int) $request->attributes->get('id_empresa_activa');
 
@@ -149,6 +149,18 @@ class UsuarioController extends Controller
         $this->usuarioService->actualizarRolEnEmpresa($usuario, $empresa, $idRol, $request->user());
 
         return response()->json(['message' => 'Rol actualizado correctamente.']);
+    }
+
+    public function actualizarBodegasEnEmpresa(Request $request, Usuario $usuario, int $empresa): JsonResponse
+    {
+        $codigosBodega = $request->validate([
+            'codigos_bodega' => ['present', 'array'],
+            'codigos_bodega.*' => ['string'],
+        ])['codigos_bodega'];
+
+        $this->usuarioService->actualizarBodegasAsignadas($usuario, $empresa, $codigosBodega, $request->user());
+
+        return response()->json(['message' => 'Bodegas asignadas actualizadas correctamente.']);
     }
 
     public function quitarAccesoEmpresa(Request $request, Usuario $usuario, int $empresa): JsonResponse
