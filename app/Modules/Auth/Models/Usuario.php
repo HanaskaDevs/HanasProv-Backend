@@ -123,6 +123,25 @@ class Usuario extends Authenticatable
     {
         return $this->tieneRolEnEmpresa($idEmpresa, 'Compras');
     }
+    public function bodegasAsignadas(): HasMany
+    {
+        return $this->hasMany(UsuarioBodega::class, 'Id_Usuario');
+    }
+
+    /**
+     * Códigos de bodega (Cod_Almacen) que este usuario puede ver en
+     * "Pedidos por bodega", dentro de la empresa dada. Solo tiene sentido
+     * para rol Compras -> Admin/Sistemas ya ven todas las bodegas sin
+     * necesidad de consultar esto.
+     */
+    public function codigosBodegasAsignadas(int $idEmpresa): array
+    {
+        return $this->bodegasAsignadas()
+            ->where('Id_Empresa', $idEmpresa)
+            ->where('Activo', true)
+            ->pluck('Cod_Almacen')
+            ->all();
+    }
 
 
     /**
@@ -137,5 +156,9 @@ class Usuario extends Authenticatable
             ->where('Activo', true)
             ->whereHas('rol', fn ($q) => $q->where('Nombre_Rol', 'Sistemas'))
             ->exists();
+    }
+    public function esCalidad(int $idEmpresa): bool
+    {
+        return $this->tieneRolEnEmpresa($idEmpresa, 'Calidad');
     }
 }

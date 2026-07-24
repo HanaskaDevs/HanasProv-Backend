@@ -10,3 +10,4 @@ require base_path('app/Modules/Pedidos/routes.php');
 require base_path('app/Modules/Reclamos/routes.php');
 require base_path('app/Modules/Asistente/routes.php');
 require base_path('app/Modules/Configuraciones/routes.php');
+require base_path('app/Modules/Auditorias/routes.php');

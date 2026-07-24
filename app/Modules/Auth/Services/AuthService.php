@@ -54,7 +54,7 @@ class AuthService
         ]);
 
         return [
-            'usuario' => $usuario->load('empresas'),
+            'usuario' => $usuario->load(['empresas' => fn($q) => $q->wherePivot('Activo', true)]),
             'token' => $token,
             'id_empresa_activa' => $idEmpresaActiva,
         ];

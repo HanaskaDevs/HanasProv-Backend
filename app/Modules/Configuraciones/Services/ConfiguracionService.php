@@ -217,9 +217,20 @@ class ConfiguracionService
         Storage::disk(self::DISCO_PUBLICO)->putFileAs($carpeta, $archivo, $nombreFisico);
 
         $tipoMedia = str_starts_with($archivo->getMimeType(), 'video') ? 'video' : 'imagen';
-        $rutaPublica = '/storage/' . $carpeta . '/' . $nombreFisico;
 
-        return [$rutaPublica, $tipoMedia];
+        // Ruta relativa dentro del disco (la que se guarda internamente para
+        // poder localizar/borrar el archivo físico más adelante).
+        $rutaRelativa = $carpeta . '/' . $nombreFisico;
+
+        // URL absoluta real, construida por el disco 'public' a partir de
+        // APP_URL (ver config/filesystems.php) -> esto es lo que se guarda
+        // en BD y se le entrega al frontend. Antes esto era un string
+        // manual '/storage/...' relativo, que el navegador resolvía contra
+        // el ORIGEN DEL FRONTEND (Vite) en vez del backend -> por eso no
+        // cargaba ninguna imagen ni en Login ni en Home.
+        $urlAbsoluta = Storage::disk(self::DISCO_PUBLICO)->url($rutaRelativa);
+
+        return [$urlAbsoluta, $tipoMedia];
     }
 
     protected function eliminarMediaFisica(?string $rutaPublica): void
@@ -228,9 +239,11 @@ class ConfiguracionService
             return;
         }
 
-        // La ruta pública empieza con /storage/... -> hay que quitar ese
-        // prefijo para obtener la ruta real dentro del disco 'public'.
-        $rutaDisco = ltrim(str_replace('/storage/', '', $rutaPublica), '/');
+      
+        // Nos quedamos solo con el path y quitamos el prefijo /storage/ para
+        // obtener la ruta real dentro del disco 'public'.
+        $path = parse_url($rutaPublica, PHP_URL_PATH) ?? $rutaPublica;
+        $rutaDisco = ltrim(str_replace('/storage/', '', $path), '/');
 
         if (Storage::disk(self::DISCO_PUBLICO)->exists($rutaDisco)) {
             Storage::disk(self::DISCO_PUBLICO)->delete($rutaDisco);

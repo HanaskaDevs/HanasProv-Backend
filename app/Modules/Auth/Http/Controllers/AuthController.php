@@ -51,7 +51,7 @@ class AuthController extends Controller
         $sesion = $this->authService->sesionActual($usuario, $usuario->currentAccessToken());
 
         return response()->json([
-            'usuario' => new UsuarioResource($usuario->load('empresas')),
+            'usuario' => new UsuarioResource($usuario->load(['empresas' => fn ($q) => $q->wherePivot('Activo', true)])),
             'id_empresa_activa' => $sesion?->Id_Empresa_Activa,
         ]);
     }

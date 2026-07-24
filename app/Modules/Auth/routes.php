@@ -40,5 +40,6 @@ Route::prefix('usuarios')
         Route::post('/{usuario}/empresas', [UsuarioController::class, 'agregarEmpresa']);
         Route::put('/{usuario}/email', [UsuarioController::class, 'actualizarEmail']);
         Route::put('/{usuario}/empresas/{empresa}', [UsuarioController::class, 'actualizarRolEnEmpresa']);
+        Route::put('/{usuario}/empresas/{empresa}/bodegas', [UsuarioController::class, 'actualizarBodegasEnEmpresa']);
         Route::delete('/{usuario}/empresas/{empresa}', [UsuarioController::class, 'quitarAccesoEmpresa']);
     });

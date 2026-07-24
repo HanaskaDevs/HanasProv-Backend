@@ -25,6 +25,7 @@ class UsuarioDetalleResource extends JsonResource
                 'nombre_comercial' => $ue->empresa->Nombre_Comercial,
                 'id_rol' => $ue->Id_Rol,
                 'nombre_rol' => $ue->rol->Nombre_Rol,
+                'bodegas_asignadas' => $this->codigosBodegasAsignadas($ue->Id_Empresa),
             ])->values(),
         ];
     }

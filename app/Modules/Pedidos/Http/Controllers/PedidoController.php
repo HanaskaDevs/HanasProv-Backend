@@ -4,13 +4,17 @@ namespace App\Modules\Pedidos\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Modules\Pedidos\Http\Resources\PedidoCompraResource;
+use App\Modules\Pedidos\Services\PedidoInternoService;
 use App\Modules\Pedidos\Services\PedidoService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class PedidoController extends Controller
 {
-    public function __construct(protected PedidoService $pedidoService) {}
+    public function __construct(
+        protected PedidoService $pedidoService,
+        protected PedidoInternoService $pedidoInternoService,
+    ) {}
 
     public function abiertos(Request $request): JsonResponse
     {
@@ -28,6 +32,31 @@ class PedidoController extends Controller
         $pedidos = $this->pedidoService->listar($request->user(), $idEmpresaActiva, 'Cerrado');
 
         return response()->json(PedidoCompraResource::collection($pedidos));
+    }
+
+    /**
+     * Vista interna (Admin): todos los pedidos agrupados por bodega
+     * (CD-0001 / CD-0002 / CD-0003), leídos directo de BC_*.
+     * Sin distinción Vigentes/Históricos -> eso es exclusivo del proveedor.
+     */
+    public function internos(Request $request): JsonResponse
+    {
+        $idEmpresaActiva = (int) $request->attributes->get('id_empresa_activa');
+
+        $filtros = $request->validate([
+            'fecha_desde' => ['nullable', 'date'],
+            'fecha_hasta' => ['nullable', 'date'],
+            'proveedor' => ['nullable', 'string', 'max:150'],
+            'producto' => ['nullable', 'string', 'max:150'],
+        ]);
+
+        $pedidosPorBodega = $this->pedidoInternoService->listarPorBodega(
+            $request->user(),
+            $idEmpresaActiva,
+            $filtros
+        );
+
+        return response()->json($pedidosPorBodega);
     }
 
     public function actualizar(Request $request): JsonResponse
