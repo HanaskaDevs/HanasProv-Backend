@@ -379,7 +379,13 @@ class CalificacionProveedorService
             'Fecha_Calificacion' => now(),
         ])->save();
 
-        if ($aprobado) {
+        // Mientras el proveedor no confirme que ya corrigió TODO lo
+        // rechazado (con "Registrar productos actualizados"), el
+        // documento de ese producto puntual queda editable para él ->
+        // ver ProductoService::puedeEditarProducto().
+        if (! $aprobado) {
+            $producto->proveedor->forceFill(['Correcciones_Pendientes_Productos' => true])->save();
+        } else {
             $this->activarSiCorrespondeAprobado($producto->proveedor);
         }
 

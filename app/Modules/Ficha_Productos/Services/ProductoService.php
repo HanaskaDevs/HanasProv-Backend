@@ -157,17 +157,37 @@ class ProductoService
         $proveedor = $this->miProveedor($usuario, $idEmpresaActiva);
 
         $documento = DocumentoProducto::whereHas('producto', fn($q) => $q->where('Id_Proveedor', $proveedor->Id_Proveedor))
-            ->with('archivo', 'producto')
+            ->with('archivo', 'producto.proveedor')
             ->findOrFail($idDocumentoProducto);
 
-        if ($documento->producto->Bloqueado) {
+        $producto = $documento->producto;
+
+        $puedeEditarAunqueBloqueado = $producto->proveedor->Correcciones_Pendientes_Productos
+            && $producto->Estado_Calificacion !== 'Aprobado';
+
+        if ($producto->Bloqueado && ! $puedeEditarAunqueBloqueado) {
             throw new AccessDeniedHttpException('No puede eliminar documentos mientras el producto está en revisión.');
         }
 
-        DB::transaction(function () use ($documento) {
+        $estabaRechazado = $producto->Estado_Calificacion === 'Rechazado';
+
+        DB::transaction(function () use ($documento, $producto, $estabaRechazado) {
             $archivo = $documento->archivo;
             $documento->delete();
             $this->eliminarArchivoFisico($archivo);
+
+            if ($estabaRechazado) {
+                $producto->forceFill([
+                    'Estado_Calificacion' => 'Pendiente',
+                    'Comentario_Calificacion' => null,
+                    'Calificado_Por' => null,
+                    'Fecha_Calificacion' => null,
+                ])->save();
+
+                if ($producto->proveedor->Fecha_Registro_Calificacion_Productos !== null) {
+                    $producto->proveedor->forceFill(['Fecha_Registro_Calificacion_Productos' => null])->save();
+                }
+            }
         });
     }
 
@@ -195,13 +215,23 @@ class ProductoService
     ): DocumentoProducto {
         $producto = $this->miProducto($usuario, $idEmpresaActiva, $idProducto);
 
-        if ($producto->Bloqueado) {
+        // Bloqueado normalmente impide tocar el producto -> EXCEPTO
+        // mientras haya correcciones pendientes de confirmar (el admin
+        // rechazó este producto puntual y el proveedor todavía no dijo
+        // "ya terminé de corregir") Y este producto no esté ya
+        // Aprobado. Mismo criterio que ya usamos para Documentos.
+        $puedeEditarAunqueBloqueado = $producto->proveedor->Correcciones_Pendientes_Productos
+            && $producto->Estado_Calificacion !== 'Aprobado';
+
+        if ($producto->Bloqueado && ! $puedeEditarAunqueBloqueado) {
             throw new AccessDeniedHttpException('Este producto está bloqueado mientras se encuentra en revisión y no puede modificarse.');
         }
 
+        $estabaRechazado = $producto->Estado_Calificacion === 'Rechazado';
+
         $tipo = TipoDocumentoProducto::where('Activo', 1)->findOrFail($idTipoDocumentoProducto);
 
-        return DB::transaction(function () use ($usuario, $producto, $tipo, $archivo) {
+        return DB::transaction(function () use ($usuario, $producto, $tipo, $archivo, $estabaRechazado) {
             $registroArchivo = Archivo::create([
                 'Id_Proveedor' => $producto->Id_Proveedor,
                 'Nombre_Original' => $archivo->getClientOriginalName(),
@@ -228,14 +258,34 @@ class ProductoService
                 ->where('Activo', 1)
                 ->update(['Activo' => 0]);
 
-            return DocumentoProducto::create([
+            $nuevoDocumento = DocumentoProducto::create([
                 'Id_Producto' => $producto->Id_Producto,
                 'Id_Tipo_Documento_Producto' => $tipo->Id_Tipo_Documento_Producto,
                 'Id_Archivo' => $registroArchivo->Id_Archivo,
                 'Activo' => 1,
                 'Creado_Por' => $usuario->Id_Usuario,
                 'Fecha_Creacion' => now(),
-            ])->load('archivo', 'tipoDocumento');
+            ]);
+
+            // El producto estaba Rechazado y el proveedor acaba de tocar
+            // uno de sus documentos -> vuelve a "Pendiente" (el admin
+            // tiene que revisarlo de nuevo), y si ya había "Registrado"
+            // la calificación completa, esa confirmación queda obsoleta
+            // -> se reabre.
+            if ($estabaRechazado) {
+                $producto->forceFill([
+                    'Estado_Calificacion' => 'Pendiente',
+                    'Comentario_Calificacion' => null,
+                    'Calificado_Por' => null,
+                    'Fecha_Calificacion' => null,
+                ])->save();
+
+                if ($producto->proveedor->Fecha_Registro_Calificacion_Productos !== null) {
+                    $producto->proveedor->forceFill(['Fecha_Registro_Calificacion_Productos' => null])->save();
+                }
+            }
+
+            return $nuevoDocumento->load('archivo', 'tipoDocumento');
         });
     }
 
@@ -385,6 +435,28 @@ class ProductoService
                 ->where('Activo', 1)
                 ->where('Bloqueado', 1)
                 ->count(),
+            // Conteos totales del catálogo completo (no solo lo que
+            // trajo $productos, que puede estar acotado a $idsProductos)
+            // -> los usan pantallas de resumen (ej. Calificación) que
+            // necesitan el panorama completo sin pedir todo el catálogo
+            // paginado solo para contar.
+            'productos_totales_catalogo' => Producto::where('Id_Proveedor', $proveedor->Id_Proveedor)
+                ->where('Activo', 1)
+                ->count(),
+            'productos_aprobados' => Producto::where('Id_Proveedor', $proveedor->Id_Proveedor)
+                ->where('Activo', 1)
+                ->where('Estado_Calificacion', 'Aprobado')
+                ->count(),
+            'productos_rechazados' => Producto::where('Id_Proveedor', $proveedor->Id_Proveedor)
+                ->where('Activo', 1)
+                ->where('Estado_Calificacion', 'Rechazado')
+                ->count(),
+            // true = hay (o hubo) productos rechazados que el proveedor
+            // todavía no confirmó haber corregido -> mientras esté en
+            // true, esos productos puntuales quedan editables aunque
+            // sigan Bloqueado. Se apaga con "Registrar productos
+            // actualizados" (ver confirmarCorrecciones).
+            'correcciones_pendientes' => (bool) $proveedor->Correcciones_Pendientes_Productos,
         ];
     }
 
@@ -442,6 +514,39 @@ class ProductoService
             ]);
 
         return $productos->count();
+    }
+
+    /**
+     * "Registrar productos actualizados": el proveedor confirma que ya
+     * corrigió todo lo que el admin había rechazado. Exige que no quede
+     * NINGÚN producto activo en estado "Rechazado" (si queda alguno sin
+     * corregir, se rechaza indicando cuántos faltan) -> recién ahí
+     * apaga Correcciones_Pendientes_Productos, y esos productos vuelven
+     * a quedar bloqueados (solo lectura) hasta que el admin dé su
+     * retroalimentación de nuevo.
+     */
+    public function confirmarCorrecciones(Usuario $usuario, int $idEmpresaActiva): void
+    {
+        $proveedor = $this->miProveedor($usuario, $idEmpresaActiva);
+
+        if (! $proveedor->Correcciones_Pendientes_Productos) {
+            throw ValidationException::withMessages([
+                'productos' => ['No tienes correcciones pendientes de confirmar.'],
+            ]);
+        }
+
+        $pendientes = Producto::where('Id_Proveedor', $proveedor->Id_Proveedor)
+            ->where('Activo', 1)
+            ->where('Estado_Calificacion', 'Rechazado')
+            ->count();
+
+        if ($pendientes > 0) {
+            throw ValidationException::withMessages([
+                'productos' => ["Todavía te falta corregir {$pendientes} producto(s) rechazado(s)."],
+            ]);
+        }
+
+        $proveedor->forceFill(['Correcciones_Pendientes_Productos' => false])->save();
     }
 
     protected function miProveedor(Usuario $usuario, int $idEmpresaActiva): Proveedor
