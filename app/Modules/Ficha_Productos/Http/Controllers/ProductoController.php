@@ -14,13 +14,26 @@ class ProductoController extends Controller
 {
     public function __construct(protected ProductoService $productoService) {}
 
-    public function index(Request $request): JsonResponse
+    public function index(Request $request)
     {
         $idEmpresaActiva = (int) $request->attributes->get('id_empresa_activa');
 
-        return response()->json(
-            ProductoResource::collection($this->productoService->listar($request->user(), $idEmpresaActiva))
+        $productos = $this->productoService->listar(
+            $request->user(),
+            $idEmpresaActiva,
+            $request->query('search'),
+            (int) $request->query('page', 1),
+            (int) $request->query('per_page', 20)
         );
+
+        // Sin response()->json() a propósito: cuando el resource
+        // collection envuelve un paginador, Laravel solo agrega
+        // automáticamente "links"/"meta" (total, current_page,
+        // last_page...) si se devuelve así, dejando que el framework
+        // haga la conversión a respuesta -> response()->json() lo
+        // serializaría plano, sin esa info que el front necesita para
+        // pintar el paginado.
+        return ProductoResource::collection($productos);
     }
 
     public function store(GuardarProductoRequest $request): JsonResponse
@@ -57,17 +70,20 @@ class ProductoController extends Controller
     public function resumenRegistro(Request $request): JsonResponse
     {
         $idEmpresaActiva = (int) $request->attributes->get('id_empresa_activa');
+        $ids = $request->query('ids');
+        $idsProductos = $ids ? array_map('intval', explode(',', $ids)) : null;
 
         return response()->json(
-            $this->productoService->resumenRegistro($request->user(), $idEmpresaActiva)
+            $this->productoService->resumenRegistro($request->user(), $idEmpresaActiva, $idsProductos)
         );
     }
 
     public function registrar(Request $request): JsonResponse
     {
         $idEmpresaActiva = (int) $request->attributes->get('id_empresa_activa');
+        $ids = $request->validate(['ids' => ['required', 'array', 'min:1'], 'ids.*' => ['integer']])['ids'];
 
-        $total = $this->productoService->registrar($request->user(), $idEmpresaActiva);
+        $total = $this->productoService->registrar($request->user(), $idEmpresaActiva, $ids);
 
         return response()->json([
             'message' => "Se registraron {$total} producto(s) para calificación.",

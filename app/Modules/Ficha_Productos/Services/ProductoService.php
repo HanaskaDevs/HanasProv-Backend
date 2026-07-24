@@ -32,24 +32,49 @@ class ProductoService
         'PK' => 'Paquete',
     ];
 
-    public function listar(Usuario $usuario, int $idEmpresaActiva)
+    /**
+     * Paginado del lado del servidor -> con catálogos grandes (1000+
+     * productos) traer todo de una y paginar/filtrar en el navegador
+     * sería un desastre de performance (payload enorme + el browser
+     * renderizando/filtrando miles de filas). Acá se pagina y se busca
+     * directo en la consulta SQL, así el front nunca recibe más de
+     * $porPagina productos por request.
+     *
+     * La sincronización con BC solo corre en la página 1 sin búsqueda
+     * activa -> es el "punto de entrada natural" a la pantalla, y evita
+     * ejecutar esa sincronización (que pega contra BC_Producto_Proveedor)
+     * en cada cambio de página o de término de búsqueda.
+     */
+    public function listar(Usuario $usuario, int $idEmpresaActiva, ?string $busqueda = null, int $pagina = 1, int $porPagina = 20)
     {
         $proveedor = $this->miProveedor($usuario, $idEmpresaActiva);
 
-        $this->sincronizarDesdeBC($proveedor, $idEmpresaActiva);
+        if ($pagina === 1 && ! $busqueda) {
+            $this->sincronizarDesdeBC($proveedor, $idEmpresaActiva);
+        }
 
         return $proveedor
             ->productos()
             ->where('Activo', 1)
+            ->when($busqueda, function ($query) use ($busqueda) {
+                $query->where(function ($q) use ($busqueda) {
+                    $q->where('Nombre_Producto', 'like', "%{$busqueda}%")
+                        ->orWhere('Codigo_Barras', 'like', "%{$busqueda}%");
+                });
+            })
             ->with(['unidadPresentacion', 'documentos.tipoDocumento', 'documentos.archivo'])
-            ->get();
+            ->orderBy('Nombre_Producto')
+            ->paginate($porPagina, ['*'], 'page', $pagina);
     }
 
     public function crear(Usuario $usuario, int $idEmpresaActiva, array $data): Producto
     {
         $proveedor = $this->miProveedor($usuario, $idEmpresaActiva);
 
-        $this->verificarNoBloqueado($proveedor);
+        // Ya no se bloquea acá: un producto NUEVO no tiene nada que ver
+        // con otros productos que estén en revisión -> nace con
+        // Bloqueado=0, editable, sin importar cuántos lotes tenga el
+        // proveedor pendientes de calificación en paralelo.
 
         return Producto::create([
             'Id_Proveedor' => $proveedor->Id_Proveedor,
@@ -92,15 +117,13 @@ class ProductoService
     /**
      * Elimina varios productos completos de una sola vez (checkboxes en el
      * frontend). Se salta silenciosamente cualquier id que no pertenezca al
-     * proveedor o que esté bloqueado, y retorna cuántos sí se eliminaron.
+     * proveedor o que esté bloqueado (en revisión), y retorna cuántos sí
+     * se eliminaron -> no hace falta que el proveedor esté "libre de todo
+     * bloqueo": alcanza con que ESOS productos puntuales no lo estén.
      */
     public function eliminarMasivo(Usuario $usuario, int $idEmpresaActiva, array $idsProductos): int
     {
         $proveedor = $this->miProveedor($usuario, $idEmpresaActiva);
-
-        if ($this->tieneProductosBloqueados($proveedor)) {
-            throw new AccessDeniedHttpException('No puede eliminar productos mientras tiene un envío en revisión.');
-        }
 
         $productos = Producto::where('Id_Proveedor', $proveedor->Id_Proveedor)
             ->whereIn('Id_Producto', $idsProductos)
@@ -223,15 +246,13 @@ class ProductoService
      * localmente los que todavía no existan (identificados por
      * Bc_Nro_Producto). La descripción viene de BC_Ficha_Producto.
      *
-     * Se omite por completo si el proveedor tiene un envío pendiente de
-     * calificación (Bloqueado), para no interferir con esa revisión.
+     * Ya NO se omite si hay productos bloqueados: como se permiten varios
+     * envíos en paralelo, y esto solo CREA productos nuevos (nunca toca
+     * uno existente), no hay riesgo de interferir con una revisión en
+     * curso.
      */
     protected function sincronizarDesdeBC(Proveedor $proveedor, int $idEmpresaActiva): void
     {
-        if ($this->tieneProductosBloqueados($proveedor)) {
-            return;
-        }
-
         try {
             $empresa = $proveedor->empresa;
 
@@ -316,12 +337,21 @@ class ProductoService
             ?? UnidadPresentacion::where('Nombre_Unidad', 'Unidad')->value('Id_Unidad_Presentacion');
     }
 
-    public function resumenRegistro(Usuario $usuario, int $idEmpresaActiva): array
+    /**
+     * $idsProductos: si viene, el resumen (total, incompletos, etc.) se
+     * calcula SOLO sobre esos productos -> lo usa el modal de confirmar
+     * registro, acotado a lo que el proveedor tildó en la lista. Si no
+     * viene (null), se calcula sobre todos los activos, como antes (lo
+     * sigue usando la franja superior para saber si hay algo bloqueado,
+     * algo que no depende de cuáles estén seleccionados).
+     */
+    public function resumenRegistro(Usuario $usuario, int $idEmpresaActiva, ?array $idsProductos = null): array
     {
         $proveedor = $this->miProveedor($usuario, $idEmpresaActiva);
 
         $productos = $proveedor->productos()
             ->where('Activo', 1)
+            ->when($idsProductos !== null, fn ($query) => $query->whereIn('Id_Producto', $idsProductos))
             ->with('documentos.tipoDocumento')
             ->get();
 
@@ -346,31 +376,41 @@ class ProductoService
         return [
             'total_productos' => $productos->count(),
             'productos_incompletos' => $productosIncompletos,
-            'puede_registrar' => $productos->count() > 0
-                && empty($productosIncompletos)
-                && ! $this->tieneProductosBloqueados($proveedor),
-            'ya_bloqueado' => $this->tieneProductosBloqueados($proveedor),
+            // Ya no depende de si hay OTROS productos bloqueados -> se
+            // permiten varios envíos en paralelo, cada uno con lo suyo.
+            'puede_registrar' => $productos->count() > 0 && empty($productosIncompletos),
+            // Conteo (no un booleano global) -> más útil para mostrar
+            // "tienes N en revisión" en vez de un bloqueo de todo o nada.
+            'productos_en_revision' => Producto::where('Id_Proveedor', $proveedor->Id_Proveedor)
+                ->where('Activo', 1)
+                ->where('Bloqueado', 1)
+                ->count(),
         ];
     }
 
-    public function registrar(Usuario $usuario, int $idEmpresaActiva): int
+    /**
+     * Registra (bloquea para calificación) SOLO los productos indicados
+     * en $idsProductos -> el resto de los productos activos del
+     * proveedor quedan intactos, editables, para seguir cargándolos y
+     * mandarlos en un envío posterior. SÍ SE PERMITEN varios envíos en
+     * paralelo (ya no se exige que no haya ningún otro lote pendiente):
+     * cada producto tiene su propio Bloqueado, no hay un bloqueo único
+     * por proveedor.
+     */
+    public function registrar(Usuario $usuario, int $idEmpresaActiva, array $idsProductos): int
     {
         $proveedor = $this->miProveedor($usuario, $idEmpresaActiva);
 
-        if ($this->tieneProductosBloqueados($proveedor)) {
-            throw ValidationException::withMessages([
-                'productos' => ['Ya existe un envío pendiente de calificación.'],
-            ]);
-        }
-
         $productos = $proveedor->productos()
             ->where('Activo', 1)
+            ->where('Bloqueado', 0)
+            ->whereIn('Id_Producto', $idsProductos)
             ->with('documentos.tipoDocumento')
             ->get();
 
         if ($productos->isEmpty()) {
             throw ValidationException::withMessages([
-                'productos' => ['No tienes productos para registrar.'],
+                'productos' => ['Selecciona al menos un producto disponible para registrar (los que ya están en revisión no cuentan).'],
             ]);
         }
 
@@ -391,6 +431,8 @@ class ProductoService
 
         Producto::where('Id_Proveedor', $proveedor->Id_Proveedor)
             ->where('Activo', 1)
+            ->where('Bloqueado', 0)
+            ->whereIn('Id_Producto', $idsProductos)
             ->update([
                 'Bloqueado' => 1,
                 'Estado_Calificacion' => 'Pendiente',
@@ -400,21 +442,6 @@ class ProductoService
             ]);
 
         return $productos->count();
-    }
-
-    protected function tieneProductosBloqueados(Proveedor $proveedor): bool
-    {
-        return Producto::where('Id_Proveedor', $proveedor->Id_Proveedor)
-            ->where('Activo', 1)
-            ->where('Bloqueado', 1)
-            ->exists();
-    }
-
-    protected function verificarNoBloqueado(Proveedor $proveedor): void
-    {
-        if ($this->tieneProductosBloqueados($proveedor)) {
-            throw new AccessDeniedHttpException('Tienes productos en revisión. No puedes agregar nuevos productos hasta que sean calificados.');
-        }
     }
 
     protected function miProveedor(Usuario $usuario, int $idEmpresaActiva): Proveedor
