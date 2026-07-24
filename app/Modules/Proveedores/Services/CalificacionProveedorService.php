@@ -5,6 +5,7 @@ namespace App\Modules\Proveedores\Services;
 use App\Modules\Auth\Models\Usuario;
 use App\Modules\Documentos_Proveedor\Models\DocumentoProveedor;
 use App\Modules\Documentos_Proveedor\Models\TipoDocumento;
+use App\Modules\Ficha_Productos\Models\Producto;
 use App\Modules\Proveedores\Models\CalificacionCampoFicha;
 use App\Modules\Proveedores\Models\Proveedor;
 use Illuminate\Support\Facades\DB;
@@ -51,6 +52,13 @@ class CalificacionProveedorService
 
     public const CAMPO_CLASE = 'clase_proveedor';
     public const CAMPO_CATEGORIA = 'categoria_productos';
+
+    // IDs de Estado_Proveedor -> mismo criterio que el resto del código
+    // (ver los TODO en ProveedorController/UsuarioService): por ahora
+    // hardcodeados con un comentario, hasta que se centralicen en una
+    // constante/enum compartida.
+    protected const ESTADO_ASPIRANTE = 1;
+    protected const ESTADO_APROBADO = 2;
 
     public function obtenerFicha(Usuario $admin, int $idEmpresaActiva, int $idProveedor): Proveedor
     {
@@ -109,6 +117,8 @@ class CalificacionProveedorService
             );
         }
 
+        $this->activarSiCorrespondeAprobado($proveedor);
+
         return $proveedor->fresh(['clases', 'categoriasProducto', 'estado', 'calificacionesCampos']);
     }
 
@@ -123,10 +133,6 @@ class CalificacionProveedorService
         return $proveedor->fresh('calificacionesCampos')->estadoGeneralCalificacionFicha() !== null;
     }
 
-    /**
-     * Califica UN campo puntual de la ficha (o una de las 2 secciones de
-     * selección múltiple, tratadas como bloque). Upsert: si ya existía
-     * una calificación para ese campo, se actualiza en vez de acumular
     /**
      * Mismo shape que DocumentoProveedorService::obtenerChecklist(), pero
      * viendo el checklist de CUALQUIER proveedor (no "el mío") y con los
@@ -216,6 +222,8 @@ class CalificacionProveedorService
         // él -> ver DocumentoProveedorService::puedeEditarDocumento().
         if (! $aprobado) {
             $documento->proveedor->forceFill(['Correcciones_Pendientes' => true])->save();
+        } else {
+            $this->activarSiCorrespondeAprobado($documento->proveedor);
         }
 
         return $documento->fresh(['archivo', 'tipoDocumento']);
@@ -291,6 +299,217 @@ class CalificacionProveedorService
             'Content-Type' => $documento->archivo->Tipo_Mime,
             'Content-Disposition' => 'inline; filename="'.$documento->archivo->Nombre_Original.'"',
         ]);
+    }
+
+    /**
+     * Productos del proveedor con sus documentos, para que el admin los
+     * revise y califique uno por uno. Solo se listan los que el
+     * proveedor ya "Registró" (Bloqueado=1) -> mientras no los registre,
+     * no hay nada que calificar todavía (ver ProductoService::registrar).
+     */
+    public function obtenerProductosCalificacion(Usuario $admin, int $idEmpresaActiva, int $idProveedor): array
+    {
+        $this->verificarEsAdmin($admin, $idEmpresaActiva);
+
+        $proveedor = $this->proveedorDeLaEmpresa($idEmpresaActiva, $idProveedor);
+
+        $productos = Producto::where('Id_Proveedor', $proveedor->Id_Proveedor)
+            ->where('Activo', 1)
+            ->where('Bloqueado', 1)
+            ->with(['unidadPresentacion', 'documentos' => function ($query) {
+                $query->where('Activo', 1)->with('archivo', 'tipoDocumento');
+            }])
+            ->get();
+
+        return [
+            'razon_social' => $proveedor->Razon_Social,
+            // true = ya se calificaron todos los que estaban en revisión
+            // y el admin confirmó con "Registrar calificación" -> queda
+            // de solo lectura hasta que se reabra.
+            'calificacion_productos_registrada' => $proveedor->Fecha_Registro_Calificacion_Productos !== null,
+            'productos' => $productos->map(fn (Producto $producto) => [
+                'id_producto' => $producto->Id_Producto,
+                'nombre_producto' => $producto->Nombre_Producto,
+                'codigo_barras' => $producto->Codigo_Barras,
+                'unidad_presentacion' => $producto->unidadPresentacion?->Nombre_Unidad,
+                'precio' => $producto->Precio,
+                'estado_calificacion' => $producto->Estado_Calificacion,
+                'comentario_calificacion' => $producto->Comentario_Calificacion,
+                'fecha_calificacion' => $producto->Fecha_Calificacion?->toIso8601String(),
+                'documentos' => $producto->documentos->map(fn ($doc) => [
+                    'id_documento_producto' => $doc->Id_Documento_Producto,
+                    'nombre_documento' => $doc->tipoDocumento->Nombre_Documento,
+                    'nombre_original' => $doc->archivo->Nombre_Original,
+                ])->values(),
+            ])->values(),
+        ];
+    }
+
+    /**
+     * Califica UN producto puntual. Mismo esquema Aprobado/Rechazado +
+     * observación obligatoria al rechazar que ya usamos en documentos.
+     */
+    public function calificarProducto(
+        Usuario $admin,
+        int $idEmpresaActiva,
+        int $idProducto,
+        bool $aprobado,
+        ?string $observacion
+    ): Producto {
+        $this->verificarEsAdmin($admin, $idEmpresaActiva);
+
+        $producto = Producto::whereHas(
+            'proveedor',
+            fn ($q) => $q->where('Id_Empresa', $idEmpresaActiva)
+        )
+            ->where('Activo', 1)
+            ->with('proveedor')
+            ->findOrFail($idProducto);
+
+        if ($producto->proveedor->Fecha_Registro_Calificacion_Productos !== null) {
+            throw ValidationException::withMessages([
+                'producto' => ['Ya registraste la calificación de productos. Solo se puede volver a calificar cuando se reabra.'],
+            ]);
+        }
+
+        $producto->forceFill([
+            'Estado_Calificacion' => $aprobado ? 'Aprobado' : 'Rechazado',
+            'Comentario_Calificacion' => $observacion,
+            'Calificado_Por' => $admin->Id_Usuario,
+            'Fecha_Calificacion' => now(),
+        ])->save();
+
+        if ($aprobado) {
+            $this->activarSiCorrespondeAprobado($producto->proveedor);
+        }
+
+        return $producto->fresh();
+    }
+
+    /**
+     * Confirma la calificación de productos: exige que TODOS los
+     * productos actualmente en revisión (Bloqueado=1, sin importar de
+     * qué lote sean -> pueden coexistir varios en paralelo) ya tengan
+     * Estado_Calificacion puesto (no puede quedar ninguno "Pendiente").
+     * Después de esto, la sección pasa a ser de solo consulta.
+     */
+    public function registrarCalificacionProductos(Usuario $admin, int $idEmpresaActiva, int $idProveedor): void
+    {
+        $this->verificarEsAdmin($admin, $idEmpresaActiva);
+
+        $proveedor = $this->proveedorDeLaEmpresa($idEmpresaActiva, $idProveedor);
+
+        if ($proveedor->Fecha_Registro_Calificacion_Productos !== null) {
+            throw ValidationException::withMessages([
+                'productos' => ['Ya habías registrado esta calificación.'],
+            ]);
+        }
+
+        $totalProductos = Producto::where('Id_Proveedor', $proveedor->Id_Proveedor)
+            ->where('Activo', 1)
+            ->where('Bloqueado', 1)
+            ->count();
+
+        if ($totalProductos === 0) {
+            throw ValidationException::withMessages([
+                'productos' => ['No hay productos en revisión para registrar.'],
+            ]);
+        }
+
+        $pendientes = Producto::where('Id_Proveedor', $proveedor->Id_Proveedor)
+            ->where('Activo', 1)
+            ->where('Bloqueado', 1)
+            ->where('Estado_Calificacion', 'Pendiente')
+            ->count();
+
+        if ($pendientes > 0) {
+            throw ValidationException::withMessages([
+                'productos' => ["Todavía te falta calificar {$pendientes} producto(s)."],
+            ]);
+        }
+
+        $proveedor->forceFill(['Fecha_Registro_Calificacion_Productos' => now()])->save();
+    }
+
+    /**
+     * Igual que verDocumentoInline, pero para un documento de PRODUCTO
+     * en vez de un documento de la ficha general.
+     */
+    public function verDocumentoProductoInline(Usuario $admin, int $idEmpresaActiva, int $idDocumentoProducto)
+    {
+        $this->verificarEsAdmin($admin, $idEmpresaActiva);
+
+        $documento = \App\Modules\Ficha_Productos\Models\DocumentoProducto::whereHas(
+            'producto.proveedor',
+            fn ($q) => $q->where('Id_Empresa', $idEmpresaActiva)
+        )
+            ->with('archivo')
+            ->findOrFail($idDocumentoProducto);
+
+        $rutaCompleta = Storage::disk(self::DISCO)->path($documento->archivo->Ruta_Almacenamiento);
+
+        if (! is_file($rutaCompleta)) {
+            throw new NotFoundHttpException('El archivo físico no se encuentra en el repositorio.');
+        }
+
+        return response()->file($rutaCompleta, [
+            'Content-Type' => $documento->archivo->Tipo_Mime,
+            'Content-Disposition' => 'inline; filename="'.$documento->archivo->Nombre_Original.'"',
+        ]);
+    }
+
+    /**
+     * "Aspirante" -> "Aprobado" automático, apenas se cumplen las 3
+     * condiciones: Ficha aprobada, Documentación aprobada (todo lo
+     * cargado, calificado y sin ningún rechazo activo) y AL MENOS UN
+     * producto aprobado (no hace falta que sean todos). Se llama desde
+     * cada punto que podría ser "el último que faltaba" -> calificar la
+     * ficha, calificar un documento, calificar un producto.
+     *
+     * Nunca DEGRADA el estado acá (si algo se rechaza después, eso no es
+     * responsabilidad de este método) -> solo promueve hacia adelante, y
+     * solo si todavía está en Aspirante (no pisa un estado manual que
+     * un admin haya puesto a mano, ej. Suspendido).
+     */
+    protected function activarSiCorrespondeAprobado(Proveedor $proveedor): void
+    {
+        $proveedor->refresh();
+
+        if ($proveedor->Id_Estado_Proveedor !== self::ESTADO_ASPIRANTE) {
+            return;
+        }
+
+        $fichaAprobada = $proveedor->fresh('calificacionesCampos')->estadoGeneralCalificacionFicha() === 'Aprobado';
+
+        if (! $fichaAprobada) {
+            return;
+        }
+
+        $totalDocumentos = DocumentoProveedor::where('Id_Proveedor', $proveedor->Id_Proveedor)
+            ->where('Activo', 1)
+            ->count();
+        $documentosNoAprobados = DocumentoProveedor::where('Id_Proveedor', $proveedor->Id_Proveedor)
+            ->where('Activo', 1)
+            ->where(function ($query) {
+                $query->whereNull('Estado_Calificacion')->orWhere('Estado_Calificacion', 'Rechazado');
+            })
+            ->count();
+        $documentacionAprobada = $totalDocumentos > 0 && $documentosNoAprobados === 0;
+
+        if (! $documentacionAprobada) {
+            return;
+        }
+
+        $hayProductoAprobado = Producto::where('Id_Proveedor', $proveedor->Id_Proveedor)
+            ->where('Activo', 1)
+            ->where('Estado_Calificacion', 'Aprobado')
+            ->exists();
+
+        if (! $hayProductoAprobado) {
+            return;
+        }
+
+        $proveedor->forceFill(['Id_Estado_Proveedor' => self::ESTADO_APROBADO])->save();
     }
 
     protected function proveedorDeLaEmpresa(int $idEmpresaActiva, int $idProveedor): Proveedor

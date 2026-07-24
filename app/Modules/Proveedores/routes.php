@@ -22,6 +22,10 @@ Route::prefix('proveedores')
         Route::post('/{proveedor}/documentos-calificacion/registrar', [CalificacionProveedorController::class, 'registrarCalificacionDocumentos']);
         Route::post('/documentos-calificacion/{documentoProveedor}', [CalificacionProveedorController::class, 'calificarDocumento']);
         Route::get('/documentos-calificacion/{documentoProveedor}/ver', [CalificacionProveedorController::class, 'verDocumento']);
+        Route::get('/{proveedor}/productos-calificacion', [CalificacionProveedorController::class, 'mostrarProductos']);
+        Route::post('/{proveedor}/productos-calificacion/registrar', [CalificacionProveedorController::class, 'registrarCalificacionProductos']);
+        Route::post('/productos-calificacion/{producto}', [CalificacionProveedorController::class, 'calificarProducto']);
+        Route::get('/productos-calificacion/documento/{documentoProducto}/ver', [CalificacionProveedorController::class, 'verDocumentoProducto']);
     });
 
 // Ficha de Proveedor progresiva: exclusiva del propio usuario externo.

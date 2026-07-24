@@ -55,9 +55,9 @@ class AsistenteContextoService
        try {
             $resumenProductos = $this->productoService->resumenRegistro($usuario, $idEmpresaActiva);
             $lineas[] = "Total de productos registrados: {$resumenProductos['total_productos']}";
-            $lineas[] = $resumenProductos['ya_bloqueado']
-                ? "Estado de productos: EN REVISIÓN (bloqueados, esperando calificación de un administrador; no puede editar ni agregar productos mientras dure esto)."
-                : "Estado de productos: no bloqueados, puede editar/agregar libremente.";
+            $lineas[] = $resumenProductos['productos_en_revision'] > 0
+                ? "Productos en revisión: {$resumenProductos['productos_en_revision']} (esos puntuales están bloqueados hasta que un administrador los califique; el resto del catálogo se puede seguir editando y se pueden registrar más lotes en paralelo)."
+                : "Estado de productos: ninguno en revisión, puede editar/agregar libremente.";
 
             $incompletos = $resumenProductos['productos_incompletos'] ?? [];
             if (! empty($incompletos)) {
