@@ -23,7 +23,8 @@ class ProductoController extends Controller
             $idEmpresaActiva,
             $request->query('search'),
             (int) $request->query('page', 1),
-            (int) $request->query('per_page', 20)
+            (int) $request->query('per_page', 20),
+            $request->query('estado')
         );
 
         // Sin response()->json() a propósito: cuando el resource

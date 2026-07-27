@@ -49,7 +49,7 @@ return [
 
         'repositorio_proveedores' => [
             'driver' => 'local',
-            'root' => env('REPOSITORIO_PROVEEDORES_PATH', storage_path('app/repositorio-proveedores')),
+            'root' => env('REPOSITORIO_BASE_PATH', storage_path('app/repositorio-proveedores')),
             'visibility' => 'private',
             'throw' => false,
             'report' => false,

@@ -9,6 +9,8 @@ use App\Modules\Ficha_Productos\Models\Producto;
 use App\Modules\Ficha_Productos\Models\TipoDocumentoProducto;
 use App\Modules\Ficha_Productos\Models\UnidadPresentacion;
 use App\Modules\Proveedores\Models\Proveedor;
+use App\Shared\MueveArchivoAHistorico;
+use App\Shared\SaneadorNombreArchivo;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -19,6 +21,8 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 class ProductoService
 {
+    use MueveArchivoAHistorico;
+
     protected const DISCO = 'repositorio_proveedores';
 
     /**
@@ -163,30 +167,28 @@ class ProductoService
         $producto = $documento->producto;
 
         $puedeEditarAunqueBloqueado = $producto->proveedor->Correcciones_Pendientes_Productos
-            && $producto->Estado_Calificacion !== 'Aprobado';
+            && $producto->Estado_Calificacion === 'Rechazado';
 
         if ($producto->Bloqueado && ! $puedeEditarAunqueBloqueado) {
             throw new AccessDeniedHttpException('No puede eliminar documentos mientras el producto está en revisión.');
         }
 
-        $estabaRechazado = $producto->Estado_Calificacion === 'Rechazado';
+        DB::transaction(function () use ($documento, $producto) {
+            $rutaHistorico = $this->archivarOEliminarSegunEstadoProducto(
+                self::DISCO,
+                $documento->archivo?->Ruta_Almacenamiento,
+                $producto->Estado_Calificacion,
+                $documento->Fecha_Creacion,
+                $producto->Fecha_Calificacion
+            );
 
-        DB::transaction(function () use ($documento, $producto, $estabaRechazado) {
-            $archivo = $documento->archivo;
             $documento->delete();
-            $this->eliminarArchivoFisico($archivo);
 
-            if ($estabaRechazado) {
-                $producto->forceFill([
-                    'Estado_Calificacion' => 'Pendiente',
-                    'Comentario_Calificacion' => null,
-                    'Calificado_Por' => null,
-                    'Fecha_Calificacion' => null,
-                ])->save();
-
-                if ($producto->proveedor->Fecha_Registro_Calificacion_Productos !== null) {
-                    $producto->proveedor->forceFill(['Fecha_Registro_Calificacion_Productos' => null])->save();
-                }
+            // Si NO se archivó a histórico (o sea, se borró el físico
+            // directo), el registro Archivo tampoco tiene sentido
+            // dejarlo -> nada más lo referencia.
+            if (! $rutaHistorico && $documento->archivo) {
+                $documento->archivo->delete();
             }
         });
     }
@@ -216,25 +218,32 @@ class ProductoService
         $producto = $this->miProducto($usuario, $idEmpresaActiva, $idProducto);
 
         // Bloqueado normalmente impide tocar el producto -> EXCEPTO
-        // mientras haya correcciones pendientes de confirmar (el admin
-        // rechazó este producto puntual y el proveedor todavía no dijo
-        // "ya terminé de corregir") Y este producto no esté ya
-        // Aprobado. Mismo criterio que ya usamos para Documentos.
+        // mientras haya correcciones pendientes de confirmar Y este
+        // producto puntual esté específicamente Rechazado (no alcanza
+        // con "no Aprobado": un producto recién enviado y nunca
+        // revisado también queda en Estado_Calificacion="Pendiente", y
+        // ESE sí debe seguir bloqueado -> por eso el chequeo exige
+        // Rechazado exacto, no "distinto de Aprobado").
         $puedeEditarAunqueBloqueado = $producto->proveedor->Correcciones_Pendientes_Productos
-            && $producto->Estado_Calificacion !== 'Aprobado';
+            && $producto->Estado_Calificacion === 'Rechazado';
 
         if ($producto->Bloqueado && ! $puedeEditarAunqueBloqueado) {
             throw new AccessDeniedHttpException('Este producto está bloqueado mientras se encuentra en revisión y no puede modificarse.');
         }
 
-        $estabaRechazado = $producto->Estado_Calificacion === 'Rechazado';
-
         $tipo = TipoDocumentoProducto::where('Activo', 1)->findOrFail($idTipoDocumentoProducto);
 
-        return DB::transaction(function () use ($usuario, $producto, $tipo, $archivo, $estabaRechazado) {
+        return DB::transaction(function () use ($usuario, $producto, $tipo, $archivo) {
             $registroArchivo = Archivo::create([
                 'Id_Proveedor' => $producto->Id_Proveedor,
-                'Nombre_Original' => $archivo->getClientOriginalName(),
+                // Nombre_Original arranca vacío -> se completa más abajo
+                // con el mismo nombre que se usa físicamente en disco
+                // (una vez que se conoce Id_Archivo, necesario para
+                // armarlo). Antes acá se generaba un nombre DISTINTO al
+                // que terminaba en el repositorio -> el front mostraba
+                // una cosa y el archivo real en disco se llamaba otra,
+                // lo cual confunde si alguien tiene que buscarlo a mano.
+                'Nombre_Original' => '',
                 'Ruta_Almacenamiento' => '',
                 'Hash_Archivo' => hash_file('sha256', $archivo->getRealPath()),
                 'Tipo_Mime' => $archivo->getMimeType(),
@@ -246,12 +255,59 @@ class ProductoService
             ]);
 
             $extension = $archivo->getClientOriginalExtension();
-            $carpeta = "{$producto->proveedor->Id_Empresa}/{$producto->Id_Proveedor}/productos/{$producto->Id_Producto}/{$tipo->Carpeta_Slug}";
-            $nombreFisico = "{$registroArchivo->Id_Archivo}.{$extension}";
+            // /var/repositorio/proveedores/{RUC}/{Id_Empresa}_{Empresa}/doc_productos/{IdProducto}_{Producto}/{tipo}/{CODIGO}_{IdProducto}_{RazonSocial}_{IdArchivo}.pdf
+            // Subcarpeta por producto -> no pisar archivos de otro
+            // producto con un documento del mismo tipo. Subcarpeta por
+            // empresa -> el mismo RUC puede estar registrado como
+            // proveedor en más de una empresa a la vez.
+            $ruc = SaneadorNombreArchivo::sanear($producto->proveedor->Ruc, "sin-ruc-{$producto->Id_Proveedor}");
+            $nombreEmpresa = SaneadorNombreArchivo::sanear(
+                $producto->proveedor->empresa?->Nombre_Comercial ?? $producto->proveedor->empresa?->Razon_Social
+            );
+            $nombreProducto = SaneadorNombreArchivo::sanear($producto->Nombre_Producto, "producto-{$producto->Id_Producto}");
+            $codigo = SaneadorNombreArchivo::sanear($tipo->Codigo_Archivo ?? $tipo->Carpeta_Slug, 'DOC');
+            $razonSocial = SaneadorNombreArchivo::sanear($producto->proveedor->Razon_Social);
+
+            $carpeta = "proveedores/{$ruc}/{$producto->proveedor->Id_Empresa}_{$nombreEmpresa}/doc_productos/"
+                ."{$producto->Id_Producto}_{$nombreProducto}/{$tipo->Carpeta_Slug}";
+            $nombreFisico = "{$codigo}_{$producto->Id_Producto}_{$razonSocial}_{$registroArchivo->Id_Archivo}.{$extension}";
 
             Storage::disk(self::DISCO)->putFileAs($carpeta, $archivo, $nombreFisico);
 
-            $registroArchivo->update(['Ruta_Almacenamiento' => "{$carpeta}/{$nombreFisico}"]);
+            $registroArchivo->update([
+                'Nombre_Original' => $nombreFisico,
+                'Ruta_Almacenamiento' => "{$carpeta}/{$nombreFisico}",
+            ]);
+
+            // El(los) documento(s) anteriores de este mismo tipo se
+            // desactivan. El archivo físico viejo se archiva en
+            // "historico/" SOLO si de verdad fue el que un admin vio y
+            // rechazó (comparando su fecha de creación contra la fecha
+            // de calificación del producto) -> si es un archivo subido
+            // durante esta misma corrección, que nadie revisó todavía,
+            // se borra directo. Ver MueveArchivoAHistorico para el
+            // detalle de por qué hace falta esta comparación acá.
+            $fechaCalificacionProducto = $producto->Fecha_Calificacion;
+
+            $documentosViejos = DocumentoProducto::where('Id_Producto', $producto->Id_Producto)
+                ->where('Id_Tipo_Documento_Producto', $tipo->Id_Tipo_Documento_Producto)
+                ->where('Activo', 1)
+                ->with('archivo')
+                ->get();
+
+            foreach ($documentosViejos as $documentoViejo) {
+                $rutaHistorico = $this->archivarOEliminarSegunEstadoProducto(
+                    self::DISCO,
+                    $documentoViejo->archivo?->Ruta_Almacenamiento,
+                    $producto->Estado_Calificacion,
+                    $documentoViejo->Fecha_Creacion,
+                    $fechaCalificacionProducto
+                );
+
+                if ($rutaHistorico) {
+                    $documentoViejo->archivo->update(['Ruta_Almacenamiento' => $rutaHistorico]);
+                }
+            }
 
             DocumentoProducto::where('Id_Producto', $producto->Id_Producto)
                 ->where('Id_Tipo_Documento_Producto', $tipo->Id_Tipo_Documento_Producto)
@@ -267,23 +323,14 @@ class ProductoService
                 'Fecha_Creacion' => now(),
             ]);
 
-            // El producto estaba Rechazado y el proveedor acaba de tocar
-            // uno de sus documentos -> vuelve a "Pendiente" (el admin
-            // tiene que revisarlo de nuevo), y si ya había "Registrado"
-            // la calificación completa, esa confirmación queda obsoleta
-            // -> se reabre.
-            if ($estabaRechazado) {
-                $producto->forceFill([
-                    'Estado_Calificacion' => 'Pendiente',
-                    'Comentario_Calificacion' => null,
-                    'Calificado_Por' => null,
-                    'Fecha_Calificacion' => null,
-                ])->save();
-
-                if ($producto->proveedor->Fecha_Registro_Calificacion_Productos !== null) {
-                    $producto->proveedor->forceFill(['Fecha_Registro_Calificacion_Productos' => null])->save();
-                }
-            }
+            // OJO: acá NO se resetea el producto a "Pendiente" todavía
+            // -> se queda "Rechazado" (con su motivo a la vista) hasta
+            // que el proveedor confirme con "Registrar productos
+            // actualizados". Así puede corregir varios documentos del
+            // mismo producto sin que desaparezca el motivo del rechazo
+            // ni se re-bloquee después del primer archivo que toque
+            // (ver confirmarCorrecciones, que sí hace ese reseteo en
+            // bloque al final).
 
             return $nuevoDocumento->load('archivo', 'tipoDocumento');
         });
