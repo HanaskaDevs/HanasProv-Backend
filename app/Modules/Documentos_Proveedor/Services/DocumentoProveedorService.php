@@ -98,7 +98,16 @@ class DocumentoProveedorService
     ): DocumentoProveedor {
         $proveedor = $this->miProveedor($usuario, $idEmpresaActiva);
 
-        if ($proveedor->Fecha_Registro_Documentacion !== null) {
+        // Misma excepción que reemplazarDocumento/borrarDocumento: si
+        // hay correcciones pendientes de confirmar, se puede seguir
+        // subiendo aunque la documentación ya esté registrada -> hace
+        // falta acá específicamente para el caso de un tipo
+        // "Permite_Multiples" que se quedó en 0 documentos (ej. se
+        // borró el único que había, que estaba rechazado): no hay un
+        // documento existente que reemplazar, hay que subir uno nuevo
+        // desde cero, y ese flujo pasa por ESTE método, no por
+        // reemplazarDocumento.
+        if ($proveedor->Fecha_Registro_Documentacion !== null && ! $proveedor->Correcciones_Pendientes) {
             throw ValidationException::withMessages([
                 'archivo' => ['Tu documentación ya fue registrada y no se puede modificar.'],
             ]);
