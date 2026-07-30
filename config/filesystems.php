@@ -55,6 +55,29 @@ return [
             'report' => false,
         ],
 
+        // Multimedia de Configuraciones (imagen de login, banners/videos del home).
+        // Público por diseño: se muestra en Login/Landing SIN autenticación.
+        // Se sirve como archivo estático real vía symlink (ver 'links' abajo),
+        // no por un endpoint de Laravel, para que Apache/Nginx lo entregue directo.
+        'multimedia' => [
+            'driver' => 'local',
+            'root' => env('REPOSITORIO_BASE_PATH', storage_path('app/repositorio')).'/multimedia',
+            'url' => rtrim(env('APP_URL', 'http://localhost'), '/').'/media',
+            'visibility' => 'public',
+            'throw' => false,
+            'report' => false,
+        ],
+
+        // Imágenes adjuntas de Reclamos. Privado: solo se ven vía endpoint
+        // autenticado (ReclamoController::verImagen / ReclamoProveedorController::verImagen).
+        'reclamos' => [
+            'driver' => 'local',
+            'root' => env('REPOSITORIO_BASE_PATH', storage_path('app/repositorio')).'/reclamos',
+            'visibility' => 'private',
+            'throw' => false,
+            'report' => false,
+        ],
+
         's3' => [
             'driver' => 's3',
             'key' => env('AWS_ACCESS_KEY_ID'),
@@ -83,6 +106,7 @@ return [
 
     'links' => [
         public_path('storage') => storage_path('app/public'),
+        public_path('media') => env('REPOSITORIO_BASE_PATH', storage_path('app/repositorio')).'/multimedia',
     ],
 
 ];
