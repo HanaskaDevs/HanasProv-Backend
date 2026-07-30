@@ -20,7 +20,7 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 class ReclamoService
 {
-    protected const DISCO = 'repositorio_proveedores';
+    protected const DISCO = 'reclamos';
     protected const MAX_IMAGENES = 5;
 
     /**

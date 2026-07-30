@@ -16,6 +16,6 @@ class BotRegla extends BaseModel
 
     protected $casts = [
         'Activo' => 'boolean',
-        'Fecha_Modificacion' => 'datetime',
+        
     ];
 }

@@ -14,6 +14,6 @@ class GuiaPaso extends BaseModel
 
     protected $casts = [
         'Activo' => 'boolean',
-        'Fecha_Modificacion' => 'datetime',
+        
     ];
 }

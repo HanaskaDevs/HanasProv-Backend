@@ -43,7 +43,7 @@ class ReclamoNotification extends Notification
             ->line($this->mensaje->Mensaje);
 
         foreach ($this->mensaje->imagenes as $imagen) {
-            $ruta = \Illuminate\Support\Facades\Storage::disk('repositorio_proveedores')->path($imagen->archivo->Ruta_Almacenamiento);
+            $ruta = \Illuminate\Support\Facades\Storage::disk('reclamos')->path($imagen->archivo->Ruta_Almacenamiento);
 
             if (is_file($ruta)) {
                 $mail->attach(Attachment::fromPath($ruta)
