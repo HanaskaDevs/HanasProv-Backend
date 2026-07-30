@@ -7,10 +7,11 @@ use App\Modules\Documentos_Proveedor\Models\Archivo;
 use App\Modules\Documentos_Proveedor\Models\DocumentoProveedor;
 use App\Modules\Documentos_Proveedor\Models\TipoDocumento;
 use App\Modules\Proveedores\Models\Proveedor;
+use App\Shared\MueveArchivoAHistorico;
+use App\Shared\SaneadorNombreArchivo;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
@@ -22,6 +23,8 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
  */
 class DocumentoProveedorService
 {
+    use MueveArchivoAHistorico;
+
     protected const DISCO = 'repositorio_proveedores';
 
    public function obtenerChecklist(Usuario $usuario, int $idEmpresaActiva): array
@@ -95,7 +98,16 @@ class DocumentoProveedorService
     ): DocumentoProveedor {
         $proveedor = $this->miProveedor($usuario, $idEmpresaActiva);
 
-        if ($proveedor->Fecha_Registro_Documentacion !== null) {
+        // Misma excepción que reemplazarDocumento/borrarDocumento: si
+        // hay correcciones pendientes de confirmar, se puede seguir
+        // subiendo aunque la documentación ya esté registrada -> hace
+        // falta acá específicamente para el caso de un tipo
+        // "Permite_Multiples" que se quedó en 0 documentos (ej. se
+        // borró el único que había, que estaba rechazado): no hay un
+        // documento existente que reemplazar, hay que subir uno nuevo
+        // desde cero, y ese flujo pasa por ESTE método, no por
+        // reemplazarDocumento.
+        if ($proveedor->Fecha_Registro_Documentacion !== null && ! $proveedor->Correcciones_Pendientes) {
             throw ValidationException::withMessages([
                 'archivo' => ['Tu documentación ya fue registrada y no se puede modificar.'],
             ]);
@@ -121,10 +133,8 @@ class DocumentoProveedorService
             ]);
         }
 
-        $nombreFinal = $this->nombreArchivoFinal($tipo, $proveedor, $archivo, $nombreDocumento);
-
-        return DB::transaction(function () use ($usuario, $proveedor, $tipo, $archivo, $fechaCaducidad, $nombreFinal) {
-            $registroArchivo = $this->guardarArchivoFisico($usuario, $proveedor, $tipo, $archivo, $nombreFinal);
+        return DB::transaction(function () use ($usuario, $proveedor, $tipo, $archivo, $fechaCaducidad, $nombreDocumento) {
+            $registroArchivo = $this->guardarArchivoFisico($usuario, $proveedor, $tipo, $archivo, $nombreDocumento);
 
             if (! $tipo->Permite_Multiples) {
                 DocumentoProveedor::where('Id_Proveedor', $proveedor->Id_Proveedor)
@@ -165,7 +175,7 @@ class DocumentoProveedorService
 
         $documentoActual = DocumentoProveedor::where('Id_Proveedor', $proveedor->Id_Proveedor)
             ->where('Activo', 1)
-            ->with('tipoDocumento')
+            ->with('tipoDocumento', 'archivo')
             ->findOrFail($idDocumentoProveedor);
 
         // La documentación bloqueada (ya registrada) normalmente no se
@@ -197,14 +207,33 @@ class DocumentoProveedorService
             ]);
         }
 
-        $nombreFinal = $this->nombreArchivoFinal($tipo, $proveedor, $archivo, $nombreDocumento);
         $estabaRechazado = $documentoActual->Estado_Calificacion === 'Rechazado';
 
-        return DB::transaction(function () use ($usuario, $proveedor, $tipo, $documentoActual, $archivo, $fechaCaducidad, $nombreFinal, $estabaRechazado) {
-            $registroArchivo = $this->guardarArchivoFisico($usuario, $proveedor, $tipo, $archivo, $nombreFinal);
+        return DB::transaction(function () use ($usuario, $proveedor, $tipo, $documentoActual, $archivo, $fechaCaducidad, $nombreDocumento, $estabaRechazado) {
+            $registroArchivo = $this->guardarArchivoFisico($usuario, $proveedor, $tipo, $archivo, $nombreDocumento);
 
-            // Solo se desactiva ESTE documento puntual -> los demás archivos
+            // Se desactiva ESTE documento puntual -> los demás archivos
             // del mismo tipo (si Permite_Multiples) quedan intactos.
+            // El archivo físico viejo:
+            // - si estaba Rechazado -> se archiva en "historico/" (fue
+            //   una corrección real de algo que un admin juzgó).
+            // - si nunca se llegó a revisar (Pendiente/null, típico de
+            //   corregir un error de tipeo antes de registrar nada) ->
+            //   se borra directo, no aporta nada guardarlo. Cada fila de
+            //   Documento_Proveedor tiene su propio Estado_Calificacion
+            //   (arranca en null), así que este chequeo simple ya
+            //   alcanza acá -> a diferencia de Productos, no hace falta
+            //   comparar fechas.
+            $rutaHistorico = $this->archivarOEliminarSegunEstado(
+                self::DISCO,
+                $documentoActual->archivo?->Ruta_Almacenamiento,
+                $documentoActual->Estado_Calificacion
+            );
+
+            if ($rutaHistorico) {
+                $documentoActual->archivo->update(['Ruta_Almacenamiento' => $rutaHistorico]);
+            }
+
             $documentoActual->update(['Activo' => 0]);
 
             $nuevoDocumento = DocumentoProveedor::create([
@@ -241,6 +270,7 @@ class DocumentoProveedorService
 
         $documento = DocumentoProveedor::where('Id_Proveedor', $proveedor->Id_Proveedor)
             ->where('Activo', 1)
+            ->with('archivo')
             ->findOrFail($idDocumentoProveedor);
 
         // Misma regla que reemplazarDocumento: se puede borrar mientras
@@ -256,6 +286,16 @@ class DocumentoProveedorService
         $estabaRechazado = $documento->Estado_Calificacion === 'Rechazado';
 
         DB::transaction(function () use ($documento, $proveedor, $estabaRechazado) {
+            $rutaHistorico = $this->archivarOEliminarSegunEstado(
+                self::DISCO,
+                $documento->archivo?->Ruta_Almacenamiento,
+                $documento->Estado_Calificacion
+            );
+
+            if ($rutaHistorico) {
+                $documento->archivo->update(['Ruta_Almacenamiento' => $rutaHistorico]);
+            }
+
             $documento->update(['Activo' => 0]);
 
             if ($estabaRechazado && $proveedor->Fecha_Registro_Calificacion_Documentos !== null) {
@@ -265,60 +305,30 @@ class DocumentoProveedorService
     }
 
     /**
-     * Decide con qué nombre se guarda/muestra el documento:
-     * - Permite_Multiples: el nombre que escribió el proveedor (puede haber
-     *   varios del mismo tipo, tienen que distinguirse entre sí).
-     * - Un solo archivo posible: siempre el Nombre_Documento del catálogo
-     *   (ej. "RUC"), sin importar cómo se llamaba el PDF original.
-     * A eso se le agrega SIEMPRE la Razón Social del proveedor y la fecha
-     * de carga, para que el archivo sea identificable por sí solo si
-     * alguien lo descarga suelto (ej. "RUC_CANODROS_CL_20260714.pdf").
-     */
-    protected function nombreArchivoFinal(TipoDocumento $tipo, Proveedor $proveedor, UploadedFile $archivo, ?string $nombreDocumento): string
-    {
-        $extension = $archivo->getClientOriginalExtension() ?: 'pdf';
-        $base = $tipo->Permite_Multiples ? trim($nombreDocumento) : $tipo->Nombre_Documento;
-
-        $partes = [
-            $this->sanitizarNombreArchivo($base),
-            $this->sanitizarNombreArchivo($proveedor->Razon_Social),
-            now()->format('Ymd'),
-        ];
-
-        return implode('_', array_filter($partes)).".{$extension}";
-    }
-
-    /**
-     * Deja el texto seguro para usarlo como nombre de archivo: sin tildes/ñ
-     * (transliterado a ASCII), sin caracteres que rompan rutas o headers
-     * HTTP (/, \, comillas, etc.), y espacios colapsados en "_".
-     */
-    protected function sanitizarNombreArchivo(?string $texto): string
-    {
-        if (! $texto) {
-            return '';
-        }
-
-        $texto = Str::ascii($texto);
-        $texto = preg_replace('/[^A-Za-z0-9 _-]/', '', $texto) ?? $texto;
-        $texto = trim(preg_replace('/\s+/', ' ', $texto) ?? $texto);
-
-        return str_replace(' ', '_', $texto);
-    }
-
-    /**
      * Sube el archivo físico al disco y crea su registro Archivo. Usado
      * tanto por subirDocumento (documento nuevo) como por
      * reemplazarDocumento (reemplazo puntual de uno existente).
-     * $nombreFinal es el nombre "de negocio" con el que se muestra/guarda
-     * el documento (ver nombreArchivoFinal) -> el nombre real que traía el
-     * PDF del usuario ya no se usa para nada, ni para mostrar ni guardar.
+     *
+     * Nombre_Original (lo que ve el proveedor/admin en el front) y el
+     * nombre físico en disco son EXACTAMENTE el mismo string -> antes se
+     * generaban por separado y terminaban distintos, lo que confundía
+     * si alguien tenía que buscar el archivo a mano en el repositorio
+     * después de verlo en la app.
+     *
+     * $nombreDocumento: el nombre que el proveedor escribió a mano, solo
+     * para tipos "Permite_Multiples" (ej. "HACCP 2026") -> sin esto se
+     * perdería la única forma de distinguir varios archivos del mismo
+     * tipo entre sí. Para tipos de un solo archivo posible, se ignora
+     * (el código del tipo ya identifica de qué se trata).
      */
-    protected function guardarArchivoFisico(Usuario $usuario, Proveedor $proveedor, TipoDocumento $tipo, UploadedFile $archivo, string $nombreFinal): Archivo
+    protected function guardarArchivoFisico(Usuario $usuario, Proveedor $proveedor, TipoDocumento $tipo, UploadedFile $archivo, ?string $nombreDocumento): Archivo
     {
         $registroArchivo = Archivo::create([
             'Id_Proveedor' => $proveedor->Id_Proveedor,
-            'Nombre_Original' => $nombreFinal,
+            // Arranca vacío -> se completa más abajo, junto con
+            // Ruta_Almacenamiento, una vez que se conoce Id_Archivo
+            // (hace falta para que el nombre sea único).
+            'Nombre_Original' => '',
             'Ruta_Almacenamiento' => '',
             'Hash_Archivo' => hash_file('sha256', $archivo->getRealPath()),
             'Tipo_Mime' => $archivo->getMimeType(),
@@ -329,17 +339,40 @@ class DocumentoProveedorService
             'Activo' => 1,
         ]);
 
-        $extension = $archivo->getClientOriginalExtension();
-        $carpeta = "{$proveedor->Id_Empresa}/{$proveedor->Id_Proveedor}/{$tipo->Carpeta_Slug}";
-        $nombreFisico = "{$registroArchivo->Id_Archivo}.{$extension}";
+        $extension = $archivo->getClientOriginalExtension() ?: 'pdf';
+        // /var/repositorio/proveedores/{RUC}/{Id_Empresa}_{Empresa}/documentacion/{tipo}/{CODIGO}[_{NombrePersonalizado}]_{RazonSocial}_{IdArchivo}.pdf
+        $carpeta = $this->carpetaProveedor($proveedor).'/documentacion/'.$tipo->Carpeta_Slug;
+
+        $codigo = SaneadorNombreArchivo::sanear($tipo->Codigo_Archivo ?? $tipo->Carpeta_Slug, 'DOC');
+        $nombrePersonalizado = $tipo->Permite_Multiples ? SaneadorNombreArchivo::sanear($nombreDocumento) : null;
+        $razonSocial = SaneadorNombreArchivo::sanear($proveedor->Razon_Social);
+
+        $partes = array_filter([$codigo, $nombrePersonalizado, $razonSocial, (string) $registroArchivo->Id_Archivo]);
+        $nombreFisico = implode('_', $partes).".{$extension}";
 
         Storage::disk(self::DISCO)->putFileAs($carpeta, $archivo, $nombreFisico);
 
         $registroArchivo->update([
+            'Nombre_Original' => $nombreFisico,
             'Ruta_Almacenamiento' => "{$carpeta}/{$nombreFisico}",
         ]);
 
         return $registroArchivo;
+    }
+
+    /**
+     * proveedores/{RUC}/{Id_Empresa}_{NombreEmpresa} -> el mismo RUC
+     * puede estar registrado como proveedor en más de una empresa
+     * (son registros de Proveedor distintos) -> sin la subcarpeta por
+     * empresa, los documentos de una empresa se mezclarían/pisarían con
+     * los de la otra.
+     */
+    protected function carpetaProveedor(Proveedor $proveedor): string
+    {
+        $ruc = SaneadorNombreArchivo::sanear($proveedor->Ruc, "sin-ruc-{$proveedor->Id_Proveedor}");
+        $empresa = SaneadorNombreArchivo::sanear($proveedor->empresa?->Nombre_Comercial ?? $proveedor->empresa?->Razon_Social);
+
+        return "proveedores/{$ruc}/{$proveedor->Id_Empresa}_{$empresa}";
     }
 
     /**

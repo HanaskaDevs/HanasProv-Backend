@@ -10,7 +10,7 @@ class TipoDocumentoProducto extends Model
     protected $primaryKey = 'Id_Tipo_Documento_Producto';
     public $timestamps = false;
 
-    protected $fillable = ['Nombre_Documento', 'Carpeta_Slug', 'Obligatorio', 'Activo'];
+    protected $fillable = ['Nombre_Documento', 'Carpeta_Slug', 'Codigo_Archivo', 'Obligatorio', 'Activo'];
 
     protected $casts = [
         'Obligatorio' => 'boolean',
