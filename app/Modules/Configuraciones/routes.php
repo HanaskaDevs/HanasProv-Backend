@@ -5,6 +5,7 @@ use App\Modules\Configuraciones\Http\Controllers\BotReglaController;
 use App\Modules\Configuraciones\Http\Controllers\GuiaPasoController;
 use App\Modules\Configuraciones\Http\Controllers\HomeSlideController;
 use App\Modules\Configuraciones\Http\Controllers\LoginImagenController;
+use App\Modules\Configuraciones\Http\Controllers\PoliticaController;
 use App\Modules\Configuraciones\Http\Controllers\PublicConfigController;
 use Illuminate\Support\Facades\Route;
 
@@ -15,13 +16,18 @@ Route::prefix('public-config')->group(function () {
     Route::get('/guia-pasos', [PublicConfigController::class, 'guiaPasos']);
 });
 
+// Sección "Políticas" dentro de la plataforma: cualquier usuario logueado
+// (proveedor o interno, cualquier rol), solo lectura de las políticas activas.
+Route::middleware(['auth:sanctum', EmpresaActiva::class])
+    ->get('/politicas', [PoliticaController::class, 'verActivas']);
+
 // Administración: solo Sistemas (la verificación real ocurre en el service).
 Route::prefix('configuraciones')
     ->middleware(['auth:sanctum', EmpresaActiva::class])
     ->group(function () {
         Route::get('/home-slides', [HomeSlideController::class, 'index']);
         Route::post('/home-slides', [HomeSlideController::class, 'store']);
-        Route::put('/home-slides/{slide}', [HomeSlideController::class, 'update']); // POST + _method=PUT por el archivo
+        Route::put('/home-slides/{slide}', [HomeSlideController::class, 'update']);
         Route::delete('/home-slides/{slide}', [HomeSlideController::class, 'destroy']);
 
         Route::get('/login-imagen', [LoginImagenController::class, 'show']);
@@ -36,4 +42,10 @@ Route::prefix('configuraciones')
         Route::post('/guia-pasos', [GuiaPasoController::class, 'store']);
         Route::put('/guia-pasos/{paso}', [GuiaPasoController::class, 'update']);
         Route::delete('/guia-pasos/{paso}', [GuiaPasoController::class, 'destroy']);
+
+        Route::get('/politicas', [PoliticaController::class, 'index']);
+        Route::post('/politicas', [PoliticaController::class, 'store']);
+        Route::put('/politicas/{politica}', [PoliticaController::class, 'update']);
+        Route::delete('/politicas/{politica}', [PoliticaController::class, 'destroy']);
+        Route::post('/politicas/extraer-pdf', [PoliticaController::class, 'extraerTextoPdf']);
     });

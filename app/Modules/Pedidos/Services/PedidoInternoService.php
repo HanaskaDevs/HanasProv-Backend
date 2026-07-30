@@ -93,6 +93,12 @@ class PedidoInternoService
             $query->whereRaw('CONVERT(date, c.Fecha_Registro_BC) <= CONVERT(date, ?, 120)', [$filtros['fecha_hasta']]);
         }
 
+        // Usado por el bot (Hana) para "proveedores pendientes de entrega hoy":
+        // filtra por la fecha de recepción esperada, no por la de registro.
+        if (! empty($filtros['fecha_recepcion_esperada'])) {
+            $query->whereRaw('CONVERT(date, c.Fecha_Recepcion_Esperada) = CONVERT(date, ?, 120)', [$filtros['fecha_recepcion_esperada']]);
+        }
+
         if (! empty($filtros['proveedor'])) {
             $texto = $filtros['proveedor'];
             $query->where(function ($q) use ($texto) {
@@ -259,6 +265,38 @@ class PedidoInternoService
         }
 
         throw new AccessDeniedHttpException('No tiene permisos para ver los pedidos por bodega.');
+    }
+
+    /**
+     * Usado por el asistente (Hana) para responder "¿qué proveedores no han
+     * entregado hoy?". Pendiente = Fecha_Recepcion_Esperada es hoy Y 0%
+     * recibido (nada entregado todavía). Respeta las mismas bodegas
+     * permitidas que el usuario ya ve en Pedidos Internos.
+     */
+    public function proveedoresPendientesHoy(Usuario $usuario, int $idEmpresaActiva): array
+    {
+        $hoy = now()->toDateString();
+
+        $porBodega = $this->listarPorBodega($usuario, $idEmpresaActiva, [
+            'fecha_recepcion_esperada' => $hoy,
+        ]);
+
+        $pendientes = [];
+
+        foreach ($porBodega as $bodega => $datos) {
+            foreach ($datos['pedidos'] as $pedido) {
+                if ((float) $pedido['porcentaje_entrega'] === 0.0) {
+                    $pendientes[] = [
+                        'proveedor' => $pedido['proveedor'],
+                        'ruc_proveedor' => $pedido['ruc_proveedor'],
+                        'nro_pedido' => $pedido['nro_pedido'],
+                        'bodega' => $bodega,
+                    ];
+                }
+            }
+        }
+
+        return $pendientes;
     }
 
 }

@@ -7,23 +7,40 @@ use App\Modules\Configuraciones\Models\BotRegla;
 use App\Modules\Configuraciones\Models\Configuracion;
 use App\Modules\Configuraciones\Models\GuiaPaso;
 use App\Modules\Configuraciones\Models\HomeSlide;
+use App\Modules\Configuraciones\Models\Politica;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 
 class ConfiguracionService
 {
-    // Disco público: a diferencia de 'repositorio_proveedores' (privado,
+    // Disco público: a diferencia de 'repositorio_proveedores'/'reclamos' (privados,
     // solo detrás de login), este contenido se sirve en Landing/Login,
     // ANTES de cualquier autenticación -> debe ser accesible por URL directa.
-    protected const DISCO_PUBLICO = 'public';
+    // Vive físicamente en /var/repositorio/multimedia (ver REPOSITORIO_BASE_PATH),
+    // expuesto vía symlink public/media (config/filesystems.php -> 'links').
+    protected const DISCO_PUBLICO = 'multimedia';
 
     protected function verificarSistemas(Usuario $usuario): void
     {
         if (! $usuario->esSistemasGlobal()) {
             throw new AccessDeniedHttpException('Solo usuarios con rol Sistemas pueden gestionar configuraciones.');
         }
+    }
+
+    /**
+     * SQL Server (driver ODBC) a veces falla al convertir un datetime
+     * enviado como parámetro nvarchar (SQLSTATE 22007, "fuera de intervalo"),
+     * dependiendo de la configuración regional de la conexión. La forma
+     * segura y ya probada en este proyecto (ver pedidos:cerrar-vencidos) es
+     * forzar la conversión con CONVERT(datetime, ..., 120) como SQL crudo,
+     * en vez de dejar que el driver adivine el formato.
+     */
+    protected function ahoraSql(): \Illuminate\Database\Query\Expression
+    {
+        return DB::raw("CONVERT(datetime, '" . now()->format('Y-m-d H:i:s') . "', 120)");
     }
 
     // ---------- Home Slides ----------
@@ -53,7 +70,7 @@ class ConfiguracionService
             'Tipo_Media' => $tipoMedia,
             'Activo' => true,
             'Modificado_Por' => $usuario->Id_Usuario,
-            'Fecha_Modificacion' => now(),
+            'Fecha_Modificacion' => $this->ahoraSql(),
         ]);
     }
 
@@ -69,7 +86,7 @@ class ConfiguracionService
             'Descripcion' => $data['descripcion'] ?? $slide->Descripcion,
             'Orden' => $data['orden'] ?? $slide->Orden,
             'Modificado_Por' => $usuario->Id_Usuario,
-            'Fecha_Modificacion' => now(),
+            'Fecha_Modificacion' => $this->ahoraSql(),
         ];
 
         if ($media) {
@@ -130,7 +147,7 @@ class ConfiguracionService
             'Orden' => $data['orden'] ?? (BotRegla::where('Tipo', $data['tipo'])->max('Orden') + 1),
             'Activo' => true,
             'Modificado_Por' => $usuario->Id_Usuario,
-            'Fecha_Modificacion' => now(),
+            'Fecha_Modificacion' => $this->ahoraSql(),
         ]);
     }
 
@@ -146,7 +163,7 @@ class ConfiguracionService
             'Orden' => $data['orden'] ?? $regla->Orden,
             'Activo' => $data['activo'] ?? $regla->Activo,
             'Modificado_Por' => $usuario->Id_Usuario,
-            'Fecha_Modificacion' => now(),
+            'Fecha_Modificacion' => $this->ahoraSql(),
         ])->save();
 
         return $regla;
@@ -177,7 +194,7 @@ class ConfiguracionService
             'Texto' => $data['texto'],
             'Activo' => true,
             'Modificado_Por' => $usuario->Id_Usuario,
-            'Fecha_Modificacion' => now(),
+            'Fecha_Modificacion' => $this->ahoraSql(),
         ]);
     }
 
@@ -194,7 +211,7 @@ class ConfiguracionService
             'Orden' => $data['orden'] ?? $paso->Orden,
             'Activo' => $data['activo'] ?? $paso->Activo,
             'Modificado_Por' => $usuario->Id_Usuario,
-            'Fecha_Modificacion' => now(),
+            'Fecha_Modificacion' => $this->ahoraSql(),
         ])->save();
 
         return $paso;
@@ -205,6 +222,78 @@ class ConfiguracionService
         $this->verificarSistemas($usuario);
 
         GuiaPaso::findOrFail($idPaso)->delete();
+    }
+
+    // ---------- Políticas ----------
+
+    /** Admin: todas, para poder editar/reordenar/activar-desactivar. */
+    public function listarPoliticas(): Collection
+    {
+        return Politica::orderBy('Orden')->get();
+    }
+
+    /** Sección Políticas dentro de la plataforma: solo las activas. */
+    public function listarPoliticasActivas(): Collection
+    {
+        return Politica::where('Activo', true)->orderBy('Orden')->get();
+    }
+
+    public function crearPolitica(Usuario $usuario, array $data): Politica
+    {
+        $this->verificarSistemas($usuario);
+
+        return Politica::create([
+            'Orden' => $data['orden'] ?? (Politica::max('Orden') + 1),
+            'Titulo' => $data['titulo'],
+            'Descripcion' => $data['descripcion'],
+            'Activo' => true,
+            'Modificado_Por' => $usuario->Id_Usuario,
+            'Fecha_Modificacion' => $this->ahoraSql(),
+        ]);
+    }
+
+    public function actualizarPolitica(Usuario $usuario, int $idPolitica, array $data): Politica
+    {
+        $this->verificarSistemas($usuario);
+
+        $politica = Politica::findOrFail($idPolitica);
+
+        $politica->forceFill([
+            'Titulo' => $data['titulo'] ?? $politica->Titulo,
+            'Descripcion' => $data['descripcion'] ?? $politica->Descripcion,
+            'Orden' => $data['orden'] ?? $politica->Orden,
+            'Activo' => $data['activo'] ?? $politica->Activo,
+            'Modificado_Por' => $usuario->Id_Usuario,
+            'Fecha_Modificacion' => $this->ahoraSql(),
+        ])->save();
+
+        return $politica;
+    }
+
+    public function eliminarPolitica(Usuario $usuario, int $idPolitica): void
+    {
+        $this->verificarSistemas($usuario);
+
+        Politica::findOrFail($idPolitica)->delete();
+    }
+
+    /**
+     * Extrae el texto plano de un PDF subido desde el panel (para pegarlo
+     * directo en el campo Descripción de una Política). El PDF en sí NUNCA
+     * se guarda: solo se usa en memoria para sacar el texto y se descarta.
+     */
+    public function extraerTextoPdf(Usuario $usuario, UploadedFile $archivo): string
+    {
+        $this->verificarSistemas($usuario);
+
+        $parser = new \Smalot\PdfParser\Parser();
+        $pdf = $parser->parseFile($archivo->getRealPath());
+        $texto = $pdf->getText();
+
+        $texto = preg_replace("/[ \t]+/", ' ', $texto);
+        $texto = preg_replace("/\n{3,}/", "\n\n", $texto);
+
+        return trim($texto);
     }
 
     // ---------- Helpers de archivo público ----------
@@ -218,16 +307,8 @@ class ConfiguracionService
 
         $tipoMedia = str_starts_with($archivo->getMimeType(), 'video') ? 'video' : 'imagen';
 
-        // Ruta relativa dentro del disco (la que se guarda internamente para
-        // poder localizar/borrar el archivo físico más adelante).
         $rutaRelativa = $carpeta . '/' . $nombreFisico;
 
-        // URL absoluta real, construida por el disco 'public' a partir de
-        // APP_URL (ver config/filesystems.php) -> esto es lo que se guarda
-        // en BD y se le entrega al frontend. Antes esto era un string
-        // manual '/storage/...' relativo, que el navegador resolvía contra
-        // el ORIGEN DEL FRONTEND (Vite) en vez del backend -> por eso no
-        // cargaba ninguna imagen ni en Login ni en Home.
         $urlAbsoluta = Storage::disk(self::DISCO_PUBLICO)->url($rutaRelativa);
 
         return [$urlAbsoluta, $tipoMedia];
@@ -239,11 +320,8 @@ class ConfiguracionService
             return;
         }
 
-      
-        // Nos quedamos solo con el path y quitamos el prefijo /storage/ para
-        // obtener la ruta real dentro del disco 'public'.
         $path = parse_url($rutaPublica, PHP_URL_PATH) ?? $rutaPublica;
-        $rutaDisco = ltrim(str_replace('/storage/', '', $path), '/');
+        $rutaDisco = ltrim(str_replace('/media/', '', $path), '/');
 
         if (Storage::disk(self::DISCO_PUBLICO)->exists($rutaDisco)) {
             Storage::disk(self::DISCO_PUBLICO)->delete($rutaDisco);
