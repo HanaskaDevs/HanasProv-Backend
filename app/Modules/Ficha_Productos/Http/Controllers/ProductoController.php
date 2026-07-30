@@ -92,13 +92,13 @@ class ProductoController extends Controller
         ]);
     }
 
-    public function confirmarCorrecciones(Request $request): JsonResponse
+    public function confirmarCorreccionProducto(Request $request, int $producto): JsonResponse
     {
         $idEmpresaActiva = (int) $request->attributes->get('id_empresa_activa');
 
-        $this->productoService->confirmarCorrecciones($request->user(), $idEmpresaActiva);
+        $this->productoService->confirmarCorreccionProducto($request->user(), $idEmpresaActiva, $producto);
 
-        return response()->json(['message' => 'Productos actualizados registrados correctamente.']);
+        return response()->json(['message' => 'Corrección registrada correctamente.']);
     }
 
     public function destroy(Request $request, int $producto): JsonResponse

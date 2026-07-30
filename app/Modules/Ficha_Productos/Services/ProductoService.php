@@ -49,8 +49,14 @@ class ProductoService
      * ejecutar esa sincronización (que pega contra BC_Producto_Proveedor)
      * en cada cambio de página o de término de búsqueda.
      */
-    public function listar(Usuario $usuario, int $idEmpresaActiva, ?string $busqueda = null, int $pagina = 1, int $porPagina = 20)
-    {
+    public function listar(
+        Usuario $usuario,
+        int $idEmpresaActiva,
+        ?string $busqueda = null,
+        int $pagina = 1,
+        int $porPagina = 20,
+        ?string $estado = null
+    ) {
         $proveedor = $this->miProveedor($usuario, $idEmpresaActiva);
 
         if ($pagina === 1 && ! $busqueda) {
@@ -64,6 +70,43 @@ class ProductoService
                 $query->where(function ($q) use ($busqueda) {
                     $q->where('Nombre_Producto', 'like', "%{$busqueda}%")
                         ->orWhere('Codigo_Barras', 'like', "%{$busqueda}%");
+                });
+            })
+            // OJO: antes este filtro llegaba desde el controller pero el
+            // método ni siquiera lo recibía como parámetro -> PHP lo
+            // descartaba en silencio (de más está decir que nunca filtró
+            // nada). "Pendiente" y "En revisión" comparten
+            // Estado_Calificacion="Pendiente" -> la diferencia real está
+            // en Bloqueado (recién enviado y en revisión = bloqueado;
+            // todavía no enviado = no bloqueado).
+            //
+            // Ahora además soporta varios estados a la vez (filtro tipo
+            // BC, ej. "aprobado,rechazado") -> cada uno arma su propio
+            // sub-where y se unen todos con OR, así un producto que
+            // matchee CUALQUIERA de los seleccionados entra al resultado.
+            ->when($estado, function ($query) use ($estado) {
+                $estadosSolicitados = array_filter(explode(',', $estado));
+
+                $query->where(function ($q) use ($estadosSolicitados) {
+                    foreach ($estadosSolicitados as $estadoSolicitado) {
+                        $q->orWhere(function ($sub) use ($estadoSolicitado) {
+                            match ($estadoSolicitado) {
+                                'aprobado' => $sub->where('Estado_Calificacion', 'Aprobado'),
+                                'rechazado' => $sub->where('Estado_Calificacion', 'Rechazado'),
+                                'en_revision' => $sub->where('Estado_Calificacion', 'Pendiente')->where('Bloqueado', 1),
+                                // Un producto recién creado (nunca enviado a
+                                // calificación) no tiene Estado_Calificacion
+                                // seteado en absoluto -> queda NULL en la
+                                // base, no el string "Pendiente" (eso recién
+                                // se escribe en registrar()). Por eso acá hay
+                                // que aceptar los dos: NULL o "Pendiente".
+                                'pendiente' => $sub->where('Bloqueado', 0)->where(function ($q2) {
+                                    $q2->where('Estado_Calificacion', 'Pendiente')->orWhereNull('Estado_Calificacion');
+                                }),
+                                default => $sub->whereRaw('1 = 0'), // valor desconocido -> no matchea nada
+                            };
+                        });
+                    }
                 });
             })
             ->with(['unidadPresentacion', 'documentos.tipoDocumento', 'documentos.archivo'])
@@ -548,52 +591,118 @@ class ProductoService
             }
         }
 
-        Producto::where('Id_Proveedor', $proveedor->Id_Proveedor)
-            ->where('Activo', 1)
-            ->where('Bloqueado', 0)
-            ->whereIn('Id_Producto', $idsProductos)
-            ->update([
-                'Bloqueado' => 1,
-                'Estado_Calificacion' => 'Pendiente',
-                'Comentario_Calificacion' => null,
-                'Calificado_Por' => null,
-                'Fecha_Calificacion' => null,
-            ]);
+        DB::transaction(function () use ($proveedor, $idsProductos) {
+            Producto::where('Id_Proveedor', $proveedor->Id_Proveedor)
+                ->where('Activo', 1)
+                ->where('Bloqueado', 0)
+                ->whereIn('Id_Producto', $idsProductos)
+                ->update([
+                    'Bloqueado' => 1,
+                    'Estado_Calificacion' => 'Pendiente',
+                    'Comentario_Calificacion' => null,
+                    'Calificado_Por' => null,
+                    'Fecha_Calificacion' => null,
+                ]);
+
+            // Sin esto, un lote nuevo se enviaba a revisión pero el admin
+            // seguía viendo "ya calificaste todo, no hay nada más que
+            // hacer" para siempre -> Fecha_Registro_Calificacion_Productos
+            // es la marca de "ya cerré esta ronda", y acá se está abriendo
+            // una ronda nueva (este lote), así que hay que reabrirla.
+            if ($proveedor->Fecha_Registro_Calificacion_Productos !== null) {
+                $proveedor->forceFill(['Fecha_Registro_Calificacion_Productos' => null])->save();
+            }
+        });
 
         return $productos->count();
     }
 
     /**
-     * "Registrar productos actualizados": el proveedor confirma que ya
-     * corrigió todo lo que el admin había rechazado. Exige que no quede
-     * NINGÚN producto activo en estado "Rechazado" (si queda alguno sin
-     * corregir, se rechaza indicando cuántos faltan) -> recién ahí
-     * apaga Correcciones_Pendientes_Productos, y esos productos vuelven
-     * a quedar bloqueados (solo lectura) hasta que el admin dé su
-     * retroalimentación de nuevo.
+     * "Registrar corrección" de UN producto puntual. Antes esto era una
+     * sola acción para TODO el catálogo rechazado a la vez
+     * (confirmarCorrecciones) -> el botón vivía en la tarjeta de cada
+     * producto (dando a entender que era una acción individual), pero
+     * por debajo revisaba el catálogo entero: corregir un producto
+     * podía frenarse -o de peor, arrastrar al envío- productos que el
+     * proveedor ni había tocado. Ahora cada producto se corrige y se
+     * reenvía de manera completamente independiente, igual que ya
+     * funciona el registro de un producto nuevo (ver registrar()).
+     *
+     * Exige que ESTE producto tenga sus documentos obligatorios
+     * completos Y que al menos uno se haya subido DESPUÉS de
+     * Fecha_Calificacion (mismo dato que ya usa subirDocumento para
+     * decidir si el archivo viejo va a histórico) -> así un producto
+     * que nadie tocó desde el rechazo no se puede dar por corregido,
+     * aunque sus casillas de documentos estén "llenas" con los mismos
+     * archivos que el admin ya vio y rechazó.
      */
-    public function confirmarCorrecciones(Usuario $usuario, int $idEmpresaActiva): void
+    public function confirmarCorreccionProducto(Usuario $usuario, int $idEmpresaActiva, int $idProducto): void
     {
         $proveedor = $this->miProveedor($usuario, $idEmpresaActiva);
 
-        if (! $proveedor->Correcciones_Pendientes_Productos) {
-            throw ValidationException::withMessages([
-                'productos' => ['No tienes correcciones pendientes de confirmar.'],
-            ]);
-        }
-
-        $pendientes = Producto::where('Id_Proveedor', $proveedor->Id_Proveedor)
+        $producto = Producto::where('Id_Proveedor', $proveedor->Id_Proveedor)
             ->where('Activo', 1)
+            ->where('Id_Producto', $idProducto)
             ->where('Estado_Calificacion', 'Rechazado')
-            ->count();
+            ->with('documentos')
+            ->firstOrFail();
 
-        if ($pendientes > 0) {
+        $tiposObligatorios = TipoDocumentoProducto::where('Activo', 1)
+            ->where('Obligatorio', 1)
+            ->pluck('Id_Tipo_Documento_Producto');
+
+        $documentosActivos = $producto->documentos->where('Activo', true);
+        $tiposSubidos = $documentosActivos->pluck('Id_Tipo_Documento_Producto');
+
+        if ($tiposObligatorios->diff($tiposSubidos)->isNotEmpty()) {
             throw ValidationException::withMessages([
-                'productos' => ["Todavía te falta corregir {$pendientes} producto(s) rechazado(s)."],
+                'producto' => ['Todavía te falta cargar algún documento obligatorio de este producto.'],
             ]);
         }
 
-        $proveedor->forceFill(['Correcciones_Pendientes_Productos' => false])->save();
+        $seTocoAlgoDesdeElRechazo = $producto->Fecha_Calificacion === null
+            || $documentosActivos->contains(
+                fn (DocumentoProducto $doc) => $doc->Fecha_Creacion !== null
+                    && $doc->Fecha_Creacion->gt($producto->Fecha_Calificacion)
+            );
+
+        if (! $seTocoAlgoDesdeElRechazo) {
+            throw ValidationException::withMessages([
+                'producto' => ['Todavía no reemplazaste ningún documento desde que se rechazó este producto.'],
+            ]);
+        }
+
+        DB::transaction(function () use ($proveedor, $producto) {
+            $producto->forceFill([
+                'Bloqueado' => 1,
+                'Estado_Calificacion' => 'Pendiente',
+                'Comentario_Calificacion' => null,
+                'Calificado_Por' => null,
+                'Fecha_Calificacion' => null,
+            ])->save();
+
+            // Reabre la ronda de calificación para el admin (mismo
+            // motivo que en registrar()) -> este producto puntual
+            // recién vuelve a pedir revisión, sin importar en qué
+            // estado esté el resto del catálogo.
+            if ($proveedor->Fecha_Registro_Calificacion_Productos !== null) {
+                $proveedor->forceFill(['Fecha_Registro_Calificacion_Productos' => null])->save();
+            }
+
+            // El flag a nivel proveedor (usado para el banner "tienes
+            // correcciones pendientes") recién se apaga cuando YA NO
+            // queda ningún producto rechazado -> antes se apagaba
+            // entero apenas se corregía un producto, aunque quedaran
+            // otros rechazados sin tocar todavía.
+            $quedanRechazados = Producto::where('Id_Proveedor', $proveedor->Id_Proveedor)
+                ->where('Activo', 1)
+                ->where('Estado_Calificacion', 'Rechazado')
+                ->exists();
+
+            if (! $quedanRechazados && $proveedor->Correcciones_Pendientes_Productos) {
+                $proveedor->forceFill(['Correcciones_Pendientes_Productos' => false])->save();
+            }
+        });
     }
 
     protected function miProveedor(Usuario $usuario, int $idEmpresaActiva): Proveedor
