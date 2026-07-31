@@ -477,19 +477,59 @@ class CalificacionProveedorService
      * solo si todavía está en Aspirante (no pisa un estado manual que
      * un admin haya puesto a mano, ej. Suspendido).
      */
-    protected function activarSiCorrespondeAprobado(Proveedor $proveedor): void
+    /**
+     * Barrido de reconciliación: activarSiCorrespondeAprobado() solo se
+     * dispara como efecto secundario de calificar ficha/documento/
+     * producto -> si la ÚLTIMA calificación que completó las 3
+     * condiciones a la vez no fue, por lo que sea, la que terminó
+     * cumpliéndolas todas juntas (ej. algún orden particular, o un
+     * cambio manual en la base), el proveedor se queda atascado en
+     * Aspirante para siempre, aunque en verdad ya cumpla todo. Este
+     * método revisa a todos los Aspirantes y los vuelve a evaluar,
+     * sin importar qué haya pasado antes. Pensado para correrse desde
+     * un comando artisan (ver ReconciliarEstadosProveedoresCommand),
+     * a mano cuando se detecte un caso así.
+     *
+     * @param callable(Proveedor, array): void|null $onDiagnostico Se
+     *        llama con el proveedor y su diagnóstico ANTES de intentar
+     *        activarlo, para poder loguear/imprimir qué condición es
+     *        la que está fallando en cada caso (ver el comando).
+     */
+    public function reconciliarEstadosAspirantes(?callable $onDiagnostico = null): int
     {
-        $proveedor->refresh();
+        $activados = 0;
 
-        if ($proveedor->Id_Estado_Proveedor !== self::ESTADO_ASPIRANTE) {
-            return;
-        }
+        Proveedor::where('Id_Estado_Proveedor', self::ESTADO_ASPIRANTE)
+            ->where('Activo', 1)
+            ->get()
+            ->each(function (Proveedor $proveedor) use (&$activados, $onDiagnostico) {
+                $diagnostico = $this->diagnosticarCondicionesAprobado($proveedor);
 
+                if ($onDiagnostico) {
+                    $onDiagnostico($proveedor, $diagnostico);
+                }
+
+                $this->activarSiCorrespondeAprobado($proveedor);
+
+                if ($proveedor->fresh()->Id_Estado_Proveedor === self::ESTADO_APROBADO) {
+                    $activados++;
+                }
+            });
+
+        return $activados;
+    }
+
+    /**
+     * Calcula las 3 condiciones para pasar a Aprobado, SIN escribir
+     * nada -> separado de activarSiCorrespondeAprobado() para poder
+     * mostrar el detalle de cada una (qué pasó y por qué) desde el
+     * comando de diagnóstico, en vez de solo un sí/no.
+     *
+     * @return array{ficha_aprobada: bool, documentacion_aprobada: bool, total_documentos: int, documentos_no_aprobados: int, hay_producto_aprobado: bool}
+     */
+    public function diagnosticarCondicionesAprobado(Proveedor $proveedor): array
+    {
         $fichaAprobada = $proveedor->fresh('calificacionesCampos')->estadoGeneralCalificacionFicha() === 'Aprobado';
-
-        if (! $fichaAprobada) {
-            return;
-        }
 
         $totalDocumentos = DocumentoProveedor::where('Id_Proveedor', $proveedor->Id_Proveedor)
             ->where('Activo', 1)
@@ -502,20 +542,38 @@ class CalificacionProveedorService
             ->count();
         $documentacionAprobada = $totalDocumentos > 0 && $documentosNoAprobados === 0;
 
-        if (! $documentacionAprobada) {
-            return;
-        }
-
         $hayProductoAprobado = Producto::where('Id_Proveedor', $proveedor->Id_Proveedor)
             ->where('Activo', 1)
             ->where('Estado_Calificacion', 'Aprobado')
             ->exists();
 
-        if (! $hayProductoAprobado) {
+        return [
+            'ficha_aprobada' => $fichaAprobada,
+            'documentacion_aprobada' => $documentacionAprobada,
+            'total_documentos' => $totalDocumentos,
+            'documentos_no_aprobados' => $documentosNoAprobados,
+            'hay_producto_aprobado' => $hayProductoAprobado,
+        ];
+    }
+
+    protected function activarSiCorrespondeAprobado(Proveedor $proveedor): void
+    {
+        $proveedor->refresh();
+
+        if ($proveedor->Id_Estado_Proveedor !== self::ESTADO_ASPIRANTE) {
             return;
         }
 
-        $proveedor->forceFill(['Id_Estado_Proveedor' => self::ESTADO_APROBADO])->save();
+        $diagnostico = $this->diagnosticarCondicionesAprobado($proveedor);
+
+        if (! $diagnostico['ficha_aprobada'] || ! $diagnostico['documentacion_aprobada'] || ! $diagnostico['hay_producto_aprobado']) {
+            return;
+        }
+
+        $proveedor->forceFill([
+            'Id_Estado_Proveedor' => self::ESTADO_APROBADO,
+            'Fecha_Aprobacion' => now(),
+        ])->save();
     }
 
     protected function proveedorDeLaEmpresa(int $idEmpresaActiva, int $idProveedor): Proveedor

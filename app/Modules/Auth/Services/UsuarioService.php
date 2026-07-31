@@ -312,6 +312,7 @@ if ((int) $data['id_rol'] === (int) $idRolProveedor) {
                         $proveedor = Proveedor::create([
                             'Id_Empresa' => $idEmpresa,
                             'Email' => $usuario->Email,
+                            'Id_Estado_Proveedor' => 1, // TODO: usar constante/enum del estado "Aspirante" inicial
                             'Seccion_Actual' => 1,
                             'Porcentaje_Completado_Ficha' => 0,
                             'Fecha_Postulacion' => now(),
@@ -624,6 +625,7 @@ public function otorgarAccesoEmpresa(Usuario $usuario, int $idEmpresa, Usuario $
             $proveedor = Proveedor::create([
                 'Id_Empresa' => $idEmpresa,
                 'Email' => $usuario->Email,
+                'Id_Estado_Proveedor' => 1, // TODO: usar constante/enum del estado "Aspirante" inicial
                 'Seccion_Actual' => 1,
                 'Porcentaje_Completado_Ficha' => 0,
                 'Fecha_Postulacion' => now(),

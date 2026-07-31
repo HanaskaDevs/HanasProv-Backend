@@ -47,7 +47,9 @@ class ConfiguracionService
 
     public function listarSlides(): Collection
     {
-        return HomeSlide::orderBy('Orden')->get();
+        return HomeSlide::orderBy('Orden')->get()->each(function (HomeSlide $slide) {
+            $slide->Ruta_Media = $this->urlAbsolutaMedia($slide->Ruta_Media);
+        });
     }
 
     public function crearSlide(Usuario $usuario, array $data, ?UploadedFile $media = null): HomeSlide
@@ -112,7 +114,7 @@ class ConfiguracionService
 
     public function obtenerImagenLogin(): ?string
     {
-        return Configuracion::obtener('login_imagen_url');
+        return $this->urlAbsolutaMedia(Configuracion::obtener('login_imagen_url'));
     }
 
     public function actualizarImagenLogin(Usuario $usuario, UploadedFile $imagen): string
@@ -309,9 +311,40 @@ class ConfiguracionService
 
         $rutaRelativa = $carpeta . '/' . $nombreFisico;
 
-        $urlAbsoluta = Storage::disk(self::DISCO_PUBLICO)->url($rutaRelativa);
+        // OJO: antes acá se guardaba la URL ABSOLUTA (con host y puerto)
+        // calculada en este momento con Storage::disk(...)->url() -> esa
+        // URL quedaba "congelada" en la base para siempre. El día que
+        // cambia el host o el puerto de la app (dev a otro puerto,
+        // paso a producción, etc.), todo lo subido ANTES de ese cambio
+        // quedaba roto (imagen/video apuntando a un host que ya no
+        // corre ahí), porque la URL guardada nunca se vuelve a calcular.
+        // Ahora se guarda solo la ruta relativa, y la URL absoluta se
+        // arma de nuevo en cada lectura (ver urlAbsolutaMedia), con el
+        // host/puerto ACTUAL, sin importar cuándo se subió el archivo.
+        return [$rutaRelativa, $tipoMedia];
+    }
 
-        return [$urlAbsoluta, $tipoMedia];
+    /**
+     * Convierte una ruta relativa guardada en Ruta_Media/login_imagen_url
+     * a una URL absoluta usando el host/puerto ACTUAL de la app -> se
+     * llama siempre que se lee este dato, nunca al guardarlo.
+     *
+     * Compatibilidad hacia atrás: si el valor guardado ya es una URL
+     * absoluta (registros de antes de este cambio), se devuelve tal
+     * cual -> sigue apuntando al host viejo hasta que se vuelva a subir
+     * ese archivo puntual, pero no rompe nada mientras tanto.
+     */
+    protected function urlAbsolutaMedia(?string $ruta): ?string
+    {
+        if (! $ruta) {
+            return $ruta;
+        }
+
+        if (str_starts_with($ruta, 'http://') || str_starts_with($ruta, 'https://')) {
+            return $ruta;
+        }
+
+        return Storage::disk(self::DISCO_PUBLICO)->url($ruta);
     }
 
     protected function eliminarMediaFisica(?string $rutaPublica): void
@@ -320,8 +353,12 @@ class ConfiguracionService
             return;
         }
 
-        $path = parse_url($rutaPublica, PHP_URL_PATH) ?? $rutaPublica;
-        $rutaDisco = ltrim(str_replace('/media/', '', $path), '/');
+        // Compatibilidad con registros viejos que todavía tengan la URL
+        // absoluta guardada (ver guardarMediaPublica) -> a partir de acá
+        // ya es solo la ruta relativa, no hace falta parsear una URL.
+        $rutaDisco = str_starts_with($rutaPublica, 'http://') || str_starts_with($rutaPublica, 'https://')
+            ? ltrim(str_replace('/media/', '', parse_url($rutaPublica, PHP_URL_PATH) ?? $rutaPublica), '/')
+            : $rutaPublica;
 
         if (Storage::disk(self::DISCO_PUBLICO)->exists($rutaDisco)) {
             Storage::disk(self::DISCO_PUBLICO)->delete($rutaDisco);
