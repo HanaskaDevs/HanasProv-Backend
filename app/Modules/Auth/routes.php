@@ -1,6 +1,7 @@
 <?php
 
 use App\Modules\Auth\Http\Controllers\AuthController;
+use App\Modules\Auth\Http\Controllers\DashboardSistemasController;
 use App\Modules\Auth\Http\Controllers\RolController;
 use App\Modules\Auth\Http\Controllers\UsuarioController;
 use App\Modules\Auth\Http\Middleware\EmpresaActiva;
@@ -20,6 +21,9 @@ Route::prefix('auth')->group(function () {
     });
 });
 
+Route::get('/dashboard/sistemas', [DashboardSistemasController::class, 'resumen'])
+    ->middleware(['auth:sanctum', EmpresaActiva::class]);
+
 Route::prefix('usuarios')
     ->middleware(['auth:sanctum', EmpresaActiva::class])
     ->group(function () {
@@ -37,6 +41,7 @@ Route::prefix('usuarios')
         Route::patch('/{usuario}/inactivar', [UsuarioController::class, 'inactivar']);
         Route::post('/{usuario}/reenviar-codigo', [UsuarioController::class, 'reenviarCodigo']);
         Route::patch('/{usuario}/reactivar', [UsuarioController::class, 'reactivar']);
+        Route::post('/{usuario}/reenviar-activacion', [UsuarioController::class, 'reenviarActivacion']);
         Route::post('/{usuario}/empresas', [UsuarioController::class, 'agregarEmpresa']);
         Route::put('/{usuario}/email', [UsuarioController::class, 'actualizarEmail']);
         Route::put('/{usuario}/empresas/{empresa}', [UsuarioController::class, 'actualizarRolEnEmpresa']);

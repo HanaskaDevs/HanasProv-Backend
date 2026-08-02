@@ -1,0 +1,70 @@
+<?php
+
+namespace App\Modules\Auth\Services;
+
+use App\Models\Empresa;
+use App\Modules\Documentos_Proveedor\Models\DocumentoProveedor;
+use App\Modules\Ficha_Productos\Models\Producto;
+use App\Modules\Proveedores\Models\Proveedor;
+use App\Modules\Reclamos\Models\Reclamo;
+
+/**
+ * Resumen del panel de Inicio para Sistemas/Admin -> antes esa pantalla
+ * solo mostraba un cartel genérico ("usa el menú lateral..."), sin
+ * ningún dato real. Todo acá se acota a la empresa activa, mismo
+ * criterio que el resto de las pantallas de administración (el
+ * selector de empresa del header).
+ */
+class DashboardSistemasService
+{
+    public function obtenerResumen(int $idEmpresaActiva): array
+    {
+        $proveedoresActivos = Proveedor::where('Id_Empresa', $idEmpresaActiva)
+            ->where('Activo', 1)
+            ->with('calificacionesCampos')
+            ->get();
+
+        $proveedoresPorEstado = Proveedor::where('Proveedor.Id_Empresa', $idEmpresaActiva)
+            ->where('Proveedor.Activo', 1)
+            ->join('Estado_Proveedor', 'Estado_Proveedor.Id_Estado_Proveedor', '=', 'Proveedor.Id_Estado_Proveedor')
+            ->selectRaw('Estado_Proveedor.Nombre_Estado as estado, COUNT(*) as total')
+            ->groupBy('Estado_Proveedor.Nombre_Estado')
+            ->pluck('total', 'estado');
+
+        // Ficha completa (100%) pero todavía sin una calificación general
+        // definitiva (ni Aprobado ni Rechazado) -> está esperando que
+        // alguien la revise por primera vez.
+        $fichasPendientes = $proveedoresActivos
+            ->filter(fn (Proveedor $p) => $p->Porcentaje_Completado_Ficha === 100
+                && ! in_array($p->estadoGeneralCalificacionFicha(), ['Aprobado', 'Rechazado'], true))
+            ->count();
+
+        // Documentos ya registrados por el proveedor (Fecha_Registro_Documentacion
+        // no nula) pero que todavía nadie calificó.
+        $documentosPendientes = DocumentoProveedor::where('Activo', 1)
+            ->whereNull('Estado_Calificacion')
+            ->whereHas('proveedor', function ($q) use ($idEmpresaActiva) {
+                $q->where('Id_Empresa', $idEmpresaActiva)->whereNotNull('Fecha_Registro_Documentacion');
+            })
+            ->count();
+
+        $productosPendientes = Producto::where('Activo', 1)
+            ->where('Bloqueado', 1)
+            ->where('Estado_Calificacion', 'Pendiente')
+            ->whereHas('proveedor', fn ($q) => $q->where('Id_Empresa', $idEmpresaActiva))
+            ->count();
+
+        $reclamosAbiertos = Reclamo::where('Id_Empresa', $idEmpresaActiva)
+            ->where('Estado', 'Abierto')
+            ->count();
+
+        return [
+            'total_empresas' => Empresa::where('Activo', 1)->count(),
+            'proveedores_por_estado' => $proveedoresPorEstado,
+            'fichas_pendientes' => $fichasPendientes,
+            'documentos_pendientes' => $documentosPendientes,
+            'productos_pendientes' => $productosPendientes,
+            'reclamos_abiertos' => $reclamosAbiertos,
+        ];
+    }
+}

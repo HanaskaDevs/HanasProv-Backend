@@ -49,6 +49,93 @@ class ProductoService
      * ejecutar esa sincronización (que pega contra BC_Producto_Proveedor)
      * en cada cambio de página o de término de búsqueda.
      */
+    /**
+     * Búsqueda de productos entre TODOS los proveedores de la empresa
+     * activa (a diferencia de listar(), que es "mis productos" para un
+     * proveedor puntual) -> pensado para que Sistemas/Admin pueda
+     * buscar un producto por nombre o código de barras sin saber de
+     * antemano a qué proveedor pertenece.
+     */
+    public function listarTodos(int $idEmpresaActiva, ?string $busqueda = null, int $pagina = 1, int $porPagina = 20)
+    {
+        return Producto::where('Activo', 1)
+            ->whereHas('proveedor', fn ($q) => $q->where('Id_Empresa', $idEmpresaActiva))
+            ->with(['proveedor:Id_Proveedor,Razon_Social,Nombre_Comercial', 'unidadPresentacion:Id_Unidad_Presentacion,Nombre_Unidad'])
+            ->when($busqueda, function ($query) use ($busqueda) {
+                $query->where(function ($q) use ($busqueda) {
+                    $q->where('Nombre_Producto', 'like', "%{$busqueda}%")
+                        ->orWhere('Codigo_Barras', 'like', "%{$busqueda}%")
+                        ->orWhereHas('proveedor', fn ($qp) => $qp->where('Razon_Social', 'like', "%{$busqueda}%")
+                            ->orWhere('Nombre_Comercial', 'like', "%{$busqueda}%"));
+                });
+            })
+            ->orderBy('Nombre_Producto')
+            ->paginate($porPagina, ['*'], 'pagina', $pagina);
+    }
+
+    /**
+     * Edición individual del Código BC (Business Central), desde la
+     * pantalla admin de "Productos de Proveedores". Acotado a la
+     * empresa activa -> no se puede tocar el producto de otra empresa
+     * aunque se sepa el Id.
+     */
+    public function guardarCodigoBC(int $idEmpresaActiva, int $idProducto, ?string $codigoBC): Producto
+    {
+        $producto = Producto::where('Activo', 1)
+            ->whereHas('proveedor', fn ($q) => $q->where('Id_Empresa', $idEmpresaActiva))
+            ->findOrFail($idProducto);
+
+        $producto->update(['Bc_Nro_Producto' => $codigoBC ?: null]);
+
+        return $producto->fresh(['proveedor', 'unidadPresentacion']);
+    }
+
+    /**
+     * Carga masiva del Código BC desde un Excel: columna A = Código de
+     * Barras (para identificar el producto, ya es único y visible en la
+     * pantalla), columna B = Código BC. Primera fila se asume
+     * encabezado y se descarta. Une por Código de Barras dentro de la
+     * empresa activa -> nunca toca productos de otra empresa aunque el
+     * Excel traiga códigos repetidos de otro lado.
+     */
+    public function importarCodigosBC(int $idEmpresaActiva, UploadedFile $archivo): array
+    {
+        $spreadsheet = \PhpOffice\PhpSpreadsheet\IOFactory::load($archivo->getRealPath());
+        $filas = $spreadsheet->getActiveSheet()->toArray(null, true, true, false);
+
+        array_shift($filas); // descarta la fila de encabezado
+
+        $actualizados = 0;
+        $noEncontrados = [];
+
+        foreach ($filas as $fila) {
+            $codigoBarras = trim((string) ($fila[0] ?? ''));
+            $codigoBC = trim((string) ($fila[1] ?? ''));
+
+            if ($codigoBarras === '') {
+                continue;
+            }
+
+            $producto = Producto::where('Activo', 1)
+                ->where('Codigo_Barras', $codigoBarras)
+                ->whereHas('proveedor', fn ($q) => $q->where('Id_Empresa', $idEmpresaActiva))
+                ->first();
+
+            if (! $producto) {
+                $noEncontrados[] = $codigoBarras;
+                continue;
+            }
+
+            $producto->update(['Bc_Nro_Producto' => $codigoBC !== '' ? $codigoBC : null]);
+            $actualizados++;
+        }
+
+        return [
+            'actualizados' => $actualizados,
+            'no_encontrados' => $noEncontrados,
+        ];
+    }
+
     public function listar(
         Usuario $usuario,
         int $idEmpresaActiva,
@@ -204,8 +291,18 @@ class ProductoService
         $proveedor = $this->miProveedor($usuario, $idEmpresaActiva);
 
         $documento = DocumentoProducto::whereHas('producto', fn($q) => $q->where('Id_Proveedor', $proveedor->Id_Proveedor))
-            ->with('archivo', 'producto.proveedor')
+            ->with('archivo', 'producto.proveedor', 'tipoDocumento')
             ->findOrFail($idDocumentoProducto);
+
+        // Mismo criterio que en Documentos del proveedor: los tipos de
+        // documento OBLIGATORIOS (Ficha técnica, Análisis de
+        // Laboratorio) nunca se pueden borrar del todo, solo
+        // reemplazar. Antes esto solo se ocultaba en el frontend.
+        if ($documento->tipoDocumento->Obligatorio) {
+            throw ValidationException::withMessages([
+                'archivo' => ['Este documento es obligatorio, no se puede eliminar. Puede reemplazarlo por otro.'],
+            ]);
+        }
 
         $producto = $documento->producto;
 

@@ -182,6 +182,25 @@ if ((int) $data['id_rol'] === (int) $idRolProveedor) {
     }
 
     /**
+     * Genera un código nuevo y reenvía el correo de "Bienvenido" a un
+     * usuario que todavía no activó su cuenta (típicamente porque el
+     * correo original no llegó, el código venció a los 20 minutos, o
+     * se perdió el email). No tiene sentido para un usuario que ya
+     * activó -> ese caso usa el flujo de "olvidé mi contraseña", no
+     * este.
+     */
+    public function reenviarActivacion(Usuario $usuario, Usuario $solicitante): void
+    {
+        if (! $usuario->Requiere_Cambio_Password) {
+            throw ValidationException::withMessages([
+                'usuario' => ['Este usuario ya activó su cuenta. Usa "Olvidé mi contraseña" si necesita restablecerla.'],
+            ]);
+        }
+
+        $this->generarYEnviarCodigo($usuario, tipo: 'Bienvenida', creadoPor: $solicitante->Id_Usuario);
+    }
+
+    /**
      * Genera un código de activación de 20 minutos para el email dado,
      * invalidando cualquier código previo sin usar, y lo envía por correo.
      */
@@ -280,14 +299,30 @@ if ((int) $data['id_rol'] === (int) $idRolProveedor) {
         // código usado para lograrlo.
         $esPrimeraActivacion = (bool) $usuario->Requiere_Cambio_Password;
 
+        if ($esPrimeraActivacion) {
+            // El frontend ya los pide como obligatorios en este paso, pero
+            // sin esto alguien podría saltarse esa pantalla y pegarle
+            // directo a la API sin cargo/teléfono, dejando el perfil
+            // incompleto para siempre (no hay otro momento donde se
+            // vuelvan a pedir).
+            $faltantes = [];
+            if (empty($datosPerfil['nombre_completo'])) $faltantes['nombre_completo'] = ['El nombre completo es requerido.'];
+            if (empty($datosPerfil['cargo'])) $faltantes['cargo'] = ['El cargo es requerido.'];
+            if (empty($datosPerfil['telefono'])) $faltantes['telefono'] = ['El teléfono es requerido.'];
+
+            if ($faltantes) {
+                throw ValidationException::withMessages($faltantes);
+            }
+        }
+
         return DB::transaction(function () use ($usuario, $codigoActivacion, $passwordNueva, $datosPerfil, $esPrimeraActivacion) {
             $usuario->forceFill([
                 'Password_Hash' => Hash::make($passwordNueva),
                 'Requiere_Cambio_Password' => false,
                 ...($esPrimeraActivacion ? [
                     'Nombre_Completo' => $datosPerfil['nombre_completo'],
-                    'Cargo' => $datosPerfil['cargo'] ?? null,
-                    'Telefono' => $datosPerfil['telefono'] ?? null,
+                    'Cargo' => $datosPerfil['cargo'],
+                    'Telefono' => $datosPerfil['telefono'],
                 ] : []),
             ])->save();
 
