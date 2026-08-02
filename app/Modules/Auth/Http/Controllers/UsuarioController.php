@@ -122,6 +122,13 @@ class UsuarioController extends Controller
         return response()->json(['message' => 'Usuario reactivado correctamente.']);
     }
 
+    public function reenviarActivacion(Request $request, Usuario $usuario): JsonResponse
+    {
+        $this->usuarioService->reenviarActivacion($usuario, $request->user());
+
+        return response()->json(['message' => 'Correo de activación reenviado correctamente.']);
+    }
+
     public function agregarEmpresa(Request $request, Usuario $usuario): JsonResponse
     {
         $idEmpresa = (int) $request->validate(['id_empresa' => ['required', 'integer']])['id_empresa'];

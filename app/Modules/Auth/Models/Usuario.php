@@ -25,7 +25,7 @@ class Usuario extends Authenticatable
 
     protected $fillable = [
         'Email', 'Password_Hash', 'Nombre_Completo', 'Cargo',
-        'Telefono', 'Requieres_Cambio_Password', 'Ultimo_Acceso', 'Activo',
+        'Telefono', 'Requiere_Cambio_Password', 'Ultimo_Acceso', 'Activo',
         'Creado_Por', 'Fecha_Creacion', 'Modificado_Por', 'Fecha_Modificacion',
         'Tipo_Usuario',
     ];

@@ -33,6 +33,7 @@ Route::prefix('mi-ficha')
     ->middleware(['auth:sanctum', EmpresaActiva::class])
     ->group(function () {
         Route::get('/', [FichaProveedorController::class, 'show']);
+        Route::put('/contactos', [FichaProveedorController::class, 'contactos']);
         Route::put('/seccion-1', [FichaProveedorController::class, 'seccion1']);
         Route::put('/seccion-2', [FichaProveedorController::class, 'seccion2']);
         Route::put('/seccion-3', [FichaProveedorController::class, 'seccion3']);

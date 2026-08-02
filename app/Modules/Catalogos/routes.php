@@ -14,12 +14,16 @@ use Illuminate\Support\Facades\Route;
  * cargar con SQL directo: Clase_Proveedor, Categoria_Producto,
  * Tipo_Documento, Tipo_Documento_Producto y Unidad_Presentacion.
  *
- * Los endpoints de solo lectura que YA existían para que un proveedor
- * vea estas listas (ej. GET /proveedores/clases, GET
- * /ficha-productos/unidades-presentacion) no se tocan, siguen en sus
- * módulos de siempre -> esto es exclusivamente para la gestión admin.
+ * OJO: iba con el prefijo 'catalogos' originalmente, pero YA existían
+ * rutas de solo lectura con ese mismo path exacto (GET
+ * /catalogos/clases-proveedor y /catalogos/categorias-producto, en
+ * Proveedores/routes.php, usadas por cualquier proveedor en el
+ * multi-select de su Ficha) -> terminaba ganando esta ruta admin sobre
+ * esa, bloqueando a cualquier proveedor común con "Solo Sistemas puede
+ * gestionar este catálogo". Prefijo distinto para que no vuelva a
+ * pasar, sin tocar nada de lo que ya funcionaba.
  */
-Route::prefix('catalogos')
+Route::prefix('catalogos-admin')
     ->middleware(['auth:sanctum', EmpresaActiva::class])
     ->group(function () {
         Route::prefix('clases-proveedor')->group(function () {

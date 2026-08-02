@@ -3,6 +3,7 @@
 namespace App\Modules\Proveedores\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\Proveedores\Http\Requests\GuardarContactosRequest;
 use App\Modules\Proveedores\Http\Requests\GuardarSeccion1Request;
 use App\Modules\Proveedores\Http\Requests\GuardarSeccion2Request;
 use App\Modules\Proveedores\Http\Requests\GuardarSeccion3Request;
@@ -29,6 +30,15 @@ class FichaProveedorController extends Controller
         $idEmpresa = (int) $request->attributes->get('id_empresa_activa');
 
         $proveedor = $this->fichaService->obtenerMiFicha($request->user(), $idEmpresa);
+
+        return response()->json(new FichaProveedorResource($proveedor));
+    }
+
+    public function contactos(GuardarContactosRequest $request): JsonResponse
+    {
+        $idEmpresa = (int) $request->attributes->get('id_empresa_activa');
+
+        $proveedor = $this->fichaService->guardarContactosAprobado($request->user(), $idEmpresa, $request->validated());
 
         return response()->json(new FichaProveedorResource($proveedor));
     }

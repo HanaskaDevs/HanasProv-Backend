@@ -74,6 +74,12 @@ class DocumentoProveedorService
                     'id_documento_proveedor' => $doc->Id_Documento_Proveedor,
                     'nombre_original' => $doc->archivo->Nombre_Original,
                     'fecha_caducidad' => $doc->Fecha_Caducidad?->toDateString(),
+                    // true = vence en 30 días o menos (o ya venció) ->
+                    // usado para que un proveedor YA APROBADO pueda
+                    // reemplazar ESTE documento puntual aunque el resto
+                    // de su documentación ya esté aprobada y bloqueada
+                    // (ver ChecklistDocumentos.tsx en el frontend).
+                    'proximo_a_vencer' => $doc->Fecha_Caducidad !== null && $doc->Fecha_Caducidad->lte(now()->addDays(30)),
                     'estado' => $doc->Estado,
                     'fecha_creacion' => $doc->Fecha_Creacion,
                     // Lo que calificó el admin sobre ESTE archivo puntual.
@@ -179,13 +185,23 @@ class DocumentoProveedorService
             ->findOrFail($idDocumentoProveedor);
 
         // La documentación bloqueada (ya registrada) normalmente no se
-        // puede tocar -> EXCEPTO mientras haya correcciones pendientes de
-        // confirmar (el admin rechazó algo y el proveedor no dijo "ya
-        // terminé de corregir" todavía) Y este archivo puntual no esté ya
-        // Aprobado. Esto cubre tanto el rechazo original como el caso de
-        // que el proveedor se haya equivocado de archivo al reemplazar:
-        // mientras no confirme, se puede seguir corrigiendo.
-        $puedeEditarAunqueEsteRegistrada = $proveedor->Correcciones_Pendientes && $documentoActual->Estado_Calificacion !== 'Aprobado';
+        // puede tocar -> EXCEPTO en 2 casos:
+        // 1) Mientras haya correcciones pendientes de confirmar (el admin
+        //    rechazó algo y el proveedor no dijo "ya terminé de
+        //    corregir" todavía) Y este archivo puntual no esté ya
+        //    Aprobado -> cubre el rechazo original y el caso de haberse
+        //    equivocado de archivo al reemplazar.
+        // 2) El documento está a 30 días o menos de vencer (o ya venció)
+        //    -> un proveedor YA APROBADO puede renovarlo aunque el resto
+        //    de su documentación siga aprobada y bloqueada. Vuelve a
+        //    quedar pendiente de calificar (ver más abajo, el nuevo
+        //    registro nace sin Estado_Calificacion).
+        $proximoAVencer = $documentoActual->Fecha_Caducidad !== null
+            && $documentoActual->Fecha_Caducidad->lte(now()->addDays(30));
+
+        $puedeEditarAunqueEsteRegistrada =
+            ($proveedor->Correcciones_Pendientes && $documentoActual->Estado_Calificacion !== 'Aprobado')
+            || $proximoAVencer;
 
         if ($proveedor->Fecha_Registro_Documentacion !== null && ! $puedeEditarAunqueEsteRegistrada) {
             throw ValidationException::withMessages([
@@ -270,8 +286,18 @@ class DocumentoProveedorService
 
         $documento = DocumentoProveedor::where('Id_Proveedor', $proveedor->Id_Proveedor)
             ->where('Activo', 1)
-            ->with('archivo')
+            ->with(['archivo', 'tipoDocumento'])
             ->findOrFail($idDocumentoProveedor);
+
+        // Los documentos OBLIGATORIOS nunca se pueden borrar del todo,
+        // solo reemplazar -> esta regla vivía solo en el frontend (el
+        // botón "Borrar" se ocultaba), pero nada impedía pegarle
+        // directo a este endpoint. Se refuerza acá también.
+        if ($documento->tipoDocumento->Obligatorio) {
+            throw ValidationException::withMessages([
+                'archivo' => ['Este documento es obligatorio, no se puede eliminar. Puede reemplazarlo por otro.'],
+            ]);
+        }
 
         // Misma regla que reemplazarDocumento: se puede borrar mientras
         // haya correcciones pendientes de confirmar y no esté Aprobado.

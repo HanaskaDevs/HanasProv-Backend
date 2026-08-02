@@ -64,6 +64,47 @@ class FichaProveedorService
         return $proveedor->fresh(['clases', 'categoriasProducto', 'calificacionesCampos']);
     }
 
+    /**
+     * Para un proveedor YA APROBADO: permite actualizar sus 4 bloques de
+     * contacto (Representante Legal, Ventas, Calidad, Contabilidad)
+     * libremente, cuando quiera, sin que eso dispare ninguna revisión
+     * nueva -> el resto de la Ficha (Datos Generales, Clase, Categoría)
+     * sigue bloqueado para edición directa a propósito, esos requieren
+     * gestión aparte.
+     */
+    public function guardarContactosAprobado(Usuario $usuario, int $idEmpresaActiva, array $data): Proveedor
+    {
+        $proveedor = $this->miProveedor($usuario, $idEmpresaActiva);
+
+        if ((int) $proveedor->Id_Estado_Proveedor !== self::ESTADO_APROBADO) {
+            throw new AccessDeniedHttpException('Esta acción es solo para proveedores ya aprobados.');
+        }
+
+        $proveedor->forceFill([
+            'Representante_Legal' => $data['representante_legal'] ?? null,
+            'Correo_Representante' => $data['correo_representante'] ?? null,
+            'Telefono_Representante' => $data['telefono_representante'] ?? null,
+            'Contacto_Venta' => $data['contacto_venta'] ?? null,
+            'Correo_Venta' => $data['correo_venta'] ?? null,
+            'Telefono_Contacto_Venta' => $data['telefono_contacto_venta'] ?? null,
+            'Contacto_Calidad' => $data['contacto_calidad'] ?? null,
+            'Correo_Calidad' => $data['correo_calidad'] ?? null,
+            'Telefono_Contacto_Calidad' => $data['telefono_contacto_calidad'] ?? null,
+            'Contacto_Contabilidad' => $data['contacto_contabilidad'] ?? null,
+            'Correo_Contabilidad' => $data['correo_contabilidad'] ?? null,
+            'Telefono_Contabilidad' => $data['telefono_contabilidad'] ?? null,
+            'Modificado_Por' => $usuario->Id_Usuario,
+            'Fecha_Modificacion' => now(),
+        ])->save();
+
+        return $proveedor->fresh(['clases', 'categoriasProducto', 'calificacionesCampos']);
+    }
+
+    protected const ESTADO_APROBADO = 2;
+    // ^ Mismo criterio que CalificacionProveedorService: por ahora
+    // hardcodeado con comentario, hasta que se centralice en una
+    // constante/enum compartida en todo el proyecto.
+
     public function guardarSeccion2(Usuario $usuario, int $idEmpresaActiva, array $idClases): Proveedor
     {
         $proveedor = $this->miProveedor($usuario, $idEmpresaActiva);
