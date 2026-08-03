@@ -5,15 +5,6 @@ use App\Modules\Ficha_Productos\Http\Controllers\ProductoController;
 use App\Modules\Ficha_Productos\Http\Controllers\UnidadPresentacionController;
 use Illuminate\Support\Facades\Route;
 
-Route::get('/productos-proveedores', [ProductoController::class, 'indexTodos'])
-    ->middleware(['auth:sanctum', EmpresaActiva::class]);
-
-Route::put('/productos-proveedores/{producto}/codigo-bc', [ProductoController::class, 'guardarCodigoBC'])
-    ->middleware(['auth:sanctum', EmpresaActiva::class]);
-
-Route::post('/productos-proveedores/importar-codigo-bc', [ProductoController::class, 'importarCodigosBC'])
-    ->middleware(['auth:sanctum', EmpresaActiva::class]);
-
 Route::prefix('mis-productos')
     ->middleware(['auth:sanctum', EmpresaActiva::class])
     ->group(function () {

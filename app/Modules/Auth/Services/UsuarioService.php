@@ -657,18 +657,39 @@ public function otorgarAccesoEmpresa(Usuario $usuario, int $idEmpresa, Usuario $
         }
 
         if ($usuario->Tipo_Usuario === 'Proveedor' && ! $usuario->Requiere_Cambio_Password) {
-            $proveedor = Proveedor::create([
-                'Id_Empresa' => $idEmpresa,
-                'Email' => $usuario->Email,
-                'Id_Estado_Proveedor' => 1, // TODO: usar constante/enum del estado "Aspirante" inicial
-                'Seccion_Actual' => 1,
-                'Porcentaje_Completado_Ficha' => 0,
-                'Fecha_Postulacion' => now(),
-                'Activo' => true,
-                'Fecha_Creacion' => now(),
-            ]);
+            // Reutilizamos el Proveedor de esa empresa+email si YA existe,
+            // sea porque:
+            // - un intento anterior (doble clic, etc.) ya creó el cascarón
+            //   sin RUC y no llegó a vincularlo (mismo criterio que
+            //   activarCuenta()), o
+            // - el proveedor ya había tenido acceso a esta empresa antes
+            //   (quitarAccesoEmpresa() solo desactiva Usuario_Empresa, el
+            //   Proveedor -con o sin RUC ya cargado- nunca se borra) y se le
+            //   está reactivando el acceso.
+            // Sin este chequeo se creaba un cascarón vacío duplicado al
+            // reactivar a alguien que ya había completado su Ficha.
+            $proveedor = Proveedor::where('Id_Empresa', $idEmpresa)
+                ->where('Email', $usuario->Email)
+                ->first();
 
-            $usuario->proveedores()->attach($proveedor->Id_Proveedor);
+            if (! $proveedor) {
+                $proveedor = Proveedor::create([
+                    'Id_Empresa' => $idEmpresa,
+                    'Email' => $usuario->Email,
+                    'Id_Estado_Proveedor' => 1, // TODO: usar constante/enum del estado "Aspirante" inicial
+                    'Seccion_Actual' => 1,
+                    'Porcentaje_Completado_Ficha' => 0,
+                    'Fecha_Postulacion' => now(),
+                    'Activo' => true,
+                    'Fecha_Creacion' => now(),
+                ]);
+            }
+
+            // syncWithoutDetaching en vez de attach(): si el vínculo en
+            // Usuario_Proveedor ya existía (proveedor que recupera acceso),
+            // attach() intentaría insertarlo de nuevo y chocaría con la
+            // UNIQUE KEY (Id_Usuario, Id_Proveedor).
+            $usuario->proveedores()->syncWithoutDetaching([$proveedor->Id_Proveedor]);
         }
     });
 }
