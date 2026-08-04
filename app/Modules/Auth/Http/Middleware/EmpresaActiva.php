@@ -8,10 +8,22 @@ use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
- * Verifica que la Sesion ligada al token actual tenga una empresa activa
- * seleccionada (Sesion.Id_Empresa_Activa) antes de continuar.
- * La empresa activa se cambia vía POST /auth/cambiar-empresa, sin
- * necesidad de volver a loguearse (igual que en Business Central).
+ * Resuelve la empresa activa de la petición y la deja en
+ * $request->attributes['id_empresa_activa'].
+ *
+ * Orden de resolución:
+ *
+ *  1. Header X-Empresa-Activa, si viene. El front lo manda con la empresa de
+ *     ESA pestaña (guardada en sessionStorage). Al venir por petición y no del
+ *     estado del servidor, cada pestaña puede estar en una empresa distinta al
+ *     mismo tiempo compartiendo un solo token.
+ *
+ *  2. Sesion.Id_Empresa_Activa, como respaldo. Cubre el primer arranque y
+ *     cualquier cliente que no mande el header (Postman, un script, etc.).
+ *
+ * En los dos casos se verifica el acceso real contra la tabla pivote. El header
+ * lo pone el navegador, así que NO es de fiar: sin esa verificación, cambiar un
+ * número en la petición bastaría para leer los datos de otra empresa.
  */
 class EmpresaActiva
 {
@@ -32,15 +44,26 @@ class EmpresaActiva
             ], 401);
         }
 
-        if (! $sesion->Id_Empresa_Activa) {
+        // trim() por si el header llega con espacios: sin él, ctype_digit
+        // fallaría y se caería al respaldo de la sesión sin avisar, haciendo que
+        // la pestaña muestre una empresa distinta a la que pidió.
+        $idEmpresaHeader = trim((string) $request->header('X-Empresa-Activa', ''));
+
+        $idEmpresa = ctype_digit($idEmpresaHeader) && (int) $idEmpresaHeader > 0
+            ? (int) $idEmpresaHeader
+            : (int) ($sesion->Id_Empresa_Activa ?? 0);
+
+        if ($idEmpresa <= 0) {
             return response()->json([
                 'message' => 'Debe seleccionar una empresa activa para continuar.',
-                'empresas_disponibles' => $usuario->empresas()->wherePivot('Activo', true)->get(['Empresa.Id_Empresa', 'Razon_Social']),
+                'empresas_disponibles' => $usuario->empresas()
+                    ->wherePivot('Activo', true)
+                    ->get(['Empresa.Id_Empresa', 'Razon_Social']),
             ], 409);
         }
 
         $tieneAcceso = $usuario->empresas()
-            ->where('Empresa.Id_Empresa', $sesion->Id_Empresa_Activa)
+            ->where('Empresa.Id_Empresa', $idEmpresa)
             ->wherePivot('Activo', true)
             ->exists();
 
@@ -50,7 +73,7 @@ class EmpresaActiva
             ], 403);
         }
 
-        $request->attributes->set('id_empresa_activa', $sesion->Id_Empresa_Activa);
+        $request->attributes->set('id_empresa_activa', $idEmpresa);
 
         return $next($request);
     }

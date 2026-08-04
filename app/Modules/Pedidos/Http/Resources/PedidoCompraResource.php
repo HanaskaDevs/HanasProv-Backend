@@ -34,6 +34,10 @@ class PedidoCompraResource extends JsonResource
             'nro_pedido' => $this->Nro_Pedido,
             'fecha_registro_bc' => $this->Fecha_Registro_BC?->toDateString(),
             'fecha_recepcion_esperada' => $this->Fecha_Recepcion_Esperada?->toDateString(),
+            // Fecha con la que el pedido quedó clasificado en Vigentes /
+            // Históricos: la esperada si vino de BC, la de registro si no.
+            'fecha_recepcion_efectiva' => ($this->Fecha_Recepcion_Esperada ?? $this->Fecha_Registro_BC)?->toDateString(),
+            'usa_fecha_registro_como_recepcion' => $this->Fecha_Recepcion_Esperada === null,
             'estado' => $this->Estado,
             'porcentaje_entrega' => $porcentajeEntregaPedido,
             'lineas' => $lineas,

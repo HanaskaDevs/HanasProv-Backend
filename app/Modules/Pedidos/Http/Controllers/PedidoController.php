@@ -16,20 +16,27 @@ class PedidoController extends Controller
         protected PedidoInternoService $pedidoInternoService,
     ) {}
 
+    /**
+     * Pestaña "Vigentes". La ruta se sigue llamando /abiertos por
+     * compatibilidad con el front, pero ya no filtra por Estado: pasa la
+     * VISTA ('vigentes'), y el service la resuelve por fecha de recepción
+     * y por entrega completa.
+     */
     public function abiertos(Request $request): JsonResponse
     {
         $idEmpresaActiva = (int) $request->attributes->get('id_empresa_activa');
 
-        $pedidos = $this->pedidoService->listar($request->user(), $idEmpresaActiva, 'Abierto');
+        $pedidos = $this->pedidoService->listar($request->user(), $idEmpresaActiva, 'vigentes');
 
         return response()->json(PedidoCompraResource::collection($pedidos));
     }
 
+    /** Pestaña "Históricos". Ver la nota de abiertos() sobre el nombre de la ruta. */
     public function cerrados(Request $request): JsonResponse
     {
         $idEmpresaActiva = (int) $request->attributes->get('id_empresa_activa');
 
-        $pedidos = $this->pedidoService->listar($request->user(), $idEmpresaActiva, 'Cerrado');
+        $pedidos = $this->pedidoService->listar($request->user(), $idEmpresaActiva, 'historicos');
 
         return response()->json(PedidoCompraResource::collection($pedidos));
     }
