@@ -5,6 +5,7 @@ namespace App\Modules\Auth\Services;
 use App\Models\Empresa;
 use App\Modules\Documentos_Proveedor\Models\DocumentoProveedor;
 use App\Modules\Ficha_Productos\Models\Producto;
+use App\Modules\Pedidos\Models\PedidoCompra;
 use App\Modules\Proveedores\Models\Proveedor;
 use App\Modules\Reclamos\Models\Reclamo;
 
@@ -58,6 +59,25 @@ class DashboardSistemasService
             ->where('Estado', 'Abierto')
             ->count();
 
+        // Los 5 pedidos abiertos con fecha de recepción esperada más
+        // próxima (o ya vencida) -> a diferencia de los contadores de
+        // arriba (que solo dicen "cuántos"), esto le dice a
+        // Sistemas/Admin CUÁLES atender primero, sin tener que entrar
+        // a Pedidos y ordenar/filtrar a mano.
+        $pedidosProximos = PedidoCompra::where('Id_Empresa', $idEmpresaActiva)
+            ->where('Activo', 1)
+            ->where('Estado', 'Abierto')
+            ->with('proveedor:Id_Proveedor,Razon_Social,Nombre_Comercial')
+            ->orderBy('Fecha_Recepcion_Esperada')
+            ->limit(5)
+            ->get()
+            ->map(fn (PedidoCompra $pedido) => [
+                'nro_pedido' => $pedido->Nro_Pedido,
+                'proveedor' => $pedido->proveedor?->Nombre_Comercial ?? $pedido->proveedor?->Razon_Social,
+                'fecha_recepcion_esperada' => $pedido->Fecha_Recepcion_Esperada?->toDateString(),
+                'vencido' => $pedido->Fecha_Recepcion_Esperada !== null && $pedido->Fecha_Recepcion_Esperada->isPast(),
+            ]);
+
         return [
             'total_empresas' => Empresa::where('Activo', 1)->count(),
             'proveedores_por_estado' => $proveedoresPorEstado,
@@ -65,6 +85,7 @@ class DashboardSistemasService
             'documentos_pendientes' => $documentosPendientes,
             'productos_pendientes' => $productosPendientes,
             'reclamos_abiertos' => $reclamosAbiertos,
+            'pedidos_proximos' => $pedidosProximos,
         ];
     }
 }
