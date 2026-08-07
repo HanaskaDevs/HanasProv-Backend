@@ -92,6 +92,8 @@ class ReclamoService
         int $idEmpresaActiva,
         int $idProveedor,
         string $asunto,
+        string $tipoReclamo,
+        string $impactoProveedor,
         string $mensajeTexto,
         array $destinatarios,
         array $imagenes = []
@@ -106,11 +108,13 @@ class ReclamoService
 
         $proveedor = Proveedor::where('Id_Empresa', $idEmpresaActiva)->findOrFail($idProveedor);
 
-        return DB::transaction(function () use ($usuario, $idEmpresaActiva, $proveedor, $asunto, $mensajeTexto, $destinatarios, $imagenes) {
+        return DB::transaction(function () use ($usuario, $idEmpresaActiva, $proveedor, $asunto, $tipoReclamo, $impactoProveedor, $mensajeTexto, $destinatarios, $imagenes) {
             $reclamo = Reclamo::create([
                 'Id_Empresa' => $idEmpresaActiva,
                 'Id_Proveedor' => $proveedor->Id_Proveedor,
                 'Asunto' => $asunto,
+                'Tipo_Reclamo' => $tipoReclamo,
+                'Impacto_Proveedor' => $impactoProveedor,
                 'Estado' => 'Abierto',
                 'Creado_Por' => $usuario->Id_Usuario,
                 'Fecha_Creacion' => now(),

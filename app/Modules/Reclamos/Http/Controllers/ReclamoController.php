@@ -78,6 +78,8 @@ class ReclamoController extends Controller
             $idEmpresaActiva,
             (int) $request->validated('id_proveedor'),
             $request->validated('asunto'),
+            $request->validated('tipo_reclamo'),
+            $request->validated('impacto_proveedor'),
             $request->validated('mensaje'),
             $request->validated('destinatarios'),
             $request->file('imagenes', []),

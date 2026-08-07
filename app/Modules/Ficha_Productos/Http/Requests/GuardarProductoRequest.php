@@ -18,6 +18,9 @@ class GuardarProductoRequest extends FormRequest
         'codigo_barras' => ['nullable', 'string', 'max:50'],
         'id_unidad_presentacion' => ['required', 'integer', 'exists:Unidad_Presentacion,Id_Unidad_Presentacion'],
         'precio' => ['nullable', 'numeric', 'min:0'],
+        'peso' => ['nullable', 'numeric', 'min:0'],
+        'volumen' => ['nullable', 'numeric', 'min:0'],
+        'unidad_por_caja' => ['nullable', 'integer', 'min:1'],
     ];
 }
 }
