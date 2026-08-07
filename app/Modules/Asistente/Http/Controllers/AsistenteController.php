@@ -27,4 +27,18 @@ class AsistenteController extends Controller
 
         return response()->json(['respuesta' => $respuesta]);
     }
+
+    /**
+     * Se llama sola al cargar el dashboard (ver HanaBot.tsx), sin que el
+     * usuario abra el chat. Devuelve null casi siempre; solo trae texto
+     * la primera vez que un proveedor recién Aprobado entra al portal.
+     */
+    public function bienvenidaProactiva(Request $request): JsonResponse
+    {
+        $idEmpresaActiva = (int) $request->attributes->get('id_empresa_activa');
+
+        $mensaje = $this->asistenteService->obtenerBienvenidaProactiva($request->user(), $idEmpresaActiva);
+
+        return response()->json(['mensaje' => $mensaje]);
+    }
 }

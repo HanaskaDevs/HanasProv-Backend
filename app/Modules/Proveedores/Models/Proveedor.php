@@ -27,7 +27,7 @@ class Proveedor extends BaseModel
         'Fecha_Registro_Documentacion', 'Fecha_Registro_Calificacion_Documentos', 'Correcciones_Pendientes', 'Fecha_Registro_Calificacion_Productos', 'Correcciones_Pendientes_Productos',
         'Estado_Calificacion_Ficha', 'Comentario_Calificacion_Ficha',
         'Calificado_Por_Ficha', 'Fecha_Calificacion_Ficha',
-        'Fecha_Postulacion', 'Fecha_Aprobacion',
+        'Fecha_Postulacion', 'Fecha_Aprobacion', 'Felicitacion_Bienvenida_Mostrada',
         'Activo', 'Creado_Por', 'Fecha_Creacion', 'Modificado_Por', 'Fecha_Modificacion',
     ];
 
@@ -47,6 +47,7 @@ class Proveedor extends BaseModel
         'Fecha_Registro_Calificacion_Productos' => 'datetime',
         'Correcciones_Pendientes_Productos' => 'boolean',
         'Correcciones_Pendientes' => 'boolean',
+        'Felicitacion_Bienvenida_Mostrada' => 'boolean',
         'Fecha_Calificacion_Ficha' => 'datetime',
         'Fecha_Postulacion' => 'datetime',
         'Fecha_Aprobacion' => 'datetime',

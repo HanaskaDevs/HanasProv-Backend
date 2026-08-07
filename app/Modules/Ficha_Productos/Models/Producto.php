@@ -15,17 +15,22 @@ class Producto extends BaseModel
 
     protected $fillable = [
         'Id_Proveedor', 'Id_Unidad_Presentacion', 'Nombre_Producto',
-        'Codigo_Barras', 'Precio', 'Activo',
+        'Codigo_Barras', 'Precio', 'Peso', 'Volumen', 'Unidad_Por_Caja', 'Activo',
         'Bloqueado', 'Estado_Calificacion', 'Comentario_Calificacion',
         'Calificado_Por', 'Fecha_Calificacion',
+        'Precio_En_Revision',
         'Bc_Nro_Producto',
         'Creado_Por', 'Fecha_Creacion', 'Modificado_Por', 'Fecha_Modificacion',
     ];
 
     protected $casts = [
         'Precio' => 'decimal:2',
+        'Peso' => 'decimal:3',
+        'Volumen' => 'decimal:3',
+        'Unidad_Por_Caja' => 'integer',
         'Activo' => 'boolean',
         'Bloqueado' => 'boolean',
+        'Precio_En_Revision' => 'boolean',
         'Fecha_Creacion' => 'datetime',
         'Fecha_Modificacion' => 'datetime',
         'Fecha_Calificacion' => 'datetime',
@@ -44,5 +49,10 @@ class Producto extends BaseModel
     public function documentos(): HasMany
     {
         return $this->hasMany(DocumentoProducto::class, 'Id_Producto');
+    }
+
+    public function solicitudesCambioPrecio(): HasMany
+    {
+        return $this->hasMany(SolicitudCambioPrecio::class, 'Id_Producto');
     }
 }

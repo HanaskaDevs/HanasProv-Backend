@@ -8,6 +8,9 @@ use App\Modules\Documentos_Proveedor\Models\TipoDocumento;
 use App\Modules\Ficha_Productos\Models\Producto;
 use App\Modules\Proveedores\Models\CalificacionCampoFicha;
 use App\Modules\Proveedores\Models\Proveedor;
+use App\Modules\Proveedores\Notifications\ProveedorAprobadoNotification;
+use App\Modules\Proveedores\Notifications\ProveedorRechazadoNotification;
+use Illuminate\Notifications\AnonymousNotifiable;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
@@ -59,6 +62,39 @@ class CalificacionProveedorService
     // constante/enum compartida.
     protected const ESTADO_ASPIRANTE = 1;
     protected const ESTADO_APROBADO = 2;
+    protected const ESTADO_RECHAZADO = 3;
+
+    /**
+     * Mismo mapeo que ETIQUETAS_CAMPOS_FICHA en
+     * shared/constants/camposFichaProveedor.ts del front -> solo se usa
+     * acá para armar un correo legible ("Razón social" en vez de
+     * "razon_social"), no cambia ninguna validación.
+     */
+    protected const ETIQUETAS_CAMPOS_FICHA = [
+        'ruc' => 'RUC',
+        'clase_contribuyente' => 'Clase de contribuyente',
+        'razon_social' => 'Razón social',
+        'nombre_comercial' => 'Nombre comercial',
+        'email' => 'Correo',
+        'telefono' => 'Teléfono',
+        'direccion' => 'Dirección',
+        'ciudad' => 'Ciudad',
+        'pagina_web' => 'Página web',
+        'representante_legal' => 'Representante legal · Nombre',
+        'correo_representante' => 'Representante legal · Correo',
+        'telefono_representante' => 'Representante legal · Teléfono',
+        'contacto_venta' => 'Contacto de ventas · Nombre',
+        'correo_venta' => 'Contacto de ventas · Correo',
+        'telefono_contacto_venta' => 'Contacto de ventas · Teléfono',
+        'contacto_calidad' => 'Contacto de calidad · Nombre',
+        'correo_calidad' => 'Contacto de calidad · Correo',
+        'telefono_contacto_calidad' => 'Contacto de calidad · Teléfono',
+        'contacto_contabilidad' => 'Contacto de contabilidad · Nombre',
+        'correo_contabilidad' => 'Contacto de contabilidad · Correo',
+        'telefono_contabilidad' => 'Contacto de contabilidad · Teléfono',
+        'clase_proveedor' => 'Clase de Proveedor',
+        'categoria_productos' => 'Categoría de Productos',
+    ];
 
     public function obtenerFicha(Usuario $admin, int $idEmpresaActiva, int $idProveedor): Proveedor
     {
@@ -435,6 +471,13 @@ class CalificacionProveedorService
         }
 
         $proveedor->forceFill(['Fecha_Registro_Calificacion_Productos' => now()])->save();
+
+        // Este es el ÚLTIMO paso de la revisión (ficha y documentación ya
+        // se calificaron antes) -> es el único punto donde tiene sentido
+        // dar un veredicto final (Aprobado o Rechazado) y notificar por
+        // correo, porque recién acá se sabe con certeza si quedó algún
+        // producto aprobado o no.
+        $this->resolverVeredictoFinal($proveedor, $admin);
     }
 
     /**
@@ -574,6 +617,119 @@ class CalificacionProveedorService
             'Id_Estado_Proveedor' => self::ESTADO_APROBADO,
             'Fecha_Aprobacion' => now(),
         ])->save();
+
+        $this->notificarProveedorAprobado($proveedor);
+    }
+
+    /**
+     * Veredicto final al cerrar la calificación de productos (ver
+     * registrarCalificacionProductos, único llamador): si ya se cumplen
+     * las 3 condiciones, aprueba (por si por algún camino no se había
+     * disparado todavía). Si no se cumplen porque la ficha quedó
+     * rechazada, o algún documento quedó rechazado, o ningún producto
+     * quedó aprobado, rechaza formalmente al proveedor (hasta ahora
+     * Id_Estado_Proveedor nunca pasaba a Rechazado de forma automática)
+     * y le notifica por correo el detalle de qué se rechazó y por qué.
+     */
+    protected function resolverVeredictoFinal(Proveedor $proveedor, Usuario $admin): void
+    {
+        $proveedor->refresh();
+
+        if ($proveedor->Id_Estado_Proveedor !== self::ESTADO_ASPIRANTE) {
+            return;
+        }
+
+        $diagnostico = $this->diagnosticarCondicionesAprobado($proveedor);
+
+        if ($diagnostico['ficha_aprobada'] && $diagnostico['documentacion_aprobada'] && $diagnostico['hay_producto_aprobado']) {
+            $this->activarSiCorrespondeAprobado($proveedor);
+
+            return;
+        }
+
+        $fichaRechazada = $proveedor->fresh('calificacionesCampos')->estadoGeneralCalificacionFicha() === 'Rechazado';
+
+        $documentosRechazados = DocumentoProveedor::where('Id_Proveedor', $proveedor->Id_Proveedor)
+            ->where('Activo', 1)
+            ->where('Estado_Calificacion', 'Rechazado')
+            ->with('tipoDocumento')
+            ->get();
+
+        // Ninguna de las 3 condiciones de rechazo explícito se cumple
+        // (lo más probable: la ficha o la documentación todavía no
+        // terminan de calificarse en algún flujo distinto al normal) ->
+        // no corresponde tomar todavía una decisión final.
+        if (! $fichaRechazada && $documentosRechazados->isEmpty() && $diagnostico['hay_producto_aprobado']) {
+            return;
+        }
+
+        $camposRechazados = $proveedor->calificacionesCampos->where('Estado', 'Rechazado')->values();
+
+        $productosRechazados = Producto::where('Id_Proveedor', $proveedor->Id_Proveedor)
+            ->where('Activo', 1)
+            ->where('Estado_Calificacion', 'Rechazado')
+            ->get(['Nombre_Producto', 'Comentario_Calificacion']);
+
+        app(ProveedorService::class)->cambiarEstado(
+            $proveedor,
+            self::ESTADO_RECHAZADO,
+            'Rechazo automático al cerrar la calificación de productos: ficha, documentación o productos con observaciones sin resolver.',
+            $admin->Id_Usuario
+        );
+
+        $this->notificarProveedorRechazado($proveedor, $camposRechazados, $documentosRechazados, $productosRechazados);
+    }
+
+    protected function notificarProveedorAprobado(Proveedor $proveedor): void
+    {
+        if (! $proveedor->Email) {
+            return;
+        }
+
+        $nombreEmpresa = $proveedor->empresa?->Nombre_Comercial ?? $proveedor->empresa?->Razon_Social ?? 'Hanaska';
+        $nombreProveedor = $proveedor->Nombre_Comercial ?: $proveedor->Razon_Social;
+
+        (new AnonymousNotifiable())
+            ->route('mail', $proveedor->Email)
+            ->notify(new ProveedorAprobadoNotification($proveedor->Email, $nombreProveedor, $nombreEmpresa));
+    }
+
+    /**
+     * @param  \Illuminate\Support\Collection<int, CalificacionCampoFicha>  $camposRechazados
+     * @param  \Illuminate\Database\Eloquent\Collection<int, DocumentoProveedor>  $documentosRechazados
+     * @param  \Illuminate\Database\Eloquent\Collection<int, Producto>  $productosRechazados
+     */
+    protected function notificarProveedorRechazado(
+        Proveedor $proveedor,
+        $camposRechazados,
+        $documentosRechazados,
+        $productosRechazados
+    ): void {
+        if (! $proveedor->Email) {
+            return;
+        }
+
+        $nombreEmpresa = $proveedor->empresa?->Nombre_Comercial ?? $proveedor->empresa?->Razon_Social ?? 'Hanaska';
+        $nombreProveedor = $proveedor->Nombre_Comercial ?: $proveedor->Razon_Social;
+
+        $campos = $camposRechazados->map(fn (CalificacionCampoFicha $c) => [
+            'nombre' => self::ETIQUETAS_CAMPOS_FICHA[$c->Nombre_Campo] ?? $c->Nombre_Campo,
+            'motivo' => $c->Comentario,
+        ])->all();
+
+        $documentos = $documentosRechazados->map(fn (DocumentoProveedor $d) => [
+            'nombre' => $d->tipoDocumento->Nombre_Documento ?? 'Documento',
+            'motivo' => $d->Comentario_Calificacion,
+        ])->all();
+
+        $productos = $productosRechazados->map(fn (Producto $p) => [
+            'nombre' => $p->Nombre_Producto,
+            'motivo' => $p->Comentario_Calificacion,
+        ])->all();
+
+        (new AnonymousNotifiable())
+            ->route('mail', $proveedor->Email)
+            ->notify(new ProveedorRechazadoNotification($proveedor->Email, $nombreProveedor, $nombreEmpresa, $campos, $documentos, $productos));
     }
 
     protected function proveedorDeLaEmpresa(int $idEmpresaActiva, int $idProveedor): Proveedor

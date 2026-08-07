@@ -9,6 +9,11 @@ use Illuminate\Support\Facades\Log;
 
 class AsistenteService
 {
+    // Id_Estado_Proveedor de "Aprobado" (ver RolEstadoProveedorSeeder) ->
+    // mismo criterio hardcodeado-con-comentario que ya usa
+    // CalificacionProveedorService, Rol/Estado_Proveedor no tienen CRUD.
+    protected const ESTADO_PROVEEDOR_APROBADO = 2;
+
     public function __construct(protected AsistenteContextoService $contextoService)
     {
     }
@@ -48,6 +53,54 @@ class AsistenteService
         }
 
         return $this->respuestaRespaldo($mensaje);
+    }
+
+    /**
+     * Mensaje proactivo de Hana, SIN que el proveedor tenga que abrir el
+     * chat: se muestra una única vez, la primera vez que un proveedor
+     * recién Aprobado entra al portal (ver Felicitacion_Bienvenida_Mostrada
+     * en Proveedor -> se marca en true acá mismo, atómico con la
+     * lectura, para que dos pestañas abiertas a la vez no lo muestren
+     * doble). Null si no corresponde (no es proveedor, no está
+     * Aprobado, o ya se le mostró antes).
+     */
+    public function obtenerBienvenidaProactiva(Usuario $usuario, int $idEmpresaActiva): ?string
+    {
+        if ($usuario->Tipo_Usuario !== 'Proveedor') {
+            return null;
+        }
+
+        $proveedor = $usuario->proveedores()->where('Id_Empresa', $idEmpresaActiva)->first();
+
+        if (! $proveedor || (int) $proveedor->Id_Estado_Proveedor !== self::ESTADO_PROVEEDOR_APROBADO) {
+            return null;
+        }
+
+        if ($proveedor->Felicitacion_Bienvenida_Mostrada) {
+            return null;
+        }
+
+        // Se marca ANTES de armar el texto (no después): si algo falla
+        // armando el mensaje, preferimos perder este único saludo a
+        // arriesgarnos a que quede reintentando en cada carga de página.
+        $proveedor->forceFill(['Felicitacion_Bienvenida_Mostrada' => true])->save();
+
+        $ahora = now();
+        $saludoHorario = match (true) {
+            $ahora->hour < 12 => 'Buenos días',
+            $ahora->hour < 19 => 'Buenas tardes',
+            default => 'Buenas noches',
+        };
+
+        $primerNombre = AsistenteContextoService::primerNombreDe($usuario);
+        $nombreEmpresa = $proveedor->empresa?->Nombre_Comercial ?? $proveedor->empresa?->Razon_Social ?? 'Hanaska';
+
+        $saludoConNombre = $primerNombre !== '' ? "{$saludoHorario}, {$primerNombre}" : $saludoHorario;
+
+        return "{$saludoConNombre}! 🎉 Tengo que darte una noticia hermosa: ya revisamos todo tu proceso y "
+            . "quedaste como proveedor **Aprobado** de {$nombreEmpresa}. ¡Felicidades, de verdad! "
+            . "A partir de ahora ya puedes gestionar tu catálogo de productos con normalidad. "
+            . "¿Cómo estás? Cualquier cosa que necesites, aquí estoy para ayudarte 💛";
     }
 
     protected function armarPersona(): string

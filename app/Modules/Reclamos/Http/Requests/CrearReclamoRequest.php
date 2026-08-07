@@ -16,6 +16,8 @@ class CrearReclamoRequest extends FormRequest
         return [
             'id_proveedor' => ['required', 'integer'],
             'asunto' => ['required', 'string', 'max:200'],
+            'tipo_reclamo' => ['required', 'string', 'in:Calidad,Salubridad,Inocuidad'],
+            'impacto_proveedor' => ['required', 'string', 'in:Alto,Medio,Bajo'],
             'mensaje' => ['required', 'string', 'max:2000'],
             'destinatarios' => ['required', 'array', 'min:1'],
             'destinatarios.*.rol_contacto' => ['required', 'string', 'max:50'],

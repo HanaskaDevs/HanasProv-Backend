@@ -28,7 +28,52 @@ class AsistenteContextoService
             ? $this->contextoProveedor($usuario, $idEmpresaActiva)
             : $this->contextoInterno($usuario, $idEmpresaActiva);
 
-        return $this->instruccionesNavegacion($usuario, $idEmpresaActiva) . "\n\n" . $contenido;
+        return $this->contextoIdentidadYHora($usuario)
+            . "\n\n" . $this->instruccionesNavegacion($usuario, $idEmpresaActiva)
+            . "\n\n" . $contenido;
+    }
+
+    /**
+     * El modelo no tiene reloj propio ni sabe con quién habla salvo que
+     * se lo digamos acá -> sin esto, "Buenos días/tardes" o saludar por
+     * el nombre real del usuario sería puro adivinar de parte del
+     * modelo. APP_TIMEZONE ya está en America/Guayaquil (ver
+     * config/app.php), así que now() ya da la hora real de Ecuador.
+     */
+    protected function contextoIdentidadYHora(Usuario $usuario): string
+    {
+        $ahora = now();
+        $saludoHorario = match (true) {
+            $ahora->hour < 12 => 'Buenos días',
+            $ahora->hour < 19 => 'Buenas tardes',
+            default => 'Buenas noches',
+        };
+
+        $primerNombre = $this->primerNombreDe($usuario);
+
+        $lineas = [
+            "FECHA Y HORA ACTUAL EN ECUADOR: {$ahora->translatedFormat('l d \\d\\e F \\d\\e Y')}, {$ahora->format('H:i')}.",
+            "Si es tu primer mensaje en esta conversación, saluda usando exactamente \"{$saludoHorario}\" según esta hora (no calcules tú la hora, usa este dato).",
+        ];
+
+        if ($primerNombre !== '') {
+            $lineas[] = "Nombre de pila del usuario con el que hablas: {$primerNombre}. Salúdalo por su nombre la primera vez que le respondas.";
+        }
+
+        return implode("\n", $lineas);
+    }
+
+    /**
+     * "Nombre_Completo" arranca igual al Email hasta que el usuario
+     * activa su cuenta (ver comentario en CodigoActivacionNotification)
+     * -> si por lo que sea todavía no se completó, esto evita un saludo
+     * ridículo tipo "Buenos días, mlopez@hanaska.com".
+     */
+    public static function primerNombreDe(Usuario $usuario): string
+    {
+        $primerNombre = trim(explode(' ', trim((string) $usuario->Nombre_Completo))[0] ?? '');
+
+        return str_contains($primerNombre, '@') ? '' : $primerNombre;
     }
 
     /**
