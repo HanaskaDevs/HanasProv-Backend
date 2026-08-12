@@ -26,8 +26,10 @@ class ProductoResource extends JsonResource
                 ->where('Activo', true)
                 ->map(fn($doc) => [
                     'id_documento_producto' => $doc->Id_Documento_Producto,
+                    'id_tipo_documento_producto' => $doc->Id_Tipo_Documento_Producto,
                     'tipo' => $doc->tipoDocumento->Carpeta_Slug,
                     'nombre_original' => $doc->archivo->Nombre_Original,
+                    'fecha_caducidad' => $doc->Fecha_Caducidad?->toDateString(),
                 ])->values()),
         ];
     }

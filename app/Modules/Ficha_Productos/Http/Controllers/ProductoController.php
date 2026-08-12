@@ -55,10 +55,32 @@ class ProductoController extends Controller
             $idEmpresaActiva,
             $producto,
             $tipoDocumento,
-            $request->file('archivo')
+            $request->file('archivo'),
+            $request->input('fecha_caducidad'),
+            $request->input('nombre_documento')
         );
 
         return response()->json($documento, 201);
+    }
+
+    /**
+     * Catálogo activo de tipos de documento de producto -> el front lo
+     * usa para armar el checklist dinámicamente (categorías,
+     * obligatoriedad, si permite varios archivos o pide fecha de
+     * caducidad), en vez de tenerlo hardcodeado.
+     */
+    public function tiposDocumento(): JsonResponse
+    {
+        return response()->json(
+            $this->productoService->listarTiposDocumento()->map(fn ($tipo) => [
+                'id_tipo_documento_producto' => $tipo->Id_Tipo_Documento_Producto,
+                'nombre_documento' => $tipo->Nombre_Documento,
+                'carpeta_slug' => $tipo->Carpeta_Slug,
+                'obligatorio' => (bool) $tipo->Obligatorio,
+                'permite_multiples' => (bool) $tipo->Permite_Multiples,
+                'requiere_fecha_caducidad' => (bool) $tipo->Requiere_Fecha_Caducidad,
+            ])->values()
+        );
     }
 
     public function descargarDocumento(Request $request, int $documentoProducto)

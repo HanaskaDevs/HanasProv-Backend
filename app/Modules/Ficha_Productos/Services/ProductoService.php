@@ -251,12 +251,24 @@ class ProductoService
         $archivo->delete();
     }
 
+    /**
+     * Catálogo activo de tipos de documento de producto -> lo consume
+     * el front para armar el checklist dinámicamente (antes venía
+     * hardcodeado en ModalDocumentosProducto.tsx con solo 3 tipos fijos).
+     */
+    public function listarTiposDocumento(): \Illuminate\Support\Collection
+    {
+        return TipoDocumentoProducto::where('Activo', 1)->get();
+    }
+
     public function subirDocumento(
         Usuario $usuario,
         int $idEmpresaActiva,
         int $idProducto,
         int $idTipoDocumentoProducto,
-        UploadedFile $archivo
+        UploadedFile $archivo,
+        ?string $fechaCaducidad = null,
+        ?string $nombreDocumento = null
     ): DocumentoProducto {
         $producto = $this->miProducto($usuario, $idEmpresaActiva, $idProducto);
 
@@ -276,7 +288,23 @@ class ProductoService
 
         $tipo = TipoDocumentoProducto::where('Activo', 1)->findOrFail($idTipoDocumentoProducto);
 
-        return DB::transaction(function () use ($usuario, $producto, $tipo, $archivo) {
+        if ($tipo->Requiere_Fecha_Caducidad && ! $fechaCaducidad) {
+            throw ValidationException::withMessages([
+                'fecha_caducidad' => ['Este documento requiere fecha de caducidad.'],
+            ]);
+        }
+
+        // Mismo criterio que DocumentoProveedorService::subirDocumento:
+        // tipos "Permite_Multiples" (ej. "Hojas de seguridad") necesitan
+        // que el proveedor indique cómo se llama cada archivo, porque
+        // puede haber varios y no se distinguirían entre sí.
+        if ($tipo->Permite_Multiples && ! $nombreDocumento) {
+            throw ValidationException::withMessages([
+                'nombre_documento' => ['Indica el nombre de este documento.'],
+            ]);
+        }
+
+        return DB::transaction(function () use ($usuario, $producto, $tipo, $archivo, $fechaCaducidad, $nombreDocumento) {
             $registroArchivo = Archivo::create([
                 'Id_Proveedor' => $producto->Id_Proveedor,
                 // Nombre_Original arranca vacío -> se completa más abajo
@@ -310,10 +338,16 @@ class ProductoService
             $nombreProducto = SaneadorNombreArchivo::sanear($producto->Nombre_Producto, "producto-{$producto->Id_Producto}");
             $codigo = SaneadorNombreArchivo::sanear($tipo->Codigo_Archivo ?? $tipo->Carpeta_Slug, 'DOC');
             $razonSocial = SaneadorNombreArchivo::sanear($producto->proveedor->Razon_Social);
+            // Igual que en Documentos del proveedor: para tipos
+            // "Permite_Multiples" (ej. "Hojas de seguridad") el nombre
+            // que escribió el proveedor entra en el nombre físico, para
+            // poder distinguir varios archivos del mismo tipo entre sí.
+            $nombrePersonalizado = $tipo->Permite_Multiples ? SaneadorNombreArchivo::sanear($nombreDocumento) : null;
 
             $carpeta = "proveedores/{$ruc}/{$producto->proveedor->Id_Empresa}_{$nombreEmpresa}/doc_productos/"
                 ."{$producto->Id_Producto}_{$nombreProducto}/{$tipo->Carpeta_Slug}";
-            $nombreFisico = "{$codigo}_{$producto->Id_Producto}_{$razonSocial}_{$registroArchivo->Id_Archivo}.{$extension}";
+            $partesNombre = array_filter([$codigo, $nombrePersonalizado, (string) $producto->Id_Producto, $razonSocial, (string) $registroArchivo->Id_Archivo]);
+            $nombreFisico = implode('_', $partesNombre).".{$extension}";
 
             Storage::disk(self::DISCO)->putFileAs($carpeta, $archivo, $nombreFisico);
 
@@ -323,44 +357,50 @@ class ProductoService
             ]);
 
             // El(los) documento(s) anteriores de este mismo tipo se
-            // desactivan. El archivo físico viejo se archiva en
-            // "historico/" SOLO si de verdad fue el que un admin vio y
-            // rechazó (comparando su fecha de creación contra la fecha
-            // de calificación del producto) -> si es un archivo subido
-            // durante esta misma corrección, que nadie revisó todavía,
-            // se borra directo. Ver MueveArchivoAHistorico para el
-            // detalle de por qué hace falta esta comparación acá.
-            $fechaCalificacionProducto = $producto->Fecha_Calificacion;
+            // desactivan -> EXCEPTO si el tipo permite múltiples (ej.
+            // "Hojas de seguridad"), donde este archivo se suma a los
+            // que ya había en vez de reemplazarlos. El archivo físico
+            // viejo se archiva en "historico/" SOLO si de verdad fue el
+            // que un admin vio y rechazó (comparando su fecha de
+            // creación contra la fecha de calificación del producto) ->
+            // si es un archivo subido durante esta misma corrección,
+            // que nadie revisó todavía, se borra directo. Ver
+            // MueveArchivoAHistorico para el detalle de por qué hace
+            // falta esta comparación acá.
+            if (! $tipo->Permite_Multiples) {
+                $fechaCalificacionProducto = $producto->Fecha_Calificacion;
 
-            $documentosViejos = DocumentoProducto::where('Id_Producto', $producto->Id_Producto)
-                ->where('Id_Tipo_Documento_Producto', $tipo->Id_Tipo_Documento_Producto)
-                ->where('Activo', 1)
-                ->with('archivo')
-                ->get();
+                $documentosViejos = DocumentoProducto::where('Id_Producto', $producto->Id_Producto)
+                    ->where('Id_Tipo_Documento_Producto', $tipo->Id_Tipo_Documento_Producto)
+                    ->where('Activo', 1)
+                    ->with('archivo')
+                    ->get();
 
-            foreach ($documentosViejos as $documentoViejo) {
-                $rutaHistorico = $this->archivarOEliminarSegunEstadoProducto(
-                    self::DISCO,
-                    $documentoViejo->archivo?->Ruta_Almacenamiento,
-                    $producto->Estado_Calificacion,
-                    $documentoViejo->Fecha_Creacion,
-                    $fechaCalificacionProducto
-                );
+                foreach ($documentosViejos as $documentoViejo) {
+                    $rutaHistorico = $this->archivarOEliminarSegunEstadoProducto(
+                        self::DISCO,
+                        $documentoViejo->archivo?->Ruta_Almacenamiento,
+                        $producto->Estado_Calificacion,
+                        $documentoViejo->Fecha_Creacion,
+                        $fechaCalificacionProducto
+                    );
 
-                if ($rutaHistorico) {
-                    $documentoViejo->archivo->update(['Ruta_Almacenamiento' => $rutaHistorico]);
+                    if ($rutaHistorico) {
+                        $documentoViejo->archivo->update(['Ruta_Almacenamiento' => $rutaHistorico]);
+                    }
                 }
-            }
 
-            DocumentoProducto::where('Id_Producto', $producto->Id_Producto)
-                ->where('Id_Tipo_Documento_Producto', $tipo->Id_Tipo_Documento_Producto)
-                ->where('Activo', 1)
-                ->update(['Activo' => 0]);
+                DocumentoProducto::where('Id_Producto', $producto->Id_Producto)
+                    ->where('Id_Tipo_Documento_Producto', $tipo->Id_Tipo_Documento_Producto)
+                    ->where('Activo', 1)
+                    ->update(['Activo' => 0]);
+            }
 
             $nuevoDocumento = DocumentoProducto::create([
                 'Id_Producto' => $producto->Id_Producto,
                 'Id_Tipo_Documento_Producto' => $tipo->Id_Tipo_Documento_Producto,
                 'Id_Archivo' => $registroArchivo->Id_Archivo,
+                'Fecha_Caducidad' => $fechaCaducidad,
                 'Activo' => 1,
                 'Creado_Por' => $usuario->Id_Usuario,
                 'Fecha_Creacion' => now(),
