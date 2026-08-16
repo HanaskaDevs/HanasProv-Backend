@@ -5,6 +5,7 @@ namespace App\Modules\Proveedores\Services;
 use App\Modules\Auth\Models\Usuario;
 use App\Modules\Documentos_Proveedor\Models\DocumentoProveedor;
 use App\Modules\Documentos_Proveedor\Models\TipoDocumento;
+use App\Modules\Documentos_Proveedor\Models\TipoDocumentoClaseExcluida;
 use App\Modules\Ficha_Productos\Models\Producto;
 use App\Modules\Proveedores\Models\CalificacionCampoFicha;
 use App\Modules\Proveedores\Models\Proveedor;
@@ -181,13 +182,21 @@ class CalificacionProveedorService
         $proveedor = $this->proveedorDeLaEmpresa($idEmpresaActiva, $idProveedor);
         $esQuito = strcasecmp((string) $proveedor->Ciudad, 'Quito') === 0;
 
+        $idsClases = $proveedor->clases()->pluck('Clase_Proveedor.Id_Clase_Proveedor');
+        $idsExcluidosPorClase = $idsClases->isEmpty()
+            ? collect()
+            : TipoDocumentoClaseExcluida::where('Activo', 1)->whereIn('Id_Clase_Proveedor', $idsClases)->pluck('Id_Tipo_Documento');
+
         $tipos = TipoDocumento::where('Activo', 1)
             ->where(function ($query) use ($esQuito) {
-                $query->where('Requiere_Solo_Quito', 0);
+                $query->where('Requiere_Solo_Quito', 0)->where('Requiere_Excepto_Quito', 0);
                 if ($esQuito) {
                     $query->orWhere('Requiere_Solo_Quito', 1);
+                } else {
+                    $query->orWhere('Requiere_Excepto_Quito', 1);
                 }
             })
+            ->when($idsExcluidosPorClase->isNotEmpty(), fn ($query) => $query->whereNotIn('Id_Tipo_Documento', $idsExcluidosPorClase))
             ->with(['documentosProveedor' => function ($query) use ($proveedor) {
                 $query->where('Id_Proveedor', $proveedor->Id_Proveedor)
                     ->where('Activo', 1)

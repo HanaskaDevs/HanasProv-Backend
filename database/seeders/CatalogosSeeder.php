@@ -81,18 +81,26 @@ class CatalogosSeeder extends Seeder
 
     protected function seedTiposDocumento(): void
     {
+        // "Notificación sanitaria..." y "Hojas de seguridad" ya NO van
+        // acá -> pasaron a ser documentos POR PRODUCTO (ver
+        // seedTiposDocumentoProducto). "Aprobación de reglamento de
+        // trabajo en el Ministerio" tampoco -> la reemplazó "Certificado
+        // de afiliación al IESS" (ahora en "General", no en
+        // "Certificaciones").
         $tipos = [
-            ['Categoria' => 'Certificaciones', 'Nombre_Documento' => 'Certificado de IESS', 'Carpeta_Slug' => 'certificado-iess', 'Codigo_Archivo' => 'IESS', 'Obligatorio' => true, 'Permite_Multiples' => false, 'Requiere_Fecha_Caducidad' => false, 'Requiere_Solo_Quito' => false],
-            ['Categoria' => 'General', 'Nombre_Documento' => 'Carta de Garantia', 'Carpeta_Slug' => 'carta-garantia', 'Codigo_Archivo' => 'CGARANTIA', 'Obligatorio' => true, 'Permite_Multiples' => false, 'Requiere_Fecha_Caducidad' => false, 'Requiere_Solo_Quito' => false],
-            ['Categoria' => 'General', 'Nombre_Documento' => 'Notificación sanitaria o Certificado de Inscripción de alimentos', 'Carpeta_Slug' => 'notificacion-sanitaria', 'Codigo_Archivo' => 'NSANITARIA', 'Obligatorio' => true, 'Permite_Multiples' => false, 'Requiere_Fecha_Caducidad' => true, 'Requiere_Solo_Quito' => false],
-            ['Categoria' => 'General', 'Nombre_Documento' => 'Permiso de funcionamiento ARCSA', 'Carpeta_Slug' => 'permiso-arcsa', 'Codigo_Archivo' => 'ARCSA', 'Obligatorio' => true, 'Permite_Multiples' => false, 'Requiere_Fecha_Caducidad' => true, 'Requiere_Solo_Quito' => false],
-            ['Categoria' => 'General', 'Nombre_Documento' => 'Permiso de funcionamiento Bomberos', 'Carpeta_Slug' => 'permiso-bomberos', 'Codigo_Archivo' => 'PBOMBEROS', 'Obligatorio' => true, 'Permite_Multiples' => false, 'Requiere_Fecha_Caducidad' => false, 'Requiere_Solo_Quito' => false],
-            ['Categoria' => 'General', 'Nombre_Documento' => 'RUC', 'Carpeta_Slug' => 'ruc', 'Codigo_Archivo' => 'RUC', 'Obligatorio' => true, 'Permite_Multiples' => false, 'Requiere_Fecha_Caducidad' => false, 'Requiere_Solo_Quito' => false],
-            ['Categoria' => 'General', 'Nombre_Documento' => 'LUAE', 'Carpeta_Slug' => 'luae', 'Codigo_Archivo' => 'LUAE', 'Obligatorio' => true, 'Permite_Multiples' => false, 'Requiere_Fecha_Caducidad' => false, 'Requiere_Solo_Quito' => true],
-            ['Categoria' => 'General', 'Nombre_Documento' => 'Aprobación de reglamento de trabajo en el Ministerio', 'Carpeta_Slug' => 'reglamento-trabajo-ministerio', 'Codigo_Archivo' => 'RTMINISTERIO', 'Obligatorio' => false, 'Permite_Multiples' => false, 'Requiere_Fecha_Caducidad' => false, 'Requiere_Solo_Quito' => false],
-            ['Categoria' => 'Certificaciones', 'Nombre_Documento' => 'Certificaciones de calidad (BPM, HACCP, etc.)', 'Carpeta_Slug' => 'certificaciones-calidad', 'Codigo_Archivo' => 'CC', 'Obligatorio' => true, 'Permite_Multiples' => true, 'Requiere_Fecha_Caducidad' => true, 'Requiere_Solo_Quito' => false],
-            ['Categoria' => 'General', 'Nombre_Documento' => 'Check list autoevaluación de proveedores', 'Carpeta_Slug' => 'autoevaluacion-proveedores', 'Codigo_Archivo' => 'AP', 'Obligatorio' => true, 'Permite_Multiples' => false, 'Requiere_Fecha_Caducidad' => false, 'Requiere_Solo_Quito' => false],
-            ['Categoria' => 'General', 'Nombre_Documento' => 'Hojas de seguridad', 'Carpeta_Slug' => 'hojas-seguridad', 'Codigo_Archivo' => 'HS', 'Obligatorio' => false, 'Permite_Multiples' => true, 'Requiere_Fecha_Caducidad' => false, 'Requiere_Solo_Quito' => false],
+            ['Categoria' => 'General', 'Nombre_Documento' => 'Certificado de afiliación al IESS', 'Carpeta_Slug' => 'certificado-iess', 'Codigo_Archivo' => 'IESS', 'Obligatorio' => true, 'Permite_Multiples' => false, 'Requiere_Fecha_Caducidad' => false, 'Requiere_Solo_Quito' => false, 'Requiere_Excepto_Quito' => false],
+            ['Categoria' => 'General', 'Nombre_Documento' => 'Carta de Garantia', 'Carpeta_Slug' => 'carta-garantia', 'Codigo_Archivo' => 'CGARANTIA', 'Obligatorio' => true, 'Permite_Multiples' => false, 'Requiere_Fecha_Caducidad' => false, 'Requiere_Solo_Quito' => false, 'Requiere_Excepto_Quito' => false],
+            ['Categoria' => 'General', 'Nombre_Documento' => 'Permiso de funcionamiento ARCSA', 'Carpeta_Slug' => 'permiso-arcsa', 'Codigo_Archivo' => 'ARCSA', 'Obligatorio' => true, 'Permite_Multiples' => false, 'Requiere_Fecha_Caducidad' => true, 'Requiere_Solo_Quito' => false, 'Requiere_Excepto_Quito' => false],
+            // Solo fuera de Quito -> en Quito se pide LUAE en su lugar.
+            ['Categoria' => 'General', 'Nombre_Documento' => 'Permiso de funcionamiento Bomberos', 'Carpeta_Slug' => 'permiso-bomberos', 'Codigo_Archivo' => 'PBOMBEROS', 'Obligatorio' => true, 'Permite_Multiples' => false, 'Requiere_Fecha_Caducidad' => false, 'Requiere_Solo_Quito' => false, 'Requiere_Excepto_Quito' => true],
+            ['Categoria' => 'General', 'Nombre_Documento' => 'RUC', 'Carpeta_Slug' => 'ruc', 'Codigo_Archivo' => 'RUC', 'Obligatorio' => true, 'Permite_Multiples' => false, 'Requiere_Fecha_Caducidad' => false, 'Requiere_Solo_Quito' => false, 'Requiere_Excepto_Quito' => false],
+            // Solo en Quito, y no se le pide a la Clase "Productor
+            // Agrícola" (ver seedExclusionesClaseDocumento).
+            ['Categoria' => 'General', 'Nombre_Documento' => 'LUAE', 'Carpeta_Slug' => 'luae', 'Codigo_Archivo' => 'LUAE', 'Obligatorio' => true, 'Permite_Multiples' => false, 'Requiere_Fecha_Caducidad' => false, 'Requiere_Solo_Quito' => true, 'Requiere_Excepto_Quito' => false],
+            // Opcional para todos.
+            ['Categoria' => 'Certificaciones', 'Nombre_Documento' => 'Certificaciones de calidad (BPM, HACCP, etc.)', 'Carpeta_Slug' => 'certificaciones-calidad', 'Codigo_Archivo' => 'CC', 'Obligatorio' => false, 'Permite_Multiples' => true, 'Requiere_Fecha_Caducidad' => true, 'Requiere_Solo_Quito' => false, 'Requiere_Excepto_Quito' => false],
+            ['Categoria' => 'General', 'Nombre_Documento' => 'Check list autoevaluación de proveedores', 'Carpeta_Slug' => 'autoevaluacion-proveedores', 'Codigo_Archivo' => 'AP', 'Obligatorio' => true, 'Permite_Multiples' => false, 'Requiere_Fecha_Caducidad' => false, 'Requiere_Solo_Quito' => false, 'Requiere_Excepto_Quito' => false],
+            ['Categoria' => 'General', 'Nombre_Documento' => 'Certificado bancario', 'Carpeta_Slug' => 'certificado-bancario', 'Codigo_Archivo' => 'CBANCARIO', 'Obligatorio' => false, 'Permite_Multiples' => false, 'Requiere_Fecha_Caducidad' => false, 'Requiere_Solo_Quito' => false, 'Requiere_Excepto_Quito' => false],
         ];
 
         foreach ($tipos as $tipo) {
@@ -100,14 +108,48 @@ class CatalogosSeeder extends Seeder
                 DB::table('Tipo_Documento')->insert([...$tipo, 'Activo' => true]);
             }
         }
+
+        $this->seedExclusionesClaseDocumento();
+    }
+
+    /**
+     * Tipo_Documento_Clase_Excluida: "esta Clase de Proveedor NO
+     * necesita este documento" -> hoy solo hay una regla: un Productor
+     * Agrícola no necesita LUAE.
+     */
+    protected function seedExclusionesClaseDocumento(): void
+    {
+        $idLuae = DB::table('Tipo_Documento')->where('Nombre_Documento', 'LUAE')->value('Id_Tipo_Documento');
+        $idAgricola = DB::table('Clase_Proveedor')->where('Nombre_Clase', 'Productor Agrícola')->value('Id_Clase_Proveedor');
+
+        if (! $idLuae || ! $idAgricola) {
+            return;
+        }
+
+        $yaExiste = DB::table('Tipo_Documento_Clase_Excluida')
+            ->where('Id_Tipo_Documento', $idLuae)
+            ->where('Id_Clase_Proveedor', $idAgricola)
+            ->exists();
+
+        if (! $yaExiste) {
+            DB::table('Tipo_Documento_Clase_Excluida')->insert([
+                'Id_Tipo_Documento' => $idLuae,
+                'Id_Clase_Proveedor' => $idAgricola,
+                'Activo' => true,
+            ]);
+        }
     }
 
     protected function seedTiposDocumentoProducto(): void
     {
         $tipos = [
-            ['Nombre_Documento' => 'Ficha técnica', 'Carpeta_Slug' => 'ficha-tecnica', 'Codigo_Archivo' => 'FT', 'Obligatorio' => true],
-            ['Nombre_Documento' => 'Análisis de producto', 'Carpeta_Slug' => 'analisis-producto', 'Codigo_Archivo' => 'AP', 'Obligatorio' => true],
-            ['Nombre_Documento' => 'Carta de alérgenos', 'Carpeta_Slug' => 'carta-alergenos', 'Codigo_Archivo' => 'CA', 'Obligatorio' => false],
+            ['Nombre_Documento' => 'Ficha técnica', 'Carpeta_Slug' => 'ficha-tecnica', 'Codigo_Archivo' => 'FT', 'Obligatorio' => true, 'Permite_Multiples' => false, 'Requiere_Fecha_Caducidad' => false],
+            ['Nombre_Documento' => 'Análisis de producto', 'Carpeta_Slug' => 'analisis-producto', 'Codigo_Archivo' => 'AP', 'Obligatorio' => true, 'Permite_Multiples' => false, 'Requiere_Fecha_Caducidad' => false],
+            ['Nombre_Documento' => 'Carta de alérgenos', 'Carpeta_Slug' => 'carta-alergenos', 'Codigo_Archivo' => 'CA', 'Obligatorio' => false, 'Permite_Multiples' => false, 'Requiere_Fecha_Caducidad' => false],
+            // Se mudó desde Tipo_Documento (antes era del proveedor, no
+            // del producto).
+            ['Nombre_Documento' => 'Notificación sanitaria o Certificado de Inscripción de alimentos', 'Carpeta_Slug' => 'notificacion-sanitaria', 'Codigo_Archivo' => 'NSANITARIA', 'Obligatorio' => true, 'Permite_Multiples' => false, 'Requiere_Fecha_Caducidad' => true],
+            ['Nombre_Documento' => 'Hojas de seguridad', 'Carpeta_Slug' => 'hojas-seguridad', 'Codigo_Archivo' => 'HS', 'Obligatorio' => false, 'Permite_Multiples' => true, 'Requiere_Fecha_Caducidad' => false],
         ];
 
         foreach ($tipos as $tipo) {

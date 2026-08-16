@@ -6,6 +6,7 @@ use App\Modules\Auth\Models\Usuario;
 use App\Modules\Documentos_Proveedor\Models\Archivo;
 use App\Modules\Documentos_Proveedor\Models\DocumentoProveedor;
 use App\Modules\Documentos_Proveedor\Models\TipoDocumento;
+use App\Modules\Documentos_Proveedor\Models\TipoDocumentoClaseExcluida;
 use App\Modules\Proveedores\Models\Proveedor;
 use App\Shared\MueveArchivoAHistorico;
 use App\Shared\SaneadorNombreArchivo;
@@ -31,17 +32,26 @@ class DocumentoProveedorService
 {
     $proveedor = $this->miProveedor($usuario, $idEmpresaActiva);
     $esQuito = strcasecmp((string) $proveedor->Ciudad, 'Quito') === 0;
+    $idsExcluidosPorClase = $this->idsTiposDocumentoExcluidosPorClase($proveedor);
 
     $tipos = TipoDocumento::where('Activo', 1)
         // Los documentos "solo Quito" (ej. LUAE) ni siquiera se listan
-        // para proveedores de otras ciudades -> no solo se marcan como
-        // no obligatorios, desaparecen del checklist por completo.
+        // para proveedores de otras ciudades, y los "excepto Quito"
+        // (ej. Bomberos) no se listan para proveedores DE Quito -> no
+        // solo se marcan como no obligatorios, desaparecen del
+        // checklist por completo.
         ->where(function ($query) use ($esQuito) {
-            $query->where('Requiere_Solo_Quito', 0);
+            $query->where('Requiere_Solo_Quito', 0)->where('Requiere_Excepto_Quito', 0);
             if ($esQuito) {
                 $query->orWhere('Requiere_Solo_Quito', 1);
+            } else {
+                $query->orWhere('Requiere_Excepto_Quito', 1);
             }
         })
+        // Documentos excluidos para alguna de las Clases de Proveedor
+        // de este proveedor (ej. LUAE no se le pide a un Productor
+        // Agrícola) tampoco aparecen en el checklist.
+        ->when($idsExcluidosPorClase->isNotEmpty(), fn ($query) => $query->whereNotIn('Id_Tipo_Documento', $idsExcluidosPorClase))
         ->with(['documentosProveedor' => function ($query) use ($proveedor) {
             $query->where('Id_Proveedor', $proveedor->Id_Proveedor)
                 ->where('Activo', 1)
@@ -420,15 +430,19 @@ class DocumentoProveedorService
         }
 
         $esQuito = strcasecmp((string) $proveedor->Ciudad, 'Quito') === 0;
+        $idsExcluidosPorClase = $this->idsTiposDocumentoExcluidosPorClase($proveedor);
 
         $tiposObligatorios = TipoDocumento::where('Activo', 1)
             ->where('Obligatorio', 1)
             ->where(function ($query) use ($esQuito) {
-                $query->where('Requiere_Solo_Quito', 0);
+                $query->where('Requiere_Solo_Quito', 0)->where('Requiere_Excepto_Quito', 0);
                 if ($esQuito) {
                     $query->orWhere('Requiere_Solo_Quito', 1);
+                } else {
+                    $query->orWhere('Requiere_Excepto_Quito', 1);
                 }
             })
+            ->when($idsExcluidosPorClase->isNotEmpty(), fn ($query) => $query->whereNotIn('Id_Tipo_Documento', $idsExcluidosPorClase))
             ->withCount(['documentosProveedor' => function ($query) use ($proveedor) {
                 $query->where('Id_Proveedor', $proveedor->Id_Proveedor)->where('Activo', 1);
             }])
@@ -493,6 +507,27 @@ class DocumentoProveedorService
 
     return response()->download($rutaCompleta, $documento->archivo->Nombre_Original);
 }
+
+    /**
+     * Ids de Tipo_Documento que NO se le deben pedir a este proveedor
+     * por alguna de sus Clases de Proveedor (ej. LUAE excluido para
+     * "Productor Agrícola") -> ver Tipo_Documento_Clase_Excluida. Un
+     * proveedor puede tener varias clases (Sección 2 de la Ficha es
+     * multi-select); alcanza con que UNA de ellas esté excluida de un
+     * tipo para que ese documento no se le pida.
+     */
+    protected function idsTiposDocumentoExcluidosPorClase(Proveedor $proveedor): \Illuminate\Support\Collection
+    {
+        $idsClases = $proveedor->clases()->pluck('Clase_Proveedor.Id_Clase_Proveedor');
+
+        if ($idsClases->isEmpty()) {
+            return collect();
+        }
+
+        return TipoDocumentoClaseExcluida::where('Activo', 1)
+            ->whereIn('Id_Clase_Proveedor', $idsClases)
+            ->pluck('Id_Tipo_Documento');
+    }
 
     /**
      * Resuelve el Proveedor del usuario autenticado QUE PERTENECE A LA
