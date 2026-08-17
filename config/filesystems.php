@@ -55,6 +55,19 @@ return [
             'report' => false,
         ],
 
+        // Plantillas .docx en blanco que el proveedor puede descargar,
+        // llenar y volver a subir (ej. Autoevaluación, Carta de
+        // Garantía) -> archivos fijos del catálogo, NO por-proveedor,
+        // por eso van en su propio disco separado del repositorio de
+        // documentos ya cargados por cada proveedor.
+        'plantillas' => [
+            'driver' => 'local',
+            'root' => storage_path('app/plantillas'),
+            'visibility' => 'private',
+            'throw' => false,
+            'report' => false,
+        ],
+
         // Multimedia de Configuraciones (imagen de login, banners/videos del home).
         // Público por diseño: se muestra en Login/Landing SIN autenticación.
         // Se sirve como archivo estático real vía symlink (ver 'links' abajo),

@@ -38,6 +38,11 @@ class CatalogosSeeder extends Seeder
             'Servicio',
             'Maquila',
             'Fabricante Otros',
+            // Nueva (agosto 2026) -> no tenía equivalente entre las
+            // anteriores, hacía falta para poder vincular el nuevo
+            // Tipo_Auditoria "Centros de Faenamiento" (ver
+            // AuditoriaCatalogoSeeder).
+            'Centros de Faenamiento',
         ];
 
         foreach ($clases as $nombre) {
@@ -89,7 +94,7 @@ class CatalogosSeeder extends Seeder
         // "Certificaciones").
         $tipos = [
             ['Categoria' => 'General', 'Nombre_Documento' => 'Certificado de afiliación al IESS', 'Carpeta_Slug' => 'certificado-iess', 'Codigo_Archivo' => 'IESS', 'Obligatorio' => true, 'Permite_Multiples' => false, 'Requiere_Fecha_Caducidad' => false, 'Requiere_Solo_Quito' => false, 'Requiere_Excepto_Quito' => false],
-            ['Categoria' => 'General', 'Nombre_Documento' => 'Carta de Garantia', 'Carpeta_Slug' => 'carta-garantia', 'Codigo_Archivo' => 'CGARANTIA', 'Obligatorio' => true, 'Permite_Multiples' => false, 'Requiere_Fecha_Caducidad' => false, 'Requiere_Solo_Quito' => false, 'Requiere_Excepto_Quito' => false],
+            ['Categoria' => 'General', 'Nombre_Documento' => 'Carta de Garantia', 'Carpeta_Slug' => 'carta-garantia', 'Codigo_Archivo' => 'CGARANTIA', 'Ruta_Plantilla' => 'carta-garantia.docx', 'Obligatorio' => true, 'Permite_Multiples' => false, 'Requiere_Fecha_Caducidad' => false, 'Requiere_Solo_Quito' => false, 'Requiere_Excepto_Quito' => false],
             ['Categoria' => 'General', 'Nombre_Documento' => 'Permiso de funcionamiento ARCSA', 'Carpeta_Slug' => 'permiso-arcsa', 'Codigo_Archivo' => 'ARCSA', 'Obligatorio' => true, 'Permite_Multiples' => false, 'Requiere_Fecha_Caducidad' => true, 'Requiere_Solo_Quito' => false, 'Requiere_Excepto_Quito' => false],
             // Solo fuera de Quito -> en Quito se pide LUAE en su lugar.
             ['Categoria' => 'General', 'Nombre_Documento' => 'Permiso de funcionamiento Bomberos', 'Carpeta_Slug' => 'permiso-bomberos', 'Codigo_Archivo' => 'PBOMBEROS', 'Obligatorio' => true, 'Permite_Multiples' => false, 'Requiere_Fecha_Caducidad' => false, 'Requiere_Solo_Quito' => false, 'Requiere_Excepto_Quito' => true],
@@ -99,13 +104,24 @@ class CatalogosSeeder extends Seeder
             ['Categoria' => 'General', 'Nombre_Documento' => 'LUAE', 'Carpeta_Slug' => 'luae', 'Codigo_Archivo' => 'LUAE', 'Obligatorio' => true, 'Permite_Multiples' => false, 'Requiere_Fecha_Caducidad' => false, 'Requiere_Solo_Quito' => true, 'Requiere_Excepto_Quito' => false],
             // Opcional para todos.
             ['Categoria' => 'Certificaciones', 'Nombre_Documento' => 'Certificaciones de calidad (BPM, HACCP, etc.)', 'Carpeta_Slug' => 'certificaciones-calidad', 'Codigo_Archivo' => 'CC', 'Obligatorio' => false, 'Permite_Multiples' => true, 'Requiere_Fecha_Caducidad' => true, 'Requiere_Solo_Quito' => false, 'Requiere_Excepto_Quito' => false],
-            ['Categoria' => 'General', 'Nombre_Documento' => 'Check list autoevaluación de proveedores', 'Carpeta_Slug' => 'autoevaluacion-proveedores', 'Codigo_Archivo' => 'AP', 'Obligatorio' => true, 'Permite_Multiples' => false, 'Requiere_Fecha_Caducidad' => false, 'Requiere_Solo_Quito' => false, 'Requiere_Excepto_Quito' => false],
+            // Ruta_Plantilla: nombre del archivo dentro del disco
+            // 'plantillas' (storage/app/plantillas) -> ver
+            // DocumentoProveedorService::descargarPlantilla().
+            ['Categoria' => 'General', 'Nombre_Documento' => 'Check list autoevaluación de proveedores', 'Carpeta_Slug' => 'autoevaluacion-proveedores', 'Codigo_Archivo' => 'AP', 'Ruta_Plantilla' => 'autoevaluacion-proveedores.docx', 'Obligatorio' => true, 'Permite_Multiples' => false, 'Requiere_Fecha_Caducidad' => false, 'Requiere_Solo_Quito' => false, 'Requiere_Excepto_Quito' => false],
             ['Categoria' => 'General', 'Nombre_Documento' => 'Certificado bancario', 'Carpeta_Slug' => 'certificado-bancario', 'Codigo_Archivo' => 'CBANCARIO', 'Obligatorio' => false, 'Permite_Multiples' => false, 'Requiere_Fecha_Caducidad' => false, 'Requiere_Solo_Quito' => false, 'Requiere_Excepto_Quito' => false],
         ];
 
         foreach ($tipos as $tipo) {
             if (! DB::table('Tipo_Documento')->where('Nombre_Documento', $tipo['Nombre_Documento'])->exists()) {
                 DB::table('Tipo_Documento')->insert([...$tipo, 'Activo' => true]);
+            } elseif (isset($tipo['Ruta_Plantilla'])) {
+                // Si la fila ya existía de antes (instalación previa a
+                // agosto 2026), el insert de arriba no corre -> hay que
+                // completarle igual la ruta de la plantilla nueva.
+                DB::table('Tipo_Documento')
+                    ->where('Nombre_Documento', $tipo['Nombre_Documento'])
+                    ->whereNull('Ruta_Plantilla')
+                    ->update(['Ruta_Plantilla' => $tipo['Ruta_Plantilla']]);
             }
         }
 

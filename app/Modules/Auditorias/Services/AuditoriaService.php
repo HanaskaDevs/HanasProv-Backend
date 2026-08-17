@@ -21,23 +21,51 @@ class AuditoriaService
         return TipoAuditoria::where('Activo', true)->orderBy('Orden')->get();
     }
 
-    public function listarProveedoresParaAuditoria(Usuario $usuario, int $idEmpresa): Collection
+    /**
+     * $idTipoAuditoria (opcional): si viene, marca 'sugerido' = true en
+     * los proveedores cuya(s) Clase(s) de Proveedor correspondan a ese
+     * Tipo_Auditoria (ver Tipo_Auditoria_Clase) y los deja primero en la
+     * lista -> es la forma en que el wizard "sugiere automáticamente" el
+     * proveedor correcto sin obligar a cambiar el orden actual
+     * (tipo -> proveedor) del flujo.
+     */
+    public function listarProveedoresParaAuditoria(Usuario $usuario, int $idEmpresa, ?int $idTipoAuditoria = null): Collection
     {
         $this->verificarAcceso($usuario, $idEmpresa);
+
+        $idsClasesSugeridas = collect();
+
+        if ($idTipoAuditoria) {
+            $idsClasesSugeridas = TipoAuditoria::where('Activo', true)
+                ->findOrFail($idTipoAuditoria)
+                ->clasesRelacionadas()
+                ->where('Activo', true)
+                ->pluck('Id_Clase_Proveedor');
+        }
 
         return Proveedor::where('Id_Empresa', $idEmpresa)
             ->where('Activo', true)
             ->with(['estado', 'clases'])
             ->orderBy('Razon_Social')
             ->get()
-            ->map(fn($p) => [
-                'id_proveedor' => $p->Id_Proveedor,
-                'razon_social' => $p->Razon_Social,
-                'nombre_comercial' => $p->Nombre_Comercial,
-                'ruc' => $p->Ruc,
-                'estado' => $p->estado?->Nombre_Estado,
-                'clases' => $p->clases->pluck('Nombre_Clase')->values(),
-            ])
+            ->map(function ($p) use ($idsClasesSugeridas) {
+                $sugerido = $idsClasesSugeridas->isNotEmpty()
+                    && $p->clases->pluck('Id_Clase_Proveedor')->intersect($idsClasesSugeridas)->isNotEmpty();
+
+                return [
+                    'id_proveedor' => $p->Id_Proveedor,
+                    'razon_social' => $p->Razon_Social,
+                    'nombre_comercial' => $p->Nombre_Comercial,
+                    'ruc' => $p->Ruc,
+                    'estado' => $p->estado?->Nombre_Estado,
+                    'clases' => $p->clases->pluck('Nombre_Clase')->values(),
+                    'sugerido' => $sugerido,
+                ];
+            })
+            // Los sugeridos primero (orden estable: entre ellos y entre
+            // los demás se conserva el orden alfabético por Razon_Social
+            // ya aplicado en la consulta).
+            ->sortByDesc('sugerido')
             ->values();
     }
 

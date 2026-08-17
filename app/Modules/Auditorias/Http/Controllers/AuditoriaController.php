@@ -27,8 +27,13 @@ class AuditoriaController extends Controller
     public function proveedores(Request $request): JsonResponse
     {
         $idEmpresaActiva = (int) $request->attributes->get('id_empresa_activa');
+        $idTipoAuditoria = $request->query('id_tipo_auditoria');
 
-        $proveedores = $this->auditoriaService->listarProveedoresParaAuditoria($request->user(), $idEmpresaActiva);
+        $proveedores = $this->auditoriaService->listarProveedoresParaAuditoria(
+            $request->user(),
+            $idEmpresaActiva,
+            $idTipoAuditoria !== null ? (int) $idTipoAuditoria : null
+        );
 
         return response()->json($proveedores);
     }
