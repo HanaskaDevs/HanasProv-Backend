@@ -12,6 +12,7 @@ Route::prefix('mi-documentos')
         Route::post('/confirmar-correcciones', [DocumentoProveedorController::class, 'confirmarCorrecciones']);
         Route::post('/documento/{documentoProveedor}/reemplazar', [DocumentoProveedorController::class, 'reemplazar']);
         Route::delete('/documento/{documentoProveedor}', [DocumentoProveedorController::class, 'borrar']);
+        Route::get('/plantilla/{tipoDocumento}', [DocumentoProveedorController::class, 'plantilla']);
         Route::post('/{tipoDocumento}', [DocumentoProveedorController::class, 'subir']);
         Route::get('/{documentoProveedor}/descargar', [DocumentoProveedorController::class, 'descargar']);
     });

@@ -12,7 +12,7 @@ class TipoDocumento extends Model
     public $timestamps = false;
 
     protected $fillable = [
-        'Categoria', 'Nombre_Documento', 'Carpeta_Slug', 'Codigo_Archivo',
+        'Categoria', 'Nombre_Documento', 'Carpeta_Slug', 'Codigo_Archivo', 'Ruta_Plantilla',
         'Obligatorio', 'Permite_Multiples', 'Requiere_Fecha_Caducidad',
         'Requiere_Solo_Quito', 'Requiere_Excepto_Quito', 'Activo',
     ];

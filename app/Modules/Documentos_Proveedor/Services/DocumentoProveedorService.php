@@ -27,6 +27,7 @@ class DocumentoProveedorService
     use MueveArchivoAHistorico;
 
     protected const DISCO = 'repositorio_proveedores';
+    protected const DISCO_PLANTILLAS = 'plantillas';
 
    public function obtenerChecklist(Usuario $usuario, int $idEmpresaActiva): array
 {
@@ -80,6 +81,11 @@ class DocumentoProveedorService
                 'obligatorio' => (bool) $tipo->Obligatorio,
                 'permite_multiples' => (bool) $tipo->Permite_Multiples,
                 'requiere_fecha_caducidad' => (bool) $tipo->Requiere_Fecha_Caducidad,
+                // true = hay una plantilla .docx en blanco descargable
+                // para este tipo (ver descargarPlantilla()) -> el front
+                // muestra un link "Descargar plantilla" junto al control
+                // de carga cuando esto es true.
+                'tiene_plantilla' => (bool) $tipo->Ruta_Plantilla,
                 'documentos' => $tipo->documentosProveedor->map(fn (DocumentoProveedor $doc) => [
                     'id_documento_proveedor' => $doc->Id_Documento_Proveedor,
                     'nombre_original' => $doc->archivo->Nombre_Original,
@@ -507,6 +513,36 @@ class DocumentoProveedorService
 
     return response()->download($rutaCompleta, $documento->archivo->Nombre_Original);
 }
+
+    /**
+     * Descarga la plantilla .docx en blanco de un Tipo_Documento (ej.
+     * "Check list autoevaluación de proveedores", "Carta de Garantia")
+     * para que el proveedor la llene y luego suba el archivo completo
+     * por el flujo normal de subirDocumento(). Solo valida que el
+     * usuario sea un Proveedor de la empresa activa (no hace falta que
+     * la documentación esté en ningún estado en particular -> a
+     * diferencia de subir/reemplazar, descargar la plantilla siempre
+     * está permitido).
+     */
+    public function descargarPlantilla(Usuario $usuario, int $idEmpresaActiva, int $idTipoDocumento)
+    {
+        $this->miProveedor($usuario, $idEmpresaActiva);
+
+        $tipo = TipoDocumento::where('Activo', 1)->findOrFail($idTipoDocumento);
+
+        if (! $tipo->Ruta_Plantilla) {
+            throw new NotFoundHttpException('Este documento no tiene una plantilla disponible para descargar.');
+        }
+
+        if (! Storage::disk(self::DISCO_PLANTILLAS)->exists($tipo->Ruta_Plantilla)) {
+            throw new NotFoundHttpException('La plantilla no se encuentra en el servidor.');
+        }
+
+        $rutaCompleta = Storage::disk(self::DISCO_PLANTILLAS)->path($tipo->Ruta_Plantilla);
+        $nombreDescarga = basename($tipo->Ruta_Plantilla);
+
+        return response()->download($rutaCompleta, $nombreDescarga);
+    }
 
     /**
      * Ids de Tipo_Documento que NO se le deben pedir a este proveedor
