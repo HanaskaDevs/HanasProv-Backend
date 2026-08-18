@@ -8,6 +8,7 @@ use App\Modules\Configuraciones\Models\Configuracion;
 use App\Modules\Configuraciones\Models\GuiaPaso;
 use App\Modules\Configuraciones\Models\HomeSlide;
 use App\Modules\Configuraciones\Models\Politica;
+use App\Modules\Documentos_Proveedor\Services\VencimientoDocumentosService;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
@@ -296,6 +297,32 @@ class ConfiguracionService
         $texto = preg_replace("/\n{3,}/", "\n\n", $texto);
 
         return trim($texto);
+    }
+
+    // ---------- Suspensión automática por documentos vencidos ----------
+
+    /**
+     * Interruptor de la suspensión automática de proveedores con
+     * documentación vencida. La clave y el valor por defecto los define
+     * VencimientoDocumentosService (que es quien los consume) -> acá solo se
+     * expone para la pantalla de Configuraciones, sin repetir el nombre de
+     * la clave en dos lugares.
+     *
+     * Los AVISOS por correo no se pueden apagar desde acá a propósito:
+     * avisar no rompe nada, suspender sí.
+     */
+    public function obtenerSuspensionAutomatica(): bool
+    {
+        return app(VencimientoDocumentosService::class)->suspensionAutomaticaActiva();
+    }
+
+    public function definirSuspensionAutomatica(Usuario $usuario, bool $activa): bool
+    {
+        $this->verificarSistemas($usuario);
+
+        app(VencimientoDocumentosService::class)->definirSuspensionAutomatica($activa, $usuario->Id_Usuario);
+
+        return $activa;
     }
 
     // ---------- Helpers de archivo público ----------

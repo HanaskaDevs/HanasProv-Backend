@@ -10,9 +10,17 @@ return new class extends Migration
     {
         Schema::create('Proveedor_Certificacion', function (Blueprint $table) {
             $table->id('Id_Proveedor_Certificacion');
-            $table->unsignedBigInteger('Id_Proveedor');
+            // OJO con los tipos: Proveedor.Id_Proveedor y Archivo.Id_Archivo
+            // son INT en la base real (aunque sus migraciones usen
+            // $table->id(), que genera BIGINT) -> con unsignedBigInteger acá,
+            // SQL Server rechaza las FK por tipos incompatibles y esta
+            // migración no se puede correr. Id_Tipo_Certificacion SÍ va
+            // bigint porque apunta a la tabla que crea la migración anterior
+            // con $table->id(). Mismo problema ya documentado en
+            // Tipo_Documento_Clase_Excluida y Tipo_Auditoria_Clase.
+            $table->unsignedInteger('Id_Proveedor');
             $table->unsignedBigInteger('Id_Tipo_Certificacion');
-            $table->unsignedBigInteger('Id_Archivo');
+            $table->unsignedInteger('Id_Archivo');
             $table->string('Numero_Certificado', 100)->nullable();
             $table->date('Fecha_Emision');
             $table->date('Fecha_Vencimiento');

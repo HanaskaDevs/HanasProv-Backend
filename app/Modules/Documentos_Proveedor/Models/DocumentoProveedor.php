@@ -14,7 +14,7 @@ class DocumentoProveedor extends BaseModel
 
     protected $fillable = [
         'Id_Proveedor', 'Id_Tipo_Documento', 'Id_Archivo', 'Fecha_Caducidad',
-        'Notificacion_Enviada', 'Estado', 'Activo',
+        'Notificacion_Enviada', 'Fecha_Ultima_Notificacion', 'Estado', 'Activo',
         'Estado_Calificacion', 'Comentario_Calificacion', 'Calificado_Por', 'Fecha_Calificacion',
         'Creado_Por', 'Fecha_Creacion', 'Modificado_Por', 'Fecha_Modificacion',
     ];
@@ -22,6 +22,7 @@ class DocumentoProveedor extends BaseModel
     protected $casts = [
         'Fecha_Caducidad' => 'date',
         'Notificacion_Enviada' => 'boolean',
+        'Fecha_Ultima_Notificacion' => 'datetime',
         'Activo' => 'boolean',
         'Fecha_Calificacion' => 'datetime',
         'Fecha_Creacion' => 'datetime',

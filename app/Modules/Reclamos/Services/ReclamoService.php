@@ -100,11 +100,13 @@ class ReclamoService
     ): Reclamo {
         $this->verificarEsInterno($usuario);
 
-        if (count($imagenes) > self::MAX_IMAGENES) {
-            throw new \Illuminate\Validation\ValidationException(
-                validator([], []),
-            );
-        }
+        // El tope de imágenes NO se valida acá: este bloque construía un
+        // ValidationException con un validador vacío, así que llegaba al
+        // front como un error 422 SIN ningún mensaje adentro (el usuario
+        // veía el formulario fallar sin saber por qué). El límite ya está
+        // cubierto dos veces y bien: CrearReclamoRequest ('imagenes' =>
+        // max:5) y crearMensaje() más abajo, que sí lanza el mensaje
+        // legible "Máximo N imágenes por mensaje.".
 
         $proveedor = Proveedor::where('Id_Empresa', $idEmpresaActiva)->findOrFail($idProveedor);
 

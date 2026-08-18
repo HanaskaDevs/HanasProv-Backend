@@ -8,6 +8,7 @@ use App\Modules\Auth\Models\Usuario;
 use App\Modules\Auth\Models\UsuarioBodega;
 use App\Modules\Auth\Models\UsuarioEmpresa;
 use App\Modules\Auth\Notifications\CodigoActivacionNotification;
+use App\Modules\Proveedores\Models\EstadoProveedor;
 use App\Modules\Proveedores\Models\Proveedor;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
@@ -347,7 +348,7 @@ if ((int) $data['id_rol'] === (int) $idRolProveedor) {
                         $proveedor = Proveedor::create([
                             'Id_Empresa' => $idEmpresa,
                             'Email' => $usuario->Email,
-                            'Id_Estado_Proveedor' => 1, // TODO: usar constante/enum del estado "Aspirante" inicial
+                            'Id_Estado_Proveedor' => EstadoProveedor::ASPIRANTE,
                             'Seccion_Actual' => 1,
                             'Porcentaje_Completado_Ficha' => 0,
                             'Fecha_Postulacion' => now(),
@@ -676,7 +677,7 @@ public function otorgarAccesoEmpresa(Usuario $usuario, int $idEmpresa, Usuario $
                 $proveedor = Proveedor::create([
                     'Id_Empresa' => $idEmpresa,
                     'Email' => $usuario->Email,
-                    'Id_Estado_Proveedor' => 1, // TODO: usar constante/enum del estado "Aspirante" inicial
+                    'Id_Estado_Proveedor' => EstadoProveedor::ASPIRANTE,
                     'Seccion_Actual' => 1,
                     'Porcentaje_Completado_Ficha' => 0,
                     'Fecha_Postulacion' => now(),

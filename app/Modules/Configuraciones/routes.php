@@ -7,6 +7,7 @@ use App\Modules\Configuraciones\Http\Controllers\HomeSlideController;
 use App\Modules\Configuraciones\Http\Controllers\LoginImagenController;
 use App\Modules\Configuraciones\Http\Controllers\PoliticaController;
 use App\Modules\Configuraciones\Http\Controllers\PublicConfigController;
+use App\Modules\Configuraciones\Http\Controllers\SuspensionDocumentosController;
 use Illuminate\Support\Facades\Route;
 
 // Públicas: sin autenticación, consumidas por Landing/Login/Tour antes de loguearse.
@@ -48,4 +49,8 @@ Route::prefix('configuraciones')
         Route::put('/politicas/{politica}', [PoliticaController::class, 'update']);
         Route::delete('/politicas/{politica}', [PoliticaController::class, 'destroy']);
         Route::post('/politicas/extraer-pdf', [PoliticaController::class, 'extraerTextoPdf']);
+
+        // Interruptor de la suspensión automática por documentos vencidos.
+        Route::get('/suspension-documentos', [SuspensionDocumentosController::class, 'show']);
+        Route::put('/suspension-documentos', [SuspensionDocumentosController::class, 'update']);
     });
