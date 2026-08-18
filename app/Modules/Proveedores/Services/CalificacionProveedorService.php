@@ -8,6 +8,7 @@ use App\Modules\Documentos_Proveedor\Models\TipoDocumento;
 use App\Modules\Documentos_Proveedor\Models\TipoDocumentoClaseExcluida;
 use App\Modules\Ficha_Productos\Models\Producto;
 use App\Modules\Proveedores\Models\CalificacionCampoFicha;
+use App\Modules\Proveedores\Models\EstadoProveedor;
 use App\Modules\Proveedores\Models\Proveedor;
 use App\Modules\Proveedores\Notifications\ProveedorAprobadoNotification;
 use App\Modules\Proveedores\Notifications\ProveedorRechazadoNotification;
@@ -57,13 +58,9 @@ class CalificacionProveedorService
     public const CAMPO_CLASE = 'clase_proveedor';
     public const CAMPO_CATEGORIA = 'categoria_productos';
 
-    // IDs de Estado_Proveedor -> mismo criterio que el resto del código
-    // (ver los TODO en ProveedorController/UsuarioService): por ahora
-    // hardcodeados con un comentario, hasta que se centralicen en una
-    // constante/enum compartida.
-    protected const ESTADO_ASPIRANTE = 1;
-    protected const ESTADO_APROBADO = 2;
-    protected const ESTADO_RECHAZADO = 3;
+    // Los IDs de Estado_Proveedor (ASPIRANTE/APROBADO/RECHAZADO) viven en
+    // el modelo EstadoProveedor, no acá: estaban duplicados como
+    // constantes locales en este y otros 3 servicios.
 
     /**
      * Mismo mapeo que ETIQUETAS_CAMPOS_FICHA en
@@ -551,7 +548,7 @@ class CalificacionProveedorService
     {
         $activados = 0;
 
-        Proveedor::where('Id_Estado_Proveedor', self::ESTADO_ASPIRANTE)
+        Proveedor::where('Id_Estado_Proveedor', EstadoProveedor::ASPIRANTE)
             ->where('Activo', 1)
             ->get()
             ->each(function (Proveedor $proveedor) use (&$activados, $onDiagnostico) {
@@ -563,7 +560,7 @@ class CalificacionProveedorService
 
                 $this->activarSiCorrespondeAprobado($proveedor);
 
-                if ($proveedor->fresh()->Id_Estado_Proveedor === self::ESTADO_APROBADO) {
+                if ($proveedor->fresh()->Id_Estado_Proveedor === EstadoProveedor::APROBADO) {
                     $activados++;
                 }
             });
@@ -612,7 +609,7 @@ class CalificacionProveedorService
     {
         $proveedor->refresh();
 
-        if ($proveedor->Id_Estado_Proveedor !== self::ESTADO_ASPIRANTE) {
+        if ($proveedor->Id_Estado_Proveedor !== EstadoProveedor::ASPIRANTE) {
             return;
         }
 
@@ -623,7 +620,7 @@ class CalificacionProveedorService
         }
 
         $proveedor->forceFill([
-            'Id_Estado_Proveedor' => self::ESTADO_APROBADO,
+            'Id_Estado_Proveedor' => EstadoProveedor::APROBADO,
             'Fecha_Aprobacion' => now(),
         ])->save();
 
@@ -644,7 +641,7 @@ class CalificacionProveedorService
     {
         $proveedor->refresh();
 
-        if ($proveedor->Id_Estado_Proveedor !== self::ESTADO_ASPIRANTE) {
+        if ($proveedor->Id_Estado_Proveedor !== EstadoProveedor::ASPIRANTE) {
             return;
         }
 
@@ -681,7 +678,7 @@ class CalificacionProveedorService
 
         app(ProveedorService::class)->cambiarEstado(
             $proveedor,
-            self::ESTADO_RECHAZADO,
+            EstadoProveedor::RECHAZADO,
             'Rechazo automático al cerrar la calificación de productos: ficha, documentación o productos con observaciones sin resolver.',
             $admin->Id_Usuario
         );

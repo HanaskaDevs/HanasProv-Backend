@@ -23,5 +23,8 @@ class DatabaseSeeder extends Seeder
         // Auditorías), por eso el catálogo de auditorías nunca llegó a
         // sembrarse en instalaciones nuevas.
         $this->call(AuditoriaCatalogoSeeder::class);
+        // Los 13 parámetros del formulario de Calificación de Recepciones
+        // (FGH04.15.05-1). No depende de ningún otro seeder.
+        $this->call(RecepcionParametroSeeder::class);
     }
 }

@@ -4,16 +4,12 @@ namespace App\Modules\Asistente\Services;
 
 use App\Modules\Auth\Models\Usuario;
 use App\Modules\Configuraciones\Models\BotRegla;
+use App\Modules\Proveedores\Models\EstadoProveedor;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 class AsistenteService
 {
-    // Id_Estado_Proveedor de "Aprobado" (ver RolEstadoProveedorSeeder) ->
-    // mismo criterio hardcodeado-con-comentario que ya usa
-    // CalificacionProveedorService, Rol/Estado_Proveedor no tienen CRUD.
-    protected const ESTADO_PROVEEDOR_APROBADO = 2;
-
     public function __construct(protected AsistenteContextoService $contextoService)
     {
     }
@@ -72,7 +68,7 @@ class AsistenteService
 
         $proveedor = $usuario->proveedores()->where('Id_Empresa', $idEmpresaActiva)->first();
 
-        if (! $proveedor || (int) $proveedor->Id_Estado_Proveedor !== self::ESTADO_PROVEEDOR_APROBADO) {
+        if (! $proveedor || (int) $proveedor->Id_Estado_Proveedor !== EstadoProveedor::APROBADO) {
             return null;
         }
 

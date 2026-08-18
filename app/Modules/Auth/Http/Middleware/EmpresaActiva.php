@@ -3,6 +3,7 @@
 namespace App\Modules\Auth\Http\Middleware;
 
 use App\Modules\Auth\Services\AuthService;
+use App\Modules\Proveedores\Models\EstadoProveedor;
 use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -71,6 +72,28 @@ class EmpresaActiva
             return response()->json([
                 'message' => 'No tiene acceso a la empresa seleccionada.',
             ], 403);
+        }
+
+        // Proveedor suspendido EN ESTA EMPRESA (documentación vencida sin
+        // regularizar, ver VencimientoDocumentosService): se corta acá, así
+        // el bloqueo vale para todos los endpoints de una sola vez.
+        //
+        // Es por empresa a propósito: el mismo usuario externo puede trabajar
+        // con varias empresas del grupo, y estar al día en una y vencido en
+        // otra -> se le bloquea solo la que corresponde, no la cuenta entera
+        // (el login solo se niega del todo si NO le queda ninguna, ver
+        // AuthService::tieneAlgunaEmpresaDisponible).
+        if ($usuario->Tipo_Usuario === 'Proveedor') {
+            $proveedor = $usuario->proveedores()
+                ->where('Proveedor.Id_Empresa', $idEmpresa)
+                ->first();
+
+            if ($proveedor && (int) $proveedor->Id_Estado_Proveedor === EstadoProveedor::SUSPENDIDO) {
+                return response()->json([
+                    'message' => AuthService::MENSAJE_ACCESO_SUSPENDIDO,
+                    'proveedor_suspendido' => true,
+                ], 403);
+            }
         }
 
         $request->attributes->set('id_empresa_activa', $idEmpresa);

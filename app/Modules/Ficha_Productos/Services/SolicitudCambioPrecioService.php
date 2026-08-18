@@ -7,6 +7,7 @@ use App\Modules\Ficha_Productos\Mail\SolicitudCambioPrecioMail;
 use App\Modules\Ficha_Productos\Models\Producto;
 use App\Modules\Ficha_Productos\Models\SolicitudCambioPrecio;
 use App\Modules\Ficha_Productos\Notifications\SolicitudCambioPrecioNotification;
+use App\Modules\Proveedores\Models\EstadoProveedor;
 use App\Modules\Proveedores\Models\Proveedor;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Notification;
@@ -26,14 +27,6 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
  */
 class SolicitudCambioPrecioService
 {
-    /**
-     * Id_Estado_Proveedor de "Aprobado" (ver RolEstadoProveedorSeeder).
-     * Duplicado a propósito acá (igual que en CalificacionProveedorService)
-     * porque Rol/Estado_Proveedor no tienen CRUD y sus IDs están fijos
-     * desde el seeder.
-     */
-    protected const ESTADO_PROVEEDOR_APROBADO = 2;
-
     public function solicitar(Usuario $usuario, int $idEmpresaActiva, int $idProducto, float $precioNuevo): SolicitudCambioPrecio
     {
         if ($usuario->Tipo_Usuario !== 'Proveedor') {
@@ -46,7 +39,7 @@ class SolicitudCambioPrecioService
             throw new NotFoundHttpException('Este usuario no tiene un Proveedor asociado a la empresa activa.');
         }
 
-        if ((int) $proveedor->Id_Estado_Proveedor !== self::ESTADO_PROVEEDOR_APROBADO) {
+        if ((int) $proveedor->Id_Estado_Proveedor !== EstadoProveedor::APROBADO) {
             throw new AccessDeniedHttpException('Solo un proveedor ya aprobado puede solicitar cambios de precio.');
         }
 

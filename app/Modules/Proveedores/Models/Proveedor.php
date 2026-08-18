@@ -33,9 +33,9 @@ class Proveedor extends BaseModel
 
     protected $casts = [
         // Sin este cast, activarSiCorrespondeAprobado() comparaba este
-        // campo con === /!== contra constantes int (self::ESTADO_ASPIRANTE,
-        // etc.) -> el driver de SQL Server puede devolver columnas int
-        // como string en PHP, así que esa comparación estricta fallaba en
+        // campo con === /!== contra constantes int (EstadoProveedor::
+        // ASPIRANTE, etc.) -> el driver de SQL Server puede devolver
+        // columnas int como string en PHP, así que esa comparación fallaba en
         // silencio y la función se salía antes de siquiera revisar las 3
         // condiciones. Con el cast, Eloquent siempre entrega un int real.
         'Id_Estado_Proveedor' => 'integer',

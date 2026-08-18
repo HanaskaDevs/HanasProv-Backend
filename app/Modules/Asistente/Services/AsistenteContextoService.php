@@ -192,9 +192,16 @@ class AsistenteContextoService
             $lineas[] = "No se pudo obtener el estado de productos en este momento.";
         }
         try {
-            $abiertos = $this->pedidoService->listar($usuario, $idEmpresaActiva, 'Abierto')->count();
-            $cerrados = $this->pedidoService->listar($usuario, $idEmpresaActiva, 'Cerrado')->count();
-            $lineas[] = "Pedidos de compra abiertos: {$abiertos}. Pedidos cerrados: {$cerrados}.";
+            // OJO: PedidoService::listar() espera la VISTA ('vigentes' /
+            // 'historicos'), no un valor del campo Estado. Antes acá se le
+            // pasaba 'Abierto'/'Cerrado' -> el service lanzaba
+            // InvalidArgumentException, el catch de abajo se la comía, y el
+            // bot le respondía "No se pudo obtener el estado de pedidos" a
+            // TODOS los proveedores, siempre. Los nombres son los mismos que
+            // ve el proveedor en las pestañas de Pedidos.
+            $vigentes = $this->pedidoService->listar($usuario, $idEmpresaActiva, 'vigentes')->count();
+            $historicos = $this->pedidoService->listar($usuario, $idEmpresaActiva, 'historicos')->count();
+            $lineas[] = "Pedidos vigentes: {$vigentes}. Pedidos históricos: {$historicos}.";
         } catch (\Throwable $e) {
             $lineas[] = "No se pudo obtener el estado de pedidos en este momento.";
         }

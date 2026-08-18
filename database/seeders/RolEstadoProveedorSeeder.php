@@ -8,9 +8,10 @@ use Illuminate\Support\Facades\DB;
 /**
  * Rol y Estado_Proveedor NO tienen (ni deberían tener) un CRUD libre
  * desde la interfaz -> el backend tiene IDs y nombres de estos
- * hardcodeados en varias constantes PHP:
- *   - CalificacionProveedorService::ESTADO_ASPIRANTE = 1
- *   - CalificacionProveedorService::ESTADO_APROBADO = 2
+ * hardcodeados en constantes PHP:
+ *   - EstadoProveedor::ASPIRANTE = 1 / APROBADO = 2 / RECHAZADO = 3 /
+ *     SUSPENDIDO = 4 (en el modelo App\Modules\Proveedores\Models\
+ *     EstadoProveedor, único lugar donde viven estos IDs)
  *   - Roles referenciados por Nombre_Rol en varios lugares
  *     ('Admin', 'Calidad', 'Compras', 'Proveedor', 'Sistemas')
  *
@@ -53,7 +54,7 @@ class RolEstadoProveedorSeeder extends Seeder
         if (DB::table('Estado_Proveedor')->count() === 0) {
             // El orden acá importa: sin filas previas, la primera
             // insertada recibe Id=1 y la segunda Id=2 -> tienen que
-            // coincidir con ESTADO_ASPIRANTE=1 / ESTADO_APROBADO=2.
+            // coincidir con EstadoProveedor::ASPIRANTE=1 / APROBADO=2.
             DB::table('Estado_Proveedor')->insert([
                 ['Nombre_Estado' => 'Aspirante', 'Descripcion' => 'Proveedor postulando, todavía no aprobado', 'Activo' => true],
                 ['Nombre_Estado' => 'Aprobado', 'Descripcion' => 'Proveedor activo y aprobado', 'Activo' => true],

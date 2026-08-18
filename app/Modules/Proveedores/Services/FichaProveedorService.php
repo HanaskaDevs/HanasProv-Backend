@@ -4,6 +4,7 @@ namespace App\Modules\Proveedores\Services;
 
 use App\Modules\Auth\Models\Usuario;
 use App\Modules\Proveedores\Models\CalificacionCampoFicha;
+use App\Modules\Proveedores\Models\EstadoProveedor;
 use App\Modules\Proveedores\Models\Proveedor;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
@@ -76,7 +77,7 @@ class FichaProveedorService
     {
         $proveedor = $this->miProveedor($usuario, $idEmpresaActiva);
 
-        if ((int) $proveedor->Id_Estado_Proveedor !== self::ESTADO_APROBADO) {
+        if ((int) $proveedor->Id_Estado_Proveedor !== EstadoProveedor::APROBADO) {
             throw new AccessDeniedHttpException('Esta acción es solo para proveedores ya aprobados.');
         }
 
@@ -99,11 +100,6 @@ class FichaProveedorService
 
         return $proveedor->fresh(['clases', 'categoriasProducto', 'calificacionesCampos']);
     }
-
-    protected const ESTADO_APROBADO = 2;
-    // ^ Mismo criterio que CalificacionProveedorService: por ahora
-    // hardcodeado con comentario, hasta que se centralice en una
-    // constante/enum compartida en todo el proyecto.
 
     public function guardarSeccion2(Usuario $usuario, int $idEmpresaActiva, array $idClases): Proveedor
     {
