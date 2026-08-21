@@ -161,4 +161,14 @@ class Usuario extends Authenticatable
     {
         return $this->tieneRolEnEmpresa($idEmpresa, 'Calidad');
     }
+
+    /**
+     * Rol nuevo para el guardia de recepción: solo marca "el proveedor
+     * arribó" en la pantalla de seguimiento del calendario de horarios
+     * (ver HorarioEntregaService) -> no tiene acceso a nada más del portal.
+     */
+    public function esGuardia(int $idEmpresa): bool
+    {
+        return $this->tieneRolEnEmpresa($idEmpresa, 'Guardia');
+    }
 }
