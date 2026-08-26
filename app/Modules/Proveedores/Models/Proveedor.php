@@ -28,6 +28,7 @@ class Proveedor extends BaseModel
         'Estado_Calificacion_Ficha', 'Comentario_Calificacion_Ficha',
         'Calificado_Por_Ficha', 'Fecha_Calificacion_Ficha',
         'Fecha_Postulacion', 'Fecha_Aprobacion', 'Felicitacion_Bienvenida_Mostrada',
+        'Felicitacion_Calificacion_Mostrada',
         'Activo', 'Creado_Por', 'Fecha_Creacion', 'Modificado_Por', 'Fecha_Modificacion',
     ];
 
@@ -48,6 +49,7 @@ class Proveedor extends BaseModel
         'Correcciones_Pendientes_Productos' => 'boolean',
         'Correcciones_Pendientes' => 'boolean',
         'Felicitacion_Bienvenida_Mostrada' => 'boolean',
+        'Felicitacion_Calificacion_Mostrada' => 'boolean',
         'Fecha_Calificacion_Ficha' => 'datetime',
         'Fecha_Postulacion' => 'datetime',
         'Fecha_Aprobacion' => 'datetime',

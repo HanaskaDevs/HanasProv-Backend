@@ -152,8 +152,10 @@ class PedidoVistasTest extends TestCase
 
         $contexto = app(AsistenteContextoService::class)->generar($usuario, $empresa->Id_Empresa);
 
-        $this->assertStringContainsString('Pedidos vigentes: 1', $contexto);
-        $this->assertStringContainsString('Pedidos históricos: 1', $contexto);
-        $this->assertStringNotContainsString('No se pudo obtener el estado de pedidos', $contexto);
+        $this->assertStringContainsString('Vigentes: 1. Históricos: 1.', $contexto);
+        // Lo que de verdad cuida este test: que NO se haya caído al mensaje
+        // de error del catch. Si el contexto se reformula otra vez, esta
+        // aserción sigue siendo la que detecta la regresión.
+        $this->assertStringNotContainsString('no se pudo leer el estado de pedidos', $contexto);
     }
 }

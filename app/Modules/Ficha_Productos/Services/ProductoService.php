@@ -11,6 +11,7 @@ use App\Modules\Ficha_Productos\Models\UnidadPresentacion;
 use App\Modules\Proveedores\Models\Proveedor;
 use App\Shared\MueveArchivoAHistorico;
 use App\Shared\SaneadorNombreArchivo;
+use App\Shared\VerificaArchivoFisico;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -21,7 +22,7 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 class ProductoService
 {
-    use MueveArchivoAHistorico;
+    use MueveArchivoAHistorico, VerificaArchivoFisico;
 
     protected const DISCO = 'repositorio_proveedores';
 
@@ -779,9 +780,7 @@ class ProductoService
 
         $rutaCompleta = Storage::disk(self::DISCO)->path($documento->archivo->Ruta_Almacenamiento);
 
-        if (! is_file($rutaCompleta)) {
-            throw new NotFoundHttpException('El archivo físico no se encuentra en el repositorio.');
-        }
+        $this->verificarArchivoEntregable($rutaCompleta);
 
         return response()->file($rutaCompleta, [
             'Content-Type' => $documento->archivo->Tipo_Mime,

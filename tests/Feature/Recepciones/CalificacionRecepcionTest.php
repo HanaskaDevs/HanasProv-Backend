@@ -6,7 +6,10 @@ use App\Modules\Auditorias\Models\CalificacionRecepcion;
 use App\Modules\Auditorias\Models\RecepcionParametro;
 use App\Modules\Auditorias\Services\AgendaRecepcionService;
 use App\Modules\Auditorias\Services\CalificacionRecepcionService;
+use App\Modules\Horarios_Entrega\Models\HorarioEntregaProveedor;
+use App\Modules\Pedidos\Models\PedidoCompra;
 use App\Modules\Proveedores\Models\Proveedor;
+use Carbon\Carbon;
 use Database\Seeders\RecepcionParametroSeeder;
 use Illuminate\Validation\ValidationException;
 use Tests\TestCase;
@@ -157,56 +160,135 @@ class CalificacionRecepcionTest extends TestCase
         $this->servicio()->obtenerDetalle($calidad, $empresaA->Id_Empresa, $deB->Id_Calificacion_Recepcion);
     }
 
-    /** El reparto anual es estable y cae siempre en día hábil. */
-    public function test_la_agenda_es_estable_y_en_dia_habil(): void
+    /**
+     * Ya NO hay reparto por fórmula: la calificación se hace el día que el
+     * proveedor entrega. Estos tests fijan las tres condiciones.
+     */
+    public function test_no_avisa_en_fin_de_semana_ni_feriado(): void
     {
         $agenda = app(AgendaRecepcionService::class);
 
-        foreach ([1, 7, 25, 103, 998] as $idProveedor) {
-            $primera = $agenda->fechaProgramada($idProveedor, 2026);
-            $segunda = $agenda->fechaProgramada($idProveedor, 2026);
+        // Sábado y domingo.
+        $this->assertFalse($agenda->esDiaDeAviso(Carbon::create(2026, 8, 22)));
+        $this->assertFalse($agenda->esDiaDeAviso(Carbon::create(2026, 8, 23)));
 
-            $this->assertTrue($primera->equalTo($segunda), 'La fecha no puede cambiar entre llamadas.');
-            $this->assertNotContains(
-                $primera->dayOfWeek,
-                [\Carbon\Carbon::SATURDAY, \Carbon\Carbon::SUNDAY],
-                "La auditoría de {$idProveedor} cayó en fin de semana: ".$primera->toDateString()
-            );
-        }
+        // 10 de agosto de 2026: Primer Grito de Independencia, y es lunes.
+        $this->assertFalse($agenda->esDiaDeAviso(Carbon::create(2026, 8, 10)));
+
+        // Un martes cualquiera sin feriado.
+        $this->assertTrue($agenda->esDiaDeAviso(Carbon::create(2026, 8, 25)));
     }
 
-    /** Ids consecutivos NO deben caer todos juntos en el calendario. */
-    public function test_la_agenda_reparte_los_proveedores_en_el_anio(): void
+    /**
+     * Diciembre queda fuera: a esa altura del año todos los proveedores
+     * tienen que estar ya calificados, así que no se generan avisos nuevos.
+     */
+    public function test_en_diciembre_no_se_generan_avisos(): void
     {
         $agenda = app(AgendaRecepcionService::class);
 
-        $meses = collect(range(1, 12))
-            ->map(fn (int $id) => (int) $agenda->fechaProgramada($id, 2026)->month)
-            ->unique();
+        // 1 de diciembre de 2026 es martes y no es feriado: lo único que lo
+        // descarta es el mes.
+        $diciembre = Carbon::create(2026, 12, 1);
+        $this->assertFalse($diciembre->isWeekend());
+        $this->assertFalse($agenda->esDiaDeAviso($diciembre));
 
-        $this->assertGreaterThanOrEqual(10, $meses->count(), 'Con 12 proveedores deberían quedar repartidos en al menos 10 meses.');
+        // 30 de noviembre de 2026 es lunes: ese sí entra.
+        $this->assertTrue($agenda->esDiaDeAviso(Carbon::create(2026, 11, 30)));
     }
 
-    public function test_detecta_a_quien_le_toca_hoy(): void
+    public function test_solo_toca_si_el_proveedor_tiene_entrega_ese_dia(): void
+    {
+        $empresa = $this->crearEmpresa();
+        [, $conEntrega] = $this->crearProveedorConUsuario($empresa);
+        [, $sinEntrega] = $this->crearProveedorConUsuario($empresa);
+        $agenda = app(AgendaRecepcionService::class);
+
+        // Miércoles 26 de agosto de 2026, día laborable.
+        $miercoles = Carbon::create(2026, 8, 26);
+        $this->assertSame('Wednesday', $miercoles->format('l'));
+
+        HorarioEntregaProveedor::create([
+            'Id_Empresa' => $empresa->Id_Empresa,
+            'Id_Proveedor' => $conEntrega->Id_Proveedor,
+            'Clasificacion' => 'Fruver',
+            'Dia_Entrega' => 'Miercoles',
+            'Hora_Llegada' => '07:00',
+            'Activo' => 1,
+            'Fecha_Creacion' => now(),
+        ]);
+
+        $tocan = $agenda->proveedoresQueTocanHoy($empresa->Id_Empresa, $miercoles)->pluck('Id_Proveedor');
+
+        $this->assertTrue($tocan->contains($conEntrega->Id_Proveedor), 'El que entrega el miércoles debe aparecer.');
+        $this->assertFalse($tocan->contains($sinEntrega->Id_Proveedor), 'El que no entrega ese día NO debe aparecer.');
+    }
+
+    /** Un pedido con fecha de recepción ese día también cuenta como entrega. */
+    public function test_un_pedido_con_recepcion_ese_dia_tambien_cuenta(): void
     {
         $empresa = $this->crearEmpresa();
         [, $proveedor] = $this->crearProveedorConUsuario($empresa);
         $agenda = app(AgendaRecepcionService::class);
 
-        // Se viaja al día que le tocó a ESTE proveedor y se comprueba que aparece.
-        $fecha = $agenda->fechaProgramada($proveedor->Id_Proveedor);
-        $this->travelTo($fecha->copy()->setTime(9, 0));
+        $martes = Carbon::create(2026, 8, 25);
 
-        $this->assertTrue($agenda->leTocaHoy($proveedor->Id_Proveedor));
+        PedidoCompra::create([
+            'Id_Empresa' => $empresa->Id_Empresa,
+            'Id_Proveedor' => $proveedor->Id_Proveedor,
+            'Nro_Pedido' => 'TEST-'.random_int(100000, 999999),
+            'Fecha_Registro_BC' => $martes->copy()->subDays(5)->toDateString(),
+            'Fecha_Recepcion_Esperada' => $martes->toDateString(),
+            'Fecha_Sincronizacion' => now(),
+            'Activo' => 1,
+            'Estado' => 'Abierto',
+        ]);
+
         $this->assertTrue(
-            $agenda->proveedoresQueTocanHoy($empresa->Id_Empresa)
+            $agenda->proveedoresQueTocanHoy($empresa->Id_Empresa, $martes)
                 ->contains(fn (Proveedor $p) => $p->Id_Proveedor === $proveedor->Id_Proveedor)
         );
+    }
 
-        $this->travelTo($fecha->copy()->addDay()->setTime(9, 0));
-        $this->assertFalse($agenda->leTocaHoy($proveedor->Id_Proveedor));
+    /** Si ya tiene su calificación del año, deja de aparecer. */
+    public function test_deja_de_avisar_cuando_ya_tiene_la_calificacion_del_anio(): void
+    {
+        $empresa = $this->crearEmpresa();
+        [, $proveedor] = $this->crearProveedorConUsuario($empresa);
+        $calidad = $this->crearUsuarioInterno($empresa, 'Calidad');
+        $agenda = app(AgendaRecepcionService::class);
 
-        $this->travelBack();
+        $miercoles = Carbon::create(2026, 8, 26);
+
+        HorarioEntregaProveedor::create([
+            'Id_Empresa' => $empresa->Id_Empresa,
+            'Id_Proveedor' => $proveedor->Id_Proveedor,
+            'Clasificacion' => 'Fruver',
+            'Dia_Entrega' => 'Miercoles',
+            'Hora_Llegada' => '07:00',
+            'Activo' => 1,
+            'Fecha_Creacion' => now(),
+        ]);
+
+        $this->assertTrue($agenda->leTocaHoy($proveedor->Id_Proveedor, $empresa->Id_Empresa, $miercoles));
+
+        // Se registra la del año, en otra fecha del mismo año.
+        CalificacionRecepcion::create([
+            'Id_Empresa' => $empresa->Id_Empresa,
+            'Id_Proveedor' => $proveedor->Id_Proveedor,
+            'Id_Usuario_Auditor' => $calidad->Id_Usuario,
+            'Fecha_Recepcion' => Carbon::create(2026, 3, 11)->toDateString(),
+            'Estado' => 'Finalizada',
+            'Puntaje_Total_Posible' => 200,
+            'Puntaje_Obtenido' => 180,
+            'Porcentaje_Obtenido' => 90,
+            'Fecha_Creacion' => now(),
+        ]);
+
+        $this->assertFalse(
+            $agenda->leTocaHoy($proveedor->Id_Proveedor, $empresa->Id_Empresa, $miercoles),
+            'Con la calificación del año ya hecha no debe volver a avisarse.'
+        );
     }
 
     /** Deja un borrador con los 13 parámetros respondidos afirmativamente. */

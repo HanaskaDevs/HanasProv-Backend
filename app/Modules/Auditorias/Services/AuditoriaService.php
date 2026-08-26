@@ -239,8 +239,20 @@ class AuditoriaService
             ]);
         }
 
+        // El puntaje se CONGELA acá, al finalizar, y no se vuelve a
+        // recalcular: si mañana alguien edita el Puntaje_Max de una
+        // pregunta o desactiva una, esta auditoría sigue valiendo lo que
+        // valía el día que se cerró. Además la calificación global del
+        // proveedor lee estas columnas en vez de rearmar la auditoría
+        // pregunta por pregunta (ver CalificacionGlobalService).
+        $resumen = $this->calcularResumen($auditoria);
+
         $auditoria->forceFill([
             'Estado' => 'Finalizada',
+            'Puntaje_Total_Posible' => $resumen['puntaje_total_posible'],
+            'Puntaje_No_Aplica' => $resumen['puntaje_no_aplica'],
+            'Puntaje_Obtenido' => $resumen['puntaje_total_obtenido'],
+            'Porcentaje_Cumplimiento' => $resumen['porcentaje_cumplimiento'],
             'Modificado_Por' => $usuario->Id_Usuario,
             'Fecha_Modificacion' => now(),
         ])->save();

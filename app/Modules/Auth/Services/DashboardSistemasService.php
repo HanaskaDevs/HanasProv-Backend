@@ -6,6 +6,7 @@ use App\Models\Empresa;
 use App\Modules\Documentos_Proveedor\Models\DocumentoProveedor;
 use App\Modules\Ficha_Productos\Models\Producto;
 use App\Modules\Pedidos\Models\PedidoCompra;
+use App\Modules\Asistente\Services\AsistentePresupuestoService;
 use App\Modules\Proveedores\Models\Proveedor;
 use App\Modules\Reclamos\Models\Reclamo;
 
@@ -18,6 +19,10 @@ use App\Modules\Reclamos\Models\Reclamo;
  */
 class DashboardSistemasService
 {
+    public function __construct(protected AsistentePresupuestoService $presupuestoAsistente)
+    {
+    }
+
     public function obtenerResumen(int $idEmpresaActiva): array
     {
         $proveedoresActivos = Proveedor::where('Id_Empresa', $idEmpresaActiva)
@@ -86,6 +91,13 @@ class DashboardSistemasService
             'productos_pendientes' => $productosPendientes,
             'reclamos_abiertos' => $reclamosAbiertos,
             'pedidos_proximos' => $pedidosProximos,
+            // Gasto del asistente contra la API de Claude. Va acá porque un
+            // tope de gasto que no se puede mirar es medio inútil: cuando
+            // Hana empieza a responder con su texto de respaldo, esto es lo
+            // que explica por qué. NO se acota a la empresa activa a
+            // propósito -> el tope es de la cuenta de Anthropic, que es una
+            // sola para todo el grupo.
+            'asistente_presupuesto' => $this->presupuestoAsistente->estado(),
         ];
     }
 }

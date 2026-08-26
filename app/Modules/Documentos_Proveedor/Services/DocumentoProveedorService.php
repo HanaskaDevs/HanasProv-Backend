@@ -10,6 +10,7 @@ use App\Modules\Documentos_Proveedor\Models\TipoDocumentoClaseExcluida;
 use App\Modules\Proveedores\Models\Proveedor;
 use App\Shared\MueveArchivoAHistorico;
 use App\Shared\SaneadorNombreArchivo;
+use App\Shared\VerificaArchivoFisico;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -24,7 +25,7 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
  */
 class DocumentoProveedorService
 {
-    use MueveArchivoAHistorico;
+    use MueveArchivoAHistorico, VerificaArchivoFisico;
 
     protected const DISCO = 'repositorio_proveedores';
     protected const DISCO_PLANTILLAS = 'plantillas';
@@ -507,9 +508,7 @@ class DocumentoProveedorService
 
     $rutaCompleta = Storage::disk(self::DISCO)->path($documento->archivo->Ruta_Almacenamiento);
 
-    if (! is_file($rutaCompleta)) {
-        throw new NotFoundHttpException('El archivo físico no se encuentra en el repositorio.');
-    }
+    $this->verificarArchivoEntregable($rutaCompleta);
 
     return response()->download($rutaCompleta, $documento->archivo->Nombre_Original);
 }
@@ -542,6 +541,38 @@ class DocumentoProveedorService
         $nombreDescarga = basename($tipo->Ruta_Plantilla);
 
         return response()->download($rutaCompleta, $nombreDescarga);
+    }
+
+    /**
+     * Tipos de documento OBLIGATORIOS que le corresponden a este proveedor,
+     * ya filtrados por las dos reglas del catálogo: los "solo Quito" /
+     * "excepto Quito" según su ciudad, y los excluidos por alguna de sus
+     * Clases de Proveedor.
+     *
+     * Existe como método público porque ese filtro se necesita en cuatro
+     * lugares distintos (el checklist del proveedor, el del admin,
+     * registrar() y ahora la calificación global). Estaba copiado en cada
+     * uno: si mañana entra una regla nueva de exclusión y se actualiza una
+     * sola copia, cada pantalla contesta una cosa distinta sobre el mismo
+     * proveedor.
+     */
+    public function tiposObligatoriosAplicables(Proveedor $proveedor)
+    {
+        $esQuito = strcasecmp((string) $proveedor->Ciudad, 'Quito') === 0;
+        $idsExcluidosPorClase = $this->idsTiposDocumentoExcluidosPorClase($proveedor);
+
+        return TipoDocumento::where('Activo', 1)
+            ->where('Obligatorio', 1)
+            ->where(function ($query) use ($esQuito) {
+                $query->where('Requiere_Solo_Quito', 0)->where('Requiere_Excepto_Quito', 0);
+                if ($esQuito) {
+                    $query->orWhere('Requiere_Solo_Quito', 1);
+                } else {
+                    $query->orWhere('Requiere_Excepto_Quito', 1);
+                }
+            })
+            ->when($idsExcluidosPorClase->isNotEmpty(), fn ($query) => $query->whereNotIn('Id_Tipo_Documento', $idsExcluidosPorClase))
+            ->get();
     }
 
     /**

@@ -18,14 +18,21 @@ class AsistenteController extends Controller
     {
         $idEmpresaActiva = (int) $request->attributes->get('id_empresa_activa');
 
-        $respuesta = $this->asistenteService->responder(
+        $resultado = $this->asistenteService->responder(
             $request->user(),
             $idEmpresaActiva,
             $request->validated('mensaje'),
             $request->validated('historial', []),
         );
 
-        return response()->json(['respuesta' => $respuesta]);
+        // 'respuesta' se mantiene con ese nombre para no romper el frontend
+        // que ya lo lee. 'tabla' es nuevo: viene con filas cuando el modelo
+        // usó una herramienta de consulta, y es lo que habilita el botón de
+        // descarga en Excel bajo el mensaje.
+        return response()->json([
+            'respuesta' => $resultado['texto'],
+            'tabla' => $resultado['tabla'],
+        ]);
     }
 
     /**

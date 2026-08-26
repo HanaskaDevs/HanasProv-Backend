@@ -79,10 +79,17 @@ class CalificacionRecepcionService
             ->get()
             ->groupBy('Id_Proveedor');
 
-        return $proveedores->map(function (Proveedor $p) use ($calificaciones, $ultimas, $anio) {
+        // Quiénes tienen entrega HOY y todavía deben su calificación del
+        // año. Se resuelve UNA vez para toda la empresa, no por proveedor:
+        // el cálculo consulta el calendario de horarios y los pedidos, y
+        // hacerlo dentro del map serían dos consultas por fila.
+        $tocanHoy = $this->agenda->proveedoresQueTocanHoy($idEmpresaActiva)
+            ->pluck('Id_Proveedor')
+            ->all();
+
+        return $proveedores->map(function (Proveedor $p) use ($calificaciones, $ultimas, $tocanHoy) {
             $delAnio = $calificaciones->get($p->Id_Proveedor, collect());
             $ultima = $ultimas->get($p->Id_Proveedor, collect())->first();
-            $fechaProgramada = $this->agenda->fechaProgramada($p->Id_Proveedor, $anio);
 
             return [
                 'id_proveedor' => $p->Id_Proveedor,
@@ -90,8 +97,10 @@ class CalificacionRecepcionService
                 'nombre_comercial' => $p->Nombre_Comercial,
                 'ruc' => $p->Ruc,
                 'estado' => $p->estado?->Nombre_Estado,
-                'fecha_programada' => $fechaProgramada->toDateString(),
-                'le_toca_hoy' => $fechaProgramada->isSameDay(now()),
+                // Ya no hay "fecha programada": la calificación se hace el
+                // día que el proveedor entrega, no un día sorteado del año
+                // (ver AgendaRecepcionService).
+                'le_toca_hoy' => in_array($p->Id_Proveedor, $tocanHoy, true),
                 'calificaciones_del_anio' => $delAnio->count(),
                 'puede_calificar' => $delAnio->count() < self::MAX_POR_ANIO,
                 'ultima_calificacion' => $ultima ? [

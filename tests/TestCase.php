@@ -71,6 +71,12 @@ abstract class TestCase extends BaseTestCase
             'Razon_Social' => 'Empresa Test '.Str::random(6),
             'Ruc' => $this->rucFalso(),
             'Nombre_Comercial' => 'Test',
+            // Empresa_BC hace falta para cualquier cosa que consulte las
+            // tablas espejo BC_* (pedidos por bodega, fill rate): sin él,
+            // PedidoInternoService lanza "Esta empresa no tiene configurado
+            // el código Empresa_BC" y el test falla por el setup, no por lo
+            // que estaba probando.
+            'Empresa_BC' => 'test',
             'Activo' => true,
             'Fecha_Creacion' => now(),
             ...$extra,
