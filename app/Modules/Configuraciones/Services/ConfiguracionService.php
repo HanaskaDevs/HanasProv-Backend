@@ -12,6 +12,7 @@ use App\Modules\Documentos_Proveedor\Services\VencimientoDocumentosService;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
+use App\Shared\OptimizadorImagen;
 use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 
@@ -49,8 +50,43 @@ class ConfiguracionService
     public function listarSlides(): Collection
     {
         return HomeSlide::orderBy('Orden')->get()->each(function (HomeSlide $slide) {
+            $slide->Ruta_Poster = $this->urlDelPoster($slide);
             $slide->Ruta_Media = $this->urlAbsolutaMedia($slide->Ruta_Media);
         });
+    }
+
+    /**
+     * Imagen de primer cuadro de un video del home, si está en el repositorio
+     * junto al archivo (mismo nombre, extensión .jpg).
+     *
+     * PARA QUÉ: la landing no muestra el video hasta que empieza a reproducir,
+     * y hasta entonces se veía un degradado con un spinner. El video pesa unos
+     * 450 KB y el poster unos 25 KB, así que con el poster la foto aparece casi
+     * de inmediato y el video la reemplaza sin salto cuando termina de cargar.
+     *
+     * SE DERIVA DEL NOMBRE, NO SE GUARDA EN LA BASE: no hay columna para esto y
+     * no hacía falta una, porque el nombre del archivo de video ya es único.
+     * OJO: cuando Sistemas sube un video nuevo desde Configuraciones NO se
+     * genera el poster (haría falta ffmpeg desde PHP), así que ese slide vuelve
+     * al comportamiento anterior hasta que se le ponga el .jpg al lado.
+     */
+    protected function urlDelPoster(HomeSlide $slide): ?string
+    {
+        if ($slide->Tipo_Media !== 'video' || ! $slide->Ruta_Media) {
+            return null;
+        }
+
+        $poster = preg_replace('/\.[A-Za-z0-9]+$/', '.jpg', $slide->Ruta_Media);
+
+        if ($poster === null || $poster === $slide->Ruta_Media) {
+            return null;
+        }
+
+        if (! Storage::disk(self::DISCO_PUBLICO)->exists($poster)) {
+            return null;
+        }
+
+        return $this->urlAbsolutaMedia($poster);
     }
 
     public function crearSlide(Usuario $usuario, array $data, ?UploadedFile $media = null): HomeSlide
@@ -337,6 +373,21 @@ class ConfiguracionService
         $tipoMedia = str_starts_with($archivo->getMimeType(), 'video') ? 'video' : 'imagen';
 
         $rutaRelativa = $carpeta . '/' . $nombreFisico;
+
+        // Las imágenes se reducen ACÁ, al subirlas, y no con un script de
+        // una sola vez: el fondo de login que había pesaba 1.8 MB a
+        // 2560x1440 y era lo primero que descargaba cualquiera que abriera
+        // el portal. Optimizar la que ya estaba arregla el caso de hoy;
+        // hacerlo en la subida arregla también la próxima.
+        //
+        // Los videos NO se tocan: recodificarlos en el request tomaría
+        // minutos y dejaría al usuario esperando. Si hace falta, va en una
+        // tarea en cola aparte.
+        if ($tipoMedia === 'imagen') {
+            app(OptimizadorImagen::class)->optimizarEnSitio(
+                Storage::disk(self::DISCO_PUBLICO)->path($rutaRelativa)
+            );
+        }
 
         // OJO: antes acá se guardaba la URL ABSOLUTA (con host y puerto)
         // calculada en este momento con Storage::disk(...)->url() -> esa

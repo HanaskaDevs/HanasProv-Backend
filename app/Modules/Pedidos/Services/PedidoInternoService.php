@@ -254,7 +254,13 @@ class PedidoInternoService
      * tenga asignadas en Usuario_Bodega para esta empresa (puede ser 1, 2,
      * las 3, o ninguna todavía). Cualquier otro rol no tiene acceso.
      */
-    protected function obtenerBodegasPermitidas(Usuario $usuario, int $idEmpresa): array
+    /**
+     * Público porque también lo usa el asistente (ver AsistenteHerramientas)
+     * para saber qué puede consultar ANTES de ir a buscar datos: así una
+     * pregunta por una bodega ajena se rechaza sin pegarle a Business
+     * Central, y el mensaje puede decir cuáles sí tiene.
+     */
+    public function obtenerBodegasPermitidas(Usuario $usuario, int $idEmpresa): array
     {
         if ($usuario->esAdmin($idEmpresa) || $usuario->esSistemas($idEmpresa)) {
             return self::BODEGAS;

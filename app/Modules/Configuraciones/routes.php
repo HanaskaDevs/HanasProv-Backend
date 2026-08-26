@@ -5,10 +5,39 @@ use App\Modules\Configuraciones\Http\Controllers\BotReglaController;
 use App\Modules\Configuraciones\Http\Controllers\GuiaPasoController;
 use App\Modules\Configuraciones\Http\Controllers\HomeSlideController;
 use App\Modules\Configuraciones\Http\Controllers\LoginImagenController;
+use App\Modules\Configuraciones\Http\Controllers\MediaStreamController;
 use App\Modules\Configuraciones\Http\Controllers\PoliticaController;
 use App\Modules\Configuraciones\Http\Controllers\PublicConfigController;
 use App\Modules\Configuraciones\Http\Controllers\SuspensionDocumentosController;
 use Illuminate\Support\Facades\Route;
+
+/*
+ * Los archivos del disco 'multimedia' (videos del home, imagen del login).
+ *
+ * PÚBLICA a propósito: son el fondo de la landing y del login, se piden antes
+ * de que exista sesión.
+ *
+ * POR QUÉ PASAR POR PHP EN VEZ DE SERVIRLOS ESTÁTICOS. Hay un symlink
+ * public/media -> el repositorio, y hasta ahora los videos se bajaban por ahí.
+ * El problema: 'php artisan serve' sirve los estáticos SIN ningún header de
+ * caché, así que el navegador volvía a bajar los ~450 KB de cada video en cada
+ * visita a la landing, aunque el archivo no hubiera cambiado nunca. Por acá
+ * salen con 'immutable' a un año (ver MediaStreamController), y de paso con
+ * soporte de Range, que el servidor embebido tampoco da para estáticos.
+ *
+ * Es seguro cachear tan agresivo porque subir un archivo nuevo desde
+ * Configuraciones genera un NOMBRE nuevo (ver ConfiguracionService), no
+ * sobrescribe el anterior: una URL nunca cambia de contenido.
+ *
+ * El symlink se deja en su lugar: las URLs viejas /media/... que puedan estar
+ * cacheadas o guardadas en algún registro antiguo siguen funcionando.
+ *
+ * where('ruta', '.*') porque la ruta trae barra ('home/archivo.mp4') y sin eso
+ * el parámetro corta en el primer segmento.
+ */
+Route::get('/media/{ruta}', [MediaStreamController::class, 'show'])
+    ->where('ruta', '.*')
+    ->name('media.show');
 
 // Públicas: sin autenticación, consumidas por Landing/Login/Tour antes de loguearse.
 Route::prefix('public-config')->group(function () {

@@ -2,6 +2,7 @@
 
 namespace App\Modules\Pedidos\Http\Resources;
 
+use App\Modules\Proveedores\Services\CalificacionGlobalService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -24,9 +25,31 @@ class PedidoCompraResource extends JsonResource
             ];
         }));
 
+        // Porcentaje del pedido POR CANTIDAD: lo recibido sobre lo pedido,
+        // topando cada línea en su cantidad pedida.
+        //
+        // Antes esto era el promedio de los porcentajes de las líneas, que
+        // le da el mismo peso a una línea de 1 unidad que a una de 1000.
+        // Se cambió porque este número ES el que alimenta el fill rate de
+        // la calificación global (vale el 50% de la nota, ver
+        // CalificacionGlobalService): si la pantalla de Pedidos y la nota
+        // usaran fórmulas distintas, el proveedor vería un porcentaje en su
+        // pedido y otro en su calificación sin manera de explicar la
+        // diferencia. En los datos actuales hay pedidos donde las dos
+        // fórmulas difieren en 20 puntos.
+        //
+        // El tope por línea evita que una sobre-entrega tape el faltante de
+        // otra línea del mismo pedido.
         $porcentajeEntregaPedido = 0;
         if ($lineas instanceof \Illuminate\Support\Collection && $lineas->isNotEmpty()) {
-            $porcentajeEntregaPedido = round($lineas->avg('porcentaje_entrega'));
+            $totalPedido = $lineas->sum(fn ($linea) => (float) $linea['cantidad']);
+            $totalRecibidoTopado = $lineas->sum(
+                fn ($linea) => min((float) $linea['cantidad_recibida'], (float) $linea['cantidad'])
+            );
+
+            $porcentajeEntregaPedido = $totalPedido > 0
+                ? round($totalRecibidoTopado / $totalPedido * 100)
+                : 0;
         }
 
         return [
@@ -40,6 +63,13 @@ class PedidoCompraResource extends JsonResource
             'usa_fecha_registro_como_recepcion' => $this->Fecha_Recepcion_Esperada === null,
             'estado' => $this->Estado,
             'porcentaje_entrega' => $porcentajeEntregaPedido,
+            // true = este pedido entra al promedio del fill rate de la
+            // calificación global. Solo entran los cerrados: uno abierto
+            // todavía se está entregando, y contarlo a medias castigaría al
+            // proveedor por algo que aún no terminó. La interfaz lo usa para
+            // aclarar por qué un pedido muestra porcentaje pero no pesa en
+            // la nota todavía.
+            'cuenta_para_calificacion' => $this->Estado === CalificacionGlobalService::ESTADO_PEDIDO_COMPUTABLE,
             'lineas' => $lineas,
         ];
     }

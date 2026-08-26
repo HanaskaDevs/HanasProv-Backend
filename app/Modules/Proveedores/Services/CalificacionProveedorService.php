@@ -3,6 +3,7 @@
 namespace App\Modules\Proveedores\Services;
 
 use App\Modules\Auth\Models\Usuario;
+use App\Shared\VerificaArchivoFisico;
 use App\Modules\Documentos_Proveedor\Models\DocumentoProveedor;
 use App\Modules\Documentos_Proveedor\Models\TipoDocumento;
 use App\Modules\Documentos_Proveedor\Models\TipoDocumentoClaseExcluida;
@@ -36,6 +37,8 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
  */
 class CalificacionProveedorService
 {
+    use VerificaArchivoFisico;
+
     protected const DISCO = 'repositorio_proveedores';
 
     /**
@@ -333,9 +336,7 @@ class CalificacionProveedorService
 
         $rutaCompleta = Storage::disk(self::DISCO)->path($documento->archivo->Ruta_Almacenamiento);
 
-        if (! is_file($rutaCompleta)) {
-            throw new NotFoundHttpException('El archivo físico no se encuentra en el repositorio.');
-        }
+        $this->verificarArchivoEntregable($rutaCompleta);
 
         return response()->file($rutaCompleta, [
             'Content-Type' => $documento->archivo->Tipo_Mime,
@@ -503,9 +504,7 @@ class CalificacionProveedorService
 
         $rutaCompleta = Storage::disk(self::DISCO)->path($documento->archivo->Ruta_Almacenamiento);
 
-        if (! is_file($rutaCompleta)) {
-            throw new NotFoundHttpException('El archivo físico no se encuentra en el repositorio.');
-        }
+        $this->verificarArchivoEntregable($rutaCompleta);
 
         return response()->file($rutaCompleta, [
             'Content-Type' => $documento->archivo->Tipo_Mime,
