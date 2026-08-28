@@ -78,4 +78,19 @@ return [
         'email' => env('PORTAL_EMAIL_PROTECCION_DATOS', 'protecciondedatos@hanaska.com'),
     ],
 
+    /*
+    | Flujo de arribo del calendario de horarios de entrega (ver
+    | HorarioEntregaService). Si el Guardia no marca "arribó" dentro de
+    | 'minutos_atrasado_a_rechazado' desde la Hora_Llegada programada, el
+    | horario pasa solo a Rechazado y el Guardia ya no puede marcar arribo
+    | directo: solo puede mandar una Solicitud_Aprobacion_Arribo, que se
+    | avisa por correo a este destinatario. En pruebas apunta a
+    | iflores@hanaska.com; cuando se confirme el correo real de Valeria en
+    | producción, este es el ÚNICO lugar que hay que cambiar (variable de
+    | entorno, sin tocar código).
+    */
+    'email_aprobacion_arribo' => env('PORTAL_EMAIL_APROBACION_ARRIBO', 'iflores@hanaska.com'),
+
+    'minutos_atrasado_a_rechazado' => (int) env('PORTAL_MINUTOS_ATRASADO_A_RECHAZADO', 30),
+
 ];

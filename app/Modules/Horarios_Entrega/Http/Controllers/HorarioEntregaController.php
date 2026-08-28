@@ -10,8 +10,10 @@ use Illuminate\Http\Request;
 
 /**
  * Calendario de Horarios de Entrega de Proveedores. Los permisos
- * (lectura: Sistemas/Admin/Compras/Calidad; gestión: solo Sistemas/Admin)
- * los valida el service, no estas rutas -> mismo criterio que Auditorías.
+ * (lectura: Sistemas/Admin/Compras/Calidad; gestión: solo Sistemas/Admin;
+ * cambios de estado: Guardia/Sistemas/Calidad; resolver solicitudes de
+ * aprobación: solo Calidad/Sistemas) los valida el service, no estas
+ * rutas -> mismo criterio que Auditorías.
  */
 class HorarioEntregaController extends Controller
 {
@@ -30,6 +32,14 @@ class HorarioEntregaController extends Controller
 
         return response()->json(
             $this->servicio->listar($request->user(), $this->idEmpresa($request), $clasificacion)
+        );
+    }
+
+    /** Calendario propio del proveedor logueado (sección Pedidos). */
+    public function mios(Request $request): JsonResponse
+    {
+        return response()->json(
+            $this->servicio->misHorarios($request->user(), $this->idEmpresa($request))
         );
     }
 
@@ -61,13 +71,21 @@ class HorarioEntregaController extends Controller
         return response()->json(['message' => 'Horario eliminado correctamente.']);
     }
 
-    /** Seguimiento en vivo de hoy (Modo TV y pantalla de Guardia/Compras). */
+    /** Seguimiento en vivo de hoy (Modo TV y pantalla de Guardia/Calidad). */
     public function hoy(Request $request): JsonResponse
     {
         $clasificacion = $request->query('clasificacion');
 
         return response()->json(
             $this->servicio->listarDeHoy($request->user(), $this->idEmpresa($request), $clasificacion)
+        );
+    }
+
+    /** Pedidos que ese proveedor debe entregar HOY (modal de seguimiento). */
+    public function pedidosDelDia(Request $request, HorarioEntregaProveedor $horario): JsonResponse
+    {
+        return response()->json(
+            $this->servicio->pedidosDelDia($request->user(), $this->idEmpresa($request), $horario)
         );
     }
 
@@ -78,10 +96,38 @@ class HorarioEntregaController extends Controller
         );
     }
 
-    public function marcarEntregado(Request $request, HorarioEntregaProveedor $horario): JsonResponse
+    /** El Guardia pide aprobación de un arribo tardío (horario Rechazado). */
+    public function solicitarAprobacion(Request $request, HorarioEntregaProveedor $horario): JsonResponse
+    {
+        $solicitud = $this->servicio->solicitarAprobacion($request->user(), $this->idEmpresa($request), $horario);
+
+        return response()->json($solicitud, 201);
+    }
+
+    /** Calidad: solicitudes de arribo pendientes de la empresa activa. */
+    public function solicitudesPendientes(Request $request): JsonResponse
     {
         return response()->json(
-            $this->servicio->marcarEntregado($request->user(), $this->idEmpresa($request), $horario)
+            $this->servicio->listarSolicitudesPendientes($request->user(), $this->idEmpresa($request))
         );
+    }
+
+    public function aprobarSolicitud(Request $request, int $solicitud): JsonResponse
+    {
+        $resultado = $this->servicio->aprobarSolicitud($request->user(), $this->idEmpresa($request), $solicitud);
+
+        return response()->json($resultado);
+    }
+
+    public function rechazarSolicitud(Request $request, int $solicitud): JsonResponse
+    {
+        $resultado = $this->servicio->rechazarSolicitud(
+            $request->user(),
+            $this->idEmpresa($request),
+            $solicitud,
+            $request->input('motivo')
+        );
+
+        return response()->json($resultado);
     }
 }

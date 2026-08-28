@@ -296,10 +296,59 @@ class AuditoriaService
         ];
     }
 
+    /**
+     * Solo Sistemas y Calidad (pedido explícito del usuario, 26-ago-2026:
+     * "Auditorías solo para los roles CALIDAD y SISTEMAS") -> Admin quedó
+     * fuera a propósito, a diferencia de Calificación de Recepciones
+     * (CalificacionRecepcionService::verificarAcceso), que SÍ sigue
+     * incluyendo a Admin.
+     */
+    /**
+     * Resumen para el panel de bienvenida de Calidad (pedido explícito del
+     * usuario, 27-ago-2026: reemplazar el cartel genérico "usa el menú
+     * lateral..." por algo con información real). Solo cuenta lo que ya
+     * existe en Auditoria -> nada inventado ni calculado en el front.
+     */
+    public function resumenDashboard(Usuario $usuario, int $idEmpresa): array
+    {
+        $this->verificarAcceso($usuario, $idEmpresa);
+
+        $inicioMes = now()->startOfMonth()->toDateString();
+
+        $delMes = Auditoria::where('Id_Empresa', $idEmpresa)
+            ->where('Estado', 'Finalizada')
+            ->where('Fecha_Auditoria', '>=', $inicioMes)
+            ->get(['Porcentaje_Cumplimiento']);
+
+        $enBorrador = Auditoria::where('Id_Empresa', $idEmpresa)
+            ->where('Estado', 'Borrador')
+            ->count();
+
+        $ultimas = Auditoria::where('Id_Empresa', $idEmpresa)
+            ->where('Estado', 'Finalizada')
+            ->with('proveedor')
+            ->orderByDesc('Fecha_Auditoria')
+            ->limit(5)
+            ->get();
+
+        return [
+            'auditorias_mes' => $delMes->count(),
+            'promedio_cumplimiento_mes' => $delMes->isNotEmpty()
+                ? round((float) $delMes->avg(fn (Auditoria $a) => (float) $a->Porcentaje_Cumplimiento), 1)
+                : null,
+            'auditorias_en_borrador' => $enBorrador,
+            'ultimas' => $ultimas->map(fn (Auditoria $a) => [
+                'id_auditoria' => $a->Id_Auditoria,
+                'proveedor' => $a->proveedor ? ($a->proveedor->Nombre_Comercial ?: $a->proveedor->Razon_Social) : null,
+                'fecha_auditoria' => $a->Fecha_Auditoria?->format('Y-m-d'),
+                'porcentaje_cumplimiento' => (float) $a->Porcentaje_Cumplimiento,
+            ])->values(),
+        ];
+    }
+
     protected function verificarAcceso(Usuario $usuario, int $idEmpresa): void
     {
         $tieneAcceso = $usuario->esSistemas($idEmpresa)
-            || $usuario->esAdmin($idEmpresa)
             || $usuario->esCalidad($idEmpresa);
 
         if (! $tieneAcceso) {

@@ -38,6 +38,16 @@ class AuditoriaController extends Controller
         return response()->json($proveedores);
     }
 
+    /** Resumen para el panel de bienvenida de Calidad. */
+    public function resumen(Request $request): JsonResponse
+    {
+        $idEmpresaActiva = (int) $request->attributes->get('id_empresa_activa');
+
+        return response()->json(
+            $this->auditoriaService->resumenDashboard($request->user(), $idEmpresaActiva)
+        );
+    }
+
     /**
      * Retoma o crea la auditoría (Borrador) para el tipo+proveedor elegidos,
      * y devuelve el formulario completo ya armado.

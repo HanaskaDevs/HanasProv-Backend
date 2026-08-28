@@ -10,6 +10,7 @@ Route::prefix('auditorias')
     ->group(function () {
         Route::get('/tipos', [AuditoriaController::class, 'tiposAuditoria']);
         Route::get('/proveedores', [AuditoriaController::class, 'proveedores']);
+        Route::get('/resumen', [AuditoriaController::class, 'resumen']);
         Route::post('/iniciar', [AuditoriaController::class, 'iniciar']);
         Route::get('/{auditoria}', [AuditoriaController::class, 'mostrar']);
         Route::post('/{auditoria}/respuestas', [AuditoriaController::class, 'guardarRespuesta']);

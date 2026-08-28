@@ -14,6 +14,7 @@ class HorarioEntregaEstadoDiario extends BaseModel
     protected $fillable = [
         'Id_Horario_Entrega_Proveedor', 'Fecha',
         'Hora_Arribo_Real', 'Marcado_Arribo_Por',
+        'Hora_Recepcion_Real', 'Nro_Documento_Bc',
         'Hora_Entregado_Real', 'Marcado_Entregado_Por', 'Alerta_Sin_Calificacion_Enviada',
         'Fecha_Creacion', 'Fecha_Modificacion',
     ];
@@ -22,6 +23,7 @@ class HorarioEntregaEstadoDiario extends BaseModel
         'Alerta_Sin_Calificacion_Enviada' => 'datetime',
         'Fecha' => 'date',
         'Hora_Arribo_Real' => 'datetime',
+        'Hora_Recepcion_Real' => 'datetime',
         'Hora_Entregado_Real' => 'datetime',
         'Fecha_Creacion' => 'datetime',
         'Fecha_Modificacion' => 'datetime',
