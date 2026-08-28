@@ -11,11 +11,20 @@ use App\Console\Commands\AvisarRecepcionesDelDiaCommand;
 use App\Console\Commands\AvisarRecepcionesSinCalificarCommand;
 use App\Console\Commands\AvisarVencimientoDocumentosCommand;
 use App\Console\Commands\SuspenderProveedoresDocumentacionVencidaCommand;
+use App\Console\Commands\SincronizarEstadosSighCommand;
 
 Schedule::command(SincronizarPedidosDiario::class)->dailyAt('08:00');
 Schedule::command(CerrarPedidosVencidosCommand::class)->daily();
 Schedule::command(ActualizarCantidadesRecibidasCommand::class)->everyThirtyMinutes();
 Schedule::command(ReconciliarEstadosProveedoresCommand::class)->everyThirtyMinutes();
+
+// Calendario de horarios de entrega: refleja En_Recepcion/Recibido leyendo
+// SIGH (192.168.1.135, solo lectura) -> cada minuto porque el Guardia y
+// Calidad ven esto "como un tablero de aeropuerto" en vivo (ver
+// HorarioEntregaService y SincronizarEstadosSighCommand). withoutOverlapping
+// por si una corrida se demora más de un minuto (SIGH lento, etc.), no se
+// amontonan corridas encima.
+Schedule::command(SincronizarEstadosSighCommand::class)->everyMinute()->withoutOverlapping();
 // 05:00, antes de que empiecen a entrar las recepciones: el aviso dice
 // "estos proveedores entregan HOY y todavía deben su calificación del año",
 // y Calidad tiene que tenerlo en la bandeja cuando llegue. La primera
