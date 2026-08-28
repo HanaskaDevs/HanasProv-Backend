@@ -27,7 +27,7 @@ class Usuario extends Authenticatable
         'Email', 'Password_Hash', 'Nombre_Completo', 'Cargo',
         'Telefono', 'Requiere_Cambio_Password', 'Ultimo_Acceso', 'Activo',
         'Creado_Por', 'Fecha_Creacion', 'Modificado_Por', 'Fecha_Modificacion',
-        'Tipo_Usuario',
+        'Tipo_Usuario', 'Bloqueado_Por_Intentos', 'Fecha_Bloqueo',
     ];
 
     protected $hidden = ['Password_Hash'];
@@ -35,6 +35,8 @@ class Usuario extends Authenticatable
     protected $casts = [
         'Activo' => 'boolean',
         'Requiere_Cambio_Password' => 'boolean',
+        'Bloqueado_Por_Intentos' => 'boolean',
+        'Fecha_Bloqueo' => 'datetime',
         'Ultimo_Acceso' => 'datetime',
         'Fecha_Creacion' => 'datetime',
         'Fecha_Modificacion' => 'datetime',

@@ -9,6 +9,7 @@ use App\Modules\Configuraciones\Models\GuiaPaso;
 use App\Modules\Configuraciones\Models\HomeSlide;
 use App\Modules\Configuraciones\Models\Politica;
 use App\Modules\Documentos_Proveedor\Services\VencimientoDocumentosService;
+use App\Modules\Horarios_Entrega\Services\HorarioEntregaService;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
@@ -357,6 +358,34 @@ class ConfiguracionService
         $this->verificarSistemas($usuario);
 
         app(VencimientoDocumentosService::class)->definirSuspensionAutomatica($activa, $usuario->Id_Usuario);
+
+        return $activa;
+    }
+
+    // ---------- Anuncios por voz del Modo TV ----------
+
+    /**
+     * Interruptor de los anuncios por voz del Modo TV del calendario de
+     * entregas. La clave y el valor por defecto los define
+     * HorarioEntregaService (que es quien los consume) -> acá solo se
+     * expone para la pantalla de Configuraciones, mismo criterio que la
+     * suspensión automática de arriba.
+     *
+     * LEER el interruptor NO pasa por acá: lo hace el propio Modo TV
+     * contra /horarios-entrega/config-anuncios, porque quien mira la TV
+     * suele ser el Guardia o Compras y no tiene acceso a Configuraciones.
+     * Acá está solo la ESCRITURA, que sí es exclusiva de Sistemas.
+     */
+    public function obtenerAnunciosVoz(): bool
+    {
+        return app(HorarioEntregaService::class)->anunciosVozActivos();
+    }
+
+    public function definirAnunciosVoz(Usuario $usuario, bool $activa): bool
+    {
+        $this->verificarSistemas($usuario);
+
+        app(HorarioEntregaService::class)->definirAnunciosVoz($activa, $usuario->Id_Usuario);
 
         return $activa;
     }

@@ -1,6 +1,7 @@
 <?php
 
 use App\Modules\Auth\Http\Controllers\AuthController;
+use App\Modules\Auth\Http\Controllers\IpBloqueadaController;
 use App\Modules\Auth\Http\Controllers\DashboardSistemasController;
 use App\Modules\Auth\Http\Controllers\RolController;
 use App\Modules\Auth\Http\Controllers\UsuarioController;
@@ -8,9 +9,29 @@ use App\Modules\Auth\Http\Middleware\EmpresaActiva;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('auth')->group(function () {
-    Route::post('/login', [AuthController::class, 'login']);
-    Route::post('/olvide-password', [AuthController::class, 'olvidePassword']);
-    Route::post('/activar-cuenta', [AuthController::class, 'activarCuenta']);
+    /**
+     * Los 3 endpoints anónimos van con throttle propio, aparte del límite
+     * general de la API.
+     *
+     * El bloqueo por cuenta (3 fallos) y por IP (5 correos inexistentes) ya
+     * vive en AuthService, pero eso frena a quien ADIVINA credenciales; no
+     * frena a quien simplemente inunda el endpoint para que el servidor no
+     * atienda a nadie más. Cada login gasta un Hash::check, que por diseño
+     * es lento -> sin este techo, unas pocas peticiones por segundo bastan
+     * para dejar el portal sin CPU.
+     *
+     * 'activar-cuenta' y 'olvide-password' llevan un límite MÁS BAJO porque
+     * los dos terminan mandando un correo: sin él son un cañón para llenarle
+     * la casilla a cualquiera y, encima, cada envío bloquea al servidor
+     * mientras dura el SMTP.
+     */
+    Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:10,1');
+    Route::post('/olvide-password', [AuthController::class, 'olvidePassword'])->middleware('throttle:3,10');
+    Route::post('/activar-cuenta', [AuthController::class, 'activarCuenta'])->middleware('throttle:5,10');
+    // Paso 1 de la pantalla de activación. Límite más holgado que el de
+    // activar: acá no se manda ningún correo ni se cambia nada, solo se
+    // comprueba el código, y la persona puede corregir un tipeo varias veces.
+    Route::post('/validar-codigo', [AuthController::class, 'validarCodigoActivacion'])->middleware('throttle:15,10');
 
     Route::middleware('auth:sanctum')->group(function () {
         Route::post('/logout', [AuthController::class, 'logout']);
@@ -18,6 +39,11 @@ Route::prefix('auth')->group(function () {
         Route::post('/cambiar-empresa', [AuthController::class, 'cambiarEmpresa']);
         Route::post('/cambiar-password', [AuthController::class, 'cambiarPassword']);
         Route::get('/roles', [RolController::class, 'index']);
+
+        // Bandeja de IP bloqueadas por fuerza bruta (solo Sistemas, lo
+        // valida el controller). El bloqueo no se levanta solo.
+        Route::get('/ips-bloqueadas', [IpBloqueadaController::class, 'index']);
+        Route::post('/ips-bloqueadas/{idIpBloqueada}/desbloquear', [IpBloqueadaController::class, 'desbloquear']);
     });
 });
 

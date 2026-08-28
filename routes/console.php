@@ -13,6 +13,41 @@ use App\Console\Commands\AvisarVencimientoDocumentosCommand;
 use App\Console\Commands\SuspenderProveedoresDocumentacionVencidaCommand;
 use App\Console\Commands\SincronizarEstadosSighCommand;
 
+/*
+|--------------------------------------------------------------------------
+| Worker de la cola
+|--------------------------------------------------------------------------
+|
+| Desde el 28-ago-2026 TODOS los correos del portal salen encolados (los
+| Mailables y Notifications implementan ShouldQueue), porque enviarlos
+| dentro de la petición dejaba al servidor bloqueado 4 segundos por correo
+| y alcanzaba para tumbar el portal desde /auth/olvide-password.
+|
+| Encolar sin un worker que procese la cola es peor que no encolar: los
+| correos se quedarían para siempre en la tabla `jobs` sin que nadie avise.
+| Este comando es la red de seguridad -> como el cron ya corre
+| `schedule:run` cada minuto, la cola se vacía como mucho un minuto después.
+|
+| --stop-when-empty: procesa lo pendiente y termina, no queda un proceso
+| vivo. withoutOverlapping: si un envío se demora, la corrida siguiente no
+| se le monta encima.
+|
+| EN PRODUCCIÓN conviene además un worker permanente con supervisor/systemd
+| (`php artisan queue:work --tries=3`), que manda el correo en segundos en
+| vez de esperar al minuto. Este seguiría igual, sin estorbar.
+*/
+Schedule::command('queue:work --stop-when-empty --tries=3 --max-time=50')
+    ->everyMinute()
+    ->withoutOverlapping();
+
+/*
+| Sanctum ya no emite tokens eternos (config/sanctum.php -> 24 h), pero los
+| vencidos quedan en la tabla igual. Esto los limpia: sin ella la tabla
+| crece sin techo y cada autenticación busca sobre más filas de las que
+| hacen falta.
+*/
+Schedule::command('sanctum:prune-expired --hours=24')->daily();
+
 Schedule::command(SincronizarPedidosDiario::class)->dailyAt('08:00');
 Schedule::command(CerrarPedidosVencidosCommand::class)->daily();
 Schedule::command(ActualizarCantidadesRecibidasCommand::class)->everyThirtyMinutes();

@@ -74,6 +74,21 @@ return [
     */
     'horas_para_alertar_recepcion' => (int) env('PORTAL_HORAS_ALERTA_RECEPCION', 1),
 
+    /*
+    | Techo general de peticiones por minuto de la API (ver
+    | AppServiceProvider::registrarLimitesDePeticiones).
+    |
+    | Van en config y no escritos en el código porque el valor correcto
+    | depende de cuánta gente use el portal y desde cuántas redes, y eso
+    | cambia sin que cambie el código.
+    |
+    | Referencia para calibrarlos: la pantalla más pesada (Modo TV) hace 4
+    | peticiones cada 20 s = 12 por minuto. Un usuario normal navegando
+    | rara vez pasa de 30.
+    */
+    'limite_peticiones_autenticado' => (int) env('LIMITE_PETICIONES_AUTENTICADO', 120),
+    'limite_peticiones_anonimo' => (int) env('LIMITE_PETICIONES_ANONIMO', 300),
+
     'proteccion_datos' => [
         'email' => env('PORTAL_EMAIL_PROTECCION_DATOS', 'protecciondedatos@hanaska.com'),
     ],

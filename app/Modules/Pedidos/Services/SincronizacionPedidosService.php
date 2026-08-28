@@ -72,14 +72,18 @@ class SincronizacionPedidosService
             $query->where('p.Nro_Identificacion', $rucFiltro);
         }
 
-        Log::info('SQL a ejecutar', [
-            'sql' => $query->toSql(),
-            'bindings' => $query->getBindings(),
-        ]);
-
+        // Antes acá se volcaba al log el SQL completo con sus bindings. Se
+        // quitó: no aportaba nada en operación normal, engordaba el log
+        // (6,8 MB sin rotar) y dejaba escrita la estructura interna de las
+        // consultas, que es justo lo que quiere ver alguien preparando una
+        // inyección. El conteo de resultados sí queda: es lo único que se
+        // usaba de verdad para saber si la sincronización trajo algo.
         $pedidosBC = $query->get();
 
-        Log::info('Diagnostico sync', ['total_bc' => $pedidosBC->count()]);
+        Log::info('Sincronización de pedidos', [
+            'id_empresa' => $idEmpresa,
+            'encontrados_en_bc' => $pedidosBC->count(),
+        ]);
 
         $totalSincronizados = 0;
 

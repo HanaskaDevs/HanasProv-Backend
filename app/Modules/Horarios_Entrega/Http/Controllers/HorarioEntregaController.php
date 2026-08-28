@@ -76,9 +76,29 @@ class HorarioEntregaController extends Controller
     {
         $clasificacion = $request->query('clasificacion');
 
+        // Solo el Modo TV lo manda (ver listarDeHoy): necesita ver el
+        // estado Recibido para poder anunciarlo por voz. Seguimiento de
+        // hoy no lo manda y sigue recibiendo la lista sin los recibidos.
+        $incluirRecibidos = $request->boolean('incluir_recibidos');
+
         return response()->json(
-            $this->servicio->listarDeHoy($request->user(), $this->idEmpresa($request), $clasificacion)
+            $this->servicio->listarDeHoy($request->user(), $this->idEmpresa($request), $clasificacion, $incluirRecibidos)
         );
+    }
+
+    /**
+     * Interruptor de los anuncios por voz, para el Modo TV.
+     *
+     * Va acá y no en /configuraciones porque lo tiene que poder LEER
+     * cualquiera que abra el Modo TV (Guardia, Compras, Calidad...), no
+     * solo Sistemas. Escribirlo sí es exclusivo de Sistemas, y eso vive
+     * en el módulo Configuraciones (ver AnunciosVozController).
+     */
+    public function configAnuncios(Request $request): JsonResponse
+    {
+        $this->servicio->verificarAccesoOperativo($request->user(), $this->idEmpresa($request));
+
+        return response()->json(['voz_activa' => $this->servicio->anunciosVozActivos()]);
     }
 
     /** Pedidos que ese proveedor debe entregar HOY (modal de seguimiento). */

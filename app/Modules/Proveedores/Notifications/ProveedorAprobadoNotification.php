@@ -3,10 +3,20 @@
 namespace App\Modules\Proveedores\Notifications;
 
 use App\Modules\Proveedores\Mail\ProveedorAprobadoMail;
+use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Bus\Queueable;
 use Illuminate\Notifications\Notification;
 
-class ProveedorAprobadoNotification extends Notification
+/**
+ * Encolado (ShouldQueue): el envío SMTP NO ocurre dentro de la petición.
+ *
+ * Medido antes del cambio: /auth/olvide-password tardaba 4,36 s porque
+ * esperaba al servidor de correo. Como el proceso atiende una petición por
+ * vez, unas pocas llamadas seguidas dejaban el portal sin atender a nadie.
+ * Encolado, la petición contesta al instante y el correo sale por el worker
+ * (ver routes/console.php).
+ */
+class ProveedorAprobadoNotification extends Notification implements ShouldQueue
 {
     use Queueable;
 

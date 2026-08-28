@@ -30,6 +30,9 @@ Route::prefix('horarios-entrega')
         Route::get('/mios', [HorarioEntregaController::class, 'mios']);
         Route::get('/proveedores', [HorarioEntregaController::class, 'proveedores']);
         Route::get('/hoy', [HorarioEntregaController::class, 'hoy']);
+        // Segmento fijo: va antes de cualquier comodín, si no 'config-anuncios'
+        // entraría por el {horario} y buscaría un horario con ese id.
+        Route::get('/config-anuncios', [HorarioEntregaController::class, 'configAnuncios']);
         Route::get('/aprobaciones', [HorarioEntregaController::class, 'solicitudesPendientes']);
         Route::post('/aprobaciones/{solicitud}/aprobar', [HorarioEntregaController::class, 'aprobarSolicitud']);
         Route::post('/aprobaciones/{solicitud}/rechazar', [HorarioEntregaController::class, 'rechazarSolicitud']);

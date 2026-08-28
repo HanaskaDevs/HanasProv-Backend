@@ -44,7 +44,7 @@ class SolicitudDerechosTest extends TestCase
             ->assertOk()
             ->assertJsonStructure(['message']);
 
-        Mail::assertSent(SolicitudDerechosMail::class);
+        Mail::assertQueued(SolicitudDerechosMail::class);
     }
 
     public function test_el_correo_va_al_delegado_y_responde_al_titular(): void
@@ -55,7 +55,7 @@ class SolicitudDerechosTest extends TestCase
 
         $delegado = config('portal.proteccion_datos.email');
 
-        Mail::assertSent(SolicitudDerechosMail::class, function (SolicitudDerechosMail $correo) use ($delegado) {
+        Mail::assertQueued(SolicitudDerechosMail::class, function (SolicitudDerechosMail $correo) use ($delegado) {
             // Va al Delegado...
             $llegaAlDelegado = $correo->hasTo($delegado);
 
@@ -74,7 +74,7 @@ class SolicitudDerechosTest extends TestCase
 
         $this->postJson('/api/derechos-datos', $this->solicitudValida(['derecho' => 'acceso']))->assertOk();
 
-        Mail::assertSent(SolicitudDerechosMail::class, function (SolicitudDerechosMail $correo) {
+        Mail::assertQueued(SolicitudDerechosMail::class, function (SolicitudDerechosMail $correo) {
             $asunto = $correo->envelope()->subject;
 
             return str_contains($asunto, 'Derecho de acceso')
@@ -137,7 +137,7 @@ class SolicitudDerechosTest extends TestCase
             ->assertStatus(422)
             ->assertJsonValidationErrors('declaracion');
 
-        Mail::assertNothingSent();
+        Mail::assertNothingQueued();
     }
 
     public function test_rechaza_un_derecho_que_no_existe(): void
@@ -148,7 +148,7 @@ class SolicitudDerechosTest extends TestCase
             ->assertStatus(422)
             ->assertJsonValidationErrors('derecho');
 
-        Mail::assertNothingSent();
+        Mail::assertNothingQueued();
     }
 
     public function test_exige_los_datos_que_acreditan_al_titular(): void
@@ -160,7 +160,7 @@ class SolicitudDerechosTest extends TestCase
             // Sin estos cuatro no se puede acreditar al titular ni responderle.
             ->assertJsonValidationErrors(['nombre_completo', 'email', 'cedula', 'celular', 'derecho', 'detalle']);
 
-        Mail::assertNothingSent();
+        Mail::assertNothingQueued();
     }
 
     public function test_un_detalle_de_dos_palabras_no_alcanza(): void
@@ -187,6 +187,6 @@ class SolicitudDerechosTest extends TestCase
         $this->postJson('/api/derechos-datos', $this->solicitudValida())
             ->assertStatus(429);
 
-        Mail::assertSentCount(3);
+        Mail::assertQueuedCount(3);
     }
 }

@@ -4,6 +4,7 @@ namespace App\Modules\Reclamos\Notifications;
 
 use App\Modules\Reclamos\Models\Reclamo;
 use App\Modules\Reclamos\Models\ReclamoMensaje;
+use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Bus\Queueable;
 use Illuminate\Mail\Attachment;
 use Illuminate\Mail\Mailables\Content;
@@ -11,7 +12,16 @@ use Illuminate\Mail\Mailables\Envelope;
 use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Notifications\Notification;
 
-class ReclamoNotification extends Notification
+/**
+ * Encolado (ShouldQueue): el envío SMTP NO ocurre dentro de la petición.
+ *
+ * Medido antes del cambio: /auth/olvide-password tardaba 4,36 s porque
+ * esperaba al servidor de correo. Como el proceso atiende una petición por
+ * vez, unas pocas llamadas seguidas dejaban el portal sin atender a nadie.
+ * Encolado, la petición contesta al instante y el correo sale por el worker
+ * (ver routes/console.php).
+ */
+class ReclamoNotification extends Notification implements ShouldQueue
 {
     use Queueable;
 

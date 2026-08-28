@@ -20,7 +20,12 @@ use Tests\TestCase;
  *
  * OJO CON LAS ASERCIONES: la base es compartida y tiene entregas REALES de
  * hoy que pueden calificar para la alerta. Por eso NUNCA se usa
- * Mail::assertNothingSent() (afirmar que no salió NINGÚN correo depende de que
+ * OJO CON assertQueued vs assertSent: desde que los Mailables implementan
+ * ShouldQueue (para que el envío SMTP no bloquee la petición, ver
+ * routes/console.php), Mail::fake() los registra como ENCOLADOS y no como
+ * enviados -> con assertSent estos tests fallan aunque el correo salga bien.
+ *
+ * Mail::assertNothingQueued() (afirmar que no salió NINGÚN correo depende de que
  * la base esté vacía, y no lo está): se comprueba que el correo no mencione AL
  * PROVEEDOR DE ESTE TEST. Ya pasó: los tests pasaban en una corrida y fallaban
  * una hora más tarde, cuando una entrega real del día cruzó el plazo.
@@ -66,7 +71,7 @@ class AlertaRecepcionSinCalificarTest extends TestCase
     {
         $encontrado = false;
 
-        Mail::assertSent(RecepcionSinCalificarMail::class, function (RecepcionSinCalificarMail $correo) use ($razonSocial, &$encontrado) {
+        Mail::assertQueued(RecepcionSinCalificarMail::class, function (RecepcionSinCalificarMail $correo) use ($razonSocial, &$encontrado) {
             if (collect($correo->casos)->contains(fn ($caso) => $caso['proveedor'] === $razonSocial)) {
                 $encontrado = true;
             }
@@ -99,7 +104,7 @@ class AlertaRecepcionSinCalificarTest extends TestCase
 
         $this->correr();
 
-        Mail::assertSent(RecepcionSinCalificarMail::class, function (RecepcionSinCalificarMail $correo) {
+        Mail::assertQueued(RecepcionSinCalificarMail::class, function (RecepcionSinCalificarMail $correo) {
             return collect($correo->casos)->contains(fn ($caso) => $caso['proveedor'] === 'PROVEEDOR ALERTA');
         });
     }
@@ -188,7 +193,7 @@ class AlertaRecepcionSinCalificarTest extends TestCase
         $this->correr();
 
         $veces = 0;
-        Mail::assertSent(RecepcionSinCalificarMail::class, function (RecepcionSinCalificarMail $correo) use (&$veces) {
+        Mail::assertQueued(RecepcionSinCalificarMail::class, function (RecepcionSinCalificarMail $correo) use (&$veces) {
             if (collect($correo->casos)->contains(fn ($c) => $c['proveedor'] === 'PROVEEDOR REPETIDO')) {
                 $veces++;
             }
@@ -221,8 +226,8 @@ class AlertaRecepcionSinCalificarTest extends TestCase
         // Un solo correo por corrida, con los tres casos dentro. Puede traer
         // además casos reales de la base, así que se comprueba que los TRES
         // propios estén en el MISMO correo, no que el correo tenga 3 casos.
-        Mail::assertSentCount(1);
-        Mail::assertSent(RecepcionSinCalificarMail::class, function (RecepcionSinCalificarMail $correo) {
+        Mail::assertQueuedCount(1);
+        Mail::assertQueued(RecepcionSinCalificarMail::class, function (RecepcionSinCalificarMail $correo) {
             $nombres = collect($correo->casos)->pluck('proveedor');
 
             return $nombres->contains('PROVEEDOR AGRUPADO 1')
@@ -244,7 +249,7 @@ class AlertaRecepcionSinCalificarTest extends TestCase
         $esperados = (array) config('portal.alertas_recepcion_sin_calificar');
         $this->assertNotEmpty($esperados, 'La configuración de destinatarios no puede estar vacía.');
 
-        Mail::assertSent(RecepcionSinCalificarMail::class, function (RecepcionSinCalificarMail $correo) use ($esperados) {
+        Mail::assertQueued(RecepcionSinCalificarMail::class, function (RecepcionSinCalificarMail $correo) use ($esperados) {
             foreach ($esperados as $destinatario) {
                 if (! $correo->hasTo($destinatario)) {
                     return false;
