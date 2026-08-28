@@ -19,6 +19,13 @@ use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 
 class UsuarioService
 {
+    /**
+     * Mismo texto para "ese correo no tiene cuenta" y para "el código está
+     * mal". Ver activarCuenta: con mensajes distintos, este endpoint sirve
+     * para averiguar qué correos están registrados en el portal.
+     */
+    public const MENSAJE_CODIGO_INVALIDO = 'El código no es válido o ya fue utilizado.';
+
     protected const MINUTOS_VIGENCIA_CODIGO = 20;
 
     /**
@@ -237,20 +244,26 @@ if ((int) $data['id_rol'] === (int) $idRolProveedor) {
      * - Usuario existe pero inactivo -> no se envía nada, error de inactivo.
      * - Usuario existe y activo -> nuevo código de activación (tipo Reset) por correo.
      */
+    /**
+     * NUNCA revela si el correo tiene cuenta o no.
+     *
+     * Antes contestaba "El usuario no existe" para los desconocidos y 200
+     * para los válidos: con eso, cualquiera podía ir probando correos y
+     * armarse la lista de los que sí tienen cuenta en el portal, que es el
+     * primer paso de un ataque dirigido. Ahora las tres salidas (no existe,
+     * inactivo, bloqueado) terminan igual que el caso bueno, en silencio.
+     *
+     * El controller siempre responde el mismo texto genérico.
+     */
     public function olvidePassword(string $email): void
     {
         $usuario = Usuario::where('Email', $email)->first();
 
-        if (! $usuario) {
-            throw ValidationException::withMessages([
-                'email' => ['El usuario no existe.'],
-            ]);
-        }
-
-        if (! $usuario->Activo) {
-            throw ValidationException::withMessages([
-                'email' => ['El usuario se encuentra inactivo. Contacte al administrador.'],
-            ]);
+        // Sin cuenta, inactiva o bloqueada: se corta acá sin avisar nada.
+        // Una cuenta bloqueada por intentos fallidos tampoco se destraba por
+        // esta vía a propósito -> si no, el bloqueo no serviría de nada.
+        if (! $usuario || ! $usuario->Activo || $usuario->Bloqueado_Por_Intentos) {
+            return;
         }
 
         $this->generarYEnviarCodigo($usuario, tipo: 'Reset');
@@ -267,25 +280,34 @@ if ((int) $data['id_rol'] === (int) $idRolProveedor) {
      * obligatorios cuando el código es de tipo "Bienvenida" (primera activación).
      * En un "Reset" de contraseña, esos datos ya existen y se ignoran.
      */
-    public function activarCuenta(string $email, string $codigo, string $passwordNueva, array $datosPerfil = []): Usuario
+    /**
+     * Comprueba el par correo+código y devuelve [Usuario, CodigoActivacion].
+     *
+     * Se extrajo para que lo usen los DOS endpoints: el de activar de
+     * verdad y el que valida el código en el paso 1 de la pantalla. Así no
+     * hay dos versiones de "¿este código sirve?" que puedan separarse.
+     *
+     * Un correo sin cuenta da EXACTAMENTE el mismo error que un código
+     * equivocado: si dijera "el usuario no existe", esto se volvería un
+     * buscador de correos registrados (ver olvidePassword).
+     *
+     * @return array{0: Usuario, 1: CodigoActivacion}
+     */
+    protected function resolverCodigo(string $email, string $codigo): array
     {
         $usuario = Usuario::where('Email', $email)->first();
 
-        if (! $usuario) {
-            throw ValidationException::withMessages([
-                'email' => ['El usuario no existe.'],
-            ]);
-        }
+        $codigoActivacion = $usuario
+            ? CodigoActivacion::where('Email', $email)
+                ->where('Codigo', $codigo)
+                ->where('Usado', false)
+                ->orderByDesc('Fecha_Creacion')
+                ->first()
+            : null;
 
-        $codigoActivacion = CodigoActivacion::where('Email', $email)
-            ->where('Codigo', $codigo)
-            ->where('Usado', false)
-            ->orderByDesc('Fecha_Creacion')
-            ->first();
-
-        if (! $codigoActivacion) {
+        if (! $usuario || ! $codigoActivacion) {
             throw ValidationException::withMessages([
-                'codigo' => ['El código no es válido o ya fue utilizado.'],
+                'codigo' => [self::MENSAJE_CODIGO_INVALIDO],
             ]);
         }
 
@@ -294,6 +316,35 @@ if ((int) $data['id_rol'] === (int) $idRolProveedor) {
                 'codigo' => ['El código expiró. Solicita uno nuevo.'],
             ]);
         }
+
+        return [$usuario, $codigoActivacion];
+    }
+
+    /**
+     * Paso 1 de la pantalla de activación: valida el código y dice si a esta
+     * persona hay que pedirle además los datos de su empresa.
+     *
+     * Existe para no hacerle llenar tres pantallas a alguien cuyo código ya
+     * venció, y para saber si mostrar RUC y Razón Social: solo se le piden a
+     * un usuario Proveedor en su PRIMERA activación, que es cuando se le
+     * crea la ficha. A un usuario interno no se le pide nada de eso.
+     *
+     * @return array{requiere_datos_proveedor: bool}
+     */
+    public function validarCodigoActivacion(string $email, string $codigo): array
+    {
+        [$usuario] = $this->resolverCodigo($email, $codigo);
+
+        return [
+            'requiere_datos_proveedor' => $usuario->Tipo_Usuario === 'Proveedor'
+                && (bool) $usuario->Requiere_Cambio_Password
+                && $usuario->proveedores()->count() === 0,
+        ];
+    }
+
+    public function activarCuenta(string $email, string $codigo, string $passwordNueva, array $datosPerfil = []): Usuario
+    {
+        [$usuario, $codigoActivacion] = $this->resolverCodigo($email, $codigo);
 
         // "Primera activación" se determina por el ESTADO REAL del usuario
         // (nunca completó ninguna activación todavía), NO por el tipo de
@@ -316,7 +367,27 @@ if ((int) $data['id_rol'] === (int) $idRolProveedor) {
             }
         }
 
-        return DB::transaction(function () use ($usuario, $codigoActivacion, $passwordNueva, $datosPerfil, $esPrimeraActivacion) {
+        // Datos de la EMPRESA del proveedor. Se piden en la activación (y no
+        // después, en la Ficha) porque hasta ahora la ficha se creaba vacía:
+        // el proveedor aparecía en los listados sin nombre ni RUC, imposible
+        // de identificar para quien lo tenía que revisar.
+        $creaFichaDeProveedor = $esPrimeraActivacion
+            && $usuario->Tipo_Usuario === 'Proveedor'
+            && $usuario->proveedores()->count() === 0;
+
+        if ($creaFichaDeProveedor) {
+            $faltantesProveedor = [];
+            if (empty($datosPerfil['ruc'])) $faltantesProveedor['ruc'] = ['El RUC es requerido.'];
+            if (empty($datosPerfil['razon_social'])) $faltantesProveedor['razon_social'] = ['La razón social es requerida.'];
+
+            if ($faltantesProveedor) {
+                throw ValidationException::withMessages($faltantesProveedor);
+            }
+
+            $this->verificarRucDisponible($usuario, $datosPerfil['ruc']);
+        }
+
+        return DB::transaction(function () use ($usuario, $codigoActivacion, $passwordNueva, $datosPerfil, $esPrimeraActivacion, $creaFichaDeProveedor) {
             $usuario->forceFill([
                 'Password_Hash' => Hash::make($passwordNueva),
                 'Requiere_Cambio_Password' => false,
@@ -330,7 +401,7 @@ if ((int) $data['id_rol'] === (int) $idRolProveedor) {
             // Primera activación de un usuario externo: se crea un "cascarón"
             // de Proveedor por CADA empresa a la que tiene acceso, para que
             // pueda empezar a llenar su Ficha en cada una por separado.
-            if ($esPrimeraActivacion && $usuario->Tipo_Usuario === 'Proveedor' && $usuario->proveedores()->count() === 0) {
+            if ($creaFichaDeProveedor) {
                 $idsEmpresas = $usuario->usuarioEmpresas()->where('Activo', true)->pluck('Id_Empresa');
 
                 foreach ($idsEmpresas as $idEmpresa) {
@@ -344,7 +415,16 @@ if ((int) $data['id_rol'] === (int) $idRolProveedor) {
                         ->whereNull('Ruc')
                         ->first();
 
-                    if (! $proveedor) {
+                    $datosFicha = [
+                        'Ruc' => $datosPerfil['ruc'],
+                        'Razon_Social' => $datosPerfil['razon_social'],
+                    ];
+
+                    if ($proveedor) {
+                        // Cascarón de un intento anterior: se completa en vez
+                        // de crear otro (chocaría con UQ_Proveedor_Empresa_Ruc).
+                        $proveedor->forceFill($datosFicha)->save();
+                    } else {
                         $proveedor = Proveedor::create([
                             'Id_Empresa' => $idEmpresa,
                             'Email' => $usuario->Email,
@@ -354,6 +434,7 @@ if ((int) $data['id_rol'] === (int) $idRolProveedor) {
                             'Fecha_Postulacion' => now(),
                             'Activo' => true,
                             'Fecha_Creacion' => now(),
+                            ...$datosFicha,
                         ]);
                     }
 
@@ -446,6 +527,36 @@ if ((int) $data['id_rol'] === (int) $idRolProveedor) {
         $this->cerrarSesionesYTokens($usuario);
     }
 
+    /**
+     * Ningún proveedor puede activarse con un RUC que ya está registrado en
+     * alguna de sus empresas (decisión del negocio, 28-ago-2026: se rechaza,
+     * no se vincula a la ficha existente).
+     *
+     * Se comprueba ANTES de tocar nada, y no se deja que reviente la
+     * restricción UQ_Proveedor_Empresa_Ruc: ese error llega como un fallo de
+     * base de datos, sale un 500 y el proveedor no entiende qué pasó. Acá
+     * sale como un error de validación sobre el campo 'ruc', que la pantalla
+     * ya sabe mostrar junto al campo.
+     *
+     * Se miran TODAS las empresas del usuario porque en la activación se le
+     * crea una ficha en cada una: con que el RUC esté tomado en una sola, la
+     * operación no puede completarse entera.
+     */
+    protected function verificarRucDisponible(Usuario $usuario, string $ruc): void
+    {
+        $idsEmpresas = $usuario->usuarioEmpresas()->where('Activo', true)->pluck('Id_Empresa');
+
+        $yaExiste = Proveedor::whereIn('Id_Empresa', $idsEmpresas)
+            ->where('Ruc', $ruc)
+            ->exists();
+
+        if ($yaExiste) {
+            throw ValidationException::withMessages([
+                'ruc' => ['Ya existe un proveedor registrado con este RUC. Contacta al administrador del portal.'],
+            ]);
+        }
+    }
+
     public function cerrarSesionesYTokens(Usuario $usuario): void
     {
         $usuario->sesiones()->where('Activa', true)->update(['Activa' => false]);
@@ -457,18 +568,38 @@ if ((int) $data['id_rol'] === (int) $idRolProveedor) {
         return Str::upper(Str::random(4)) . '-' . random_int(1000, 9999);
     }
 
+    /**
+     * Reactiva una cuenta, venga de una inactivación manual o de un bloqueo
+     * automático por intentos fallidos (ver AuthService::login).
+     *
+     * SIEMPRE se le manda un código nuevo y tiene que definir otra
+     * contraseña. El motivo es el caso que originó el bloqueo: si la cuenta
+     * se trabó fue justamente porque alguien estuvo probando contraseñas
+     * contra ella, así que devolverle el acceso con la misma clave sería
+     * reactivar la cuenta y dejarla igual de expuesta que antes. Decisión
+     * del negocio, 28-ago-2026.
+     */
     public function reactivar(Usuario $usuario, Usuario $ejecutor, int $idEmpresa): void
-{
-    if (! $ejecutor->esSistemas($idEmpresa)) {
-        throw new AccessDeniedHttpException('Solo usuarios con rol Sistemas pueden reactivar usuarios.');
-    }
+    {
+        if (! $ejecutor->esSistemas($idEmpresa)) {
+            throw new AccessDeniedHttpException('Solo usuarios con rol Sistemas pueden reactivar usuarios.');
+        }
 
-    $usuario->forceFill([
-        'Activo' => true,
-        'Modificado_Por' => $ejecutor->Id_Usuario,
-        'Fecha_Modificacion' => now(),
-    ])->save();
-}
+        $usuario->forceFill([
+            'Activo' => true,
+            'Bloqueado_Por_Intentos' => false,
+            'Fecha_Bloqueo' => null,
+            'Modificado_Por' => $ejecutor->Id_Usuario,
+            'Fecha_Modificacion' => now(),
+        ])->save();
+
+        // Tipo 'Reset' y no 'Bienvenida': la cuenta ya existe y ya tiene
+        // perfil cargado, solo hace falta que fije una contraseña nueva.
+        $this->generarYEnviarCodigo($usuario, tipo: 'Reset', creadoPor: $ejecutor->Id_Usuario);
+
+        // Por si el atacante alcanzó a entrar antes del bloqueo.
+        $this->cerrarSesionesYTokens($usuario);
+    }
 
 public function actualizarEmail(Usuario $usuario, string $nuevoEmail, Usuario $ejecutor, int $idEmpresa): void
 {

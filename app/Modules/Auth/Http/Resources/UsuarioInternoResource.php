@@ -23,6 +23,11 @@ class UsuarioInternoResource extends JsonResource
             'cargo' => $this->Cargo,
             'telefono' => $this->Telefono,
             'activo' => (bool) $this->Activo,
+            // Distinto de 'activo': una cuenta puede estar inactiva porque
+            // un administrador la dio de baja, o bloqueada porque falló el
+            // login 3 veces. La pantalla tiene que poder diferenciarlas.
+            'bloqueado_por_intentos' => (bool) $this->Bloqueado_Por_Intentos,
+            'fecha_bloqueo' => $this->Fecha_Bloqueo,
             'requiere_activacion' => (bool) $this->Requiere_Cambio_Password,
             'ultimo_acceso' => $this->Ultimo_Acceso,
             'rol' => $vinculoEmpresa ? [

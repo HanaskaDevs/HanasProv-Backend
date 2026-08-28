@@ -3,6 +3,7 @@
 namespace App\Modules\Auth\Notifications;
 
 use App\Modules\Auth\Mail\CodigoActivacionMail;
+use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Bus\Queueable;
 use Illuminate\Notifications\Notification;
 
@@ -15,7 +16,16 @@ use Illuminate\Notifications\Notification;
  * fuera su nombre (a esta altura Nombre_Completo todavía es igual al
  * Email, recién se completa cuando el usuario activa su cuenta).
  */
-class CodigoActivacionNotification extends Notification
+/**
+ * Encolado (ShouldQueue): el envío SMTP NO ocurre dentro de la petición.
+ *
+ * Medido antes del cambio: /auth/olvide-password tardaba 4,36 s porque
+ * esperaba al servidor de correo. Como el proceso atiende una petición por
+ * vez, unas pocas llamadas seguidas dejaban el portal sin atender a nadie.
+ * Encolado, la petición contesta al instante y el correo sale por el worker
+ * (ver routes/console.php).
+ */
+class CodigoActivacionNotification extends Notification implements ShouldQueue
 {
     use Queueable;
 

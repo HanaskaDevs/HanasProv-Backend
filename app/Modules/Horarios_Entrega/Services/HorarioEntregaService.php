@@ -4,6 +4,7 @@ namespace App\Modules\Horarios_Entrega\Services;
 
 use App\Models\Empresa;
 use App\Modules\Auth\Models\Usuario;
+use App\Modules\Configuraciones\Models\Configuracion;
 use App\Modules\Horarios_Entrega\Mail\SolicitudAprobacionArriboMail;
 use App\Modules\Horarios_Entrega\Models\HorarioEntregaEstadoDiario;
 use App\Modules\Horarios_Entrega\Models\HorarioEntregaProveedor;
@@ -80,6 +81,41 @@ class HorarioEntregaService
     public const ESTADO_ARRIBO = 'Arribo';
     public const ESTADO_EN_RECEPCION = 'En_Recepcion';
     public const ESTADO_RECIBIDO = 'Recibido';
+
+    /**
+     * Interruptor de los anuncios por voz del Modo TV. Vive acá, en el
+     * módulo que consume la configuración, por el mismo criterio que
+     * VencimientoDocumentosService::CLAVE_SUSPENSION_AUTOMATICA: la clave
+     * la define quien la usa, y Configuraciones solo la expone para la
+     * pantalla de Sistemas -> el nombre de la clave no queda escrito en
+     * dos lugares distintos.
+     */
+    public const CLAVE_ANUNCIOS_VOZ = 'anuncios_voz_modo_tv';
+
+    // ------------------------------------------------------------------
+    // Anuncios por voz del Modo TV
+    // ------------------------------------------------------------------
+
+    /**
+     * ¿El Modo TV debe cantar por voz los cambios de estado?
+     *
+     * Por defecto ENCENDIDO: si la clave todavía no existe, se asume que
+     * sí -> es lo que se pidió y evita que la función quede muda hasta que
+     * alguien entre a Configuraciones a prenderla.
+     *
+     * El interruptor es GLOBAL (una sola fila en Configuracion), no por
+     * empresa ni por pantalla: la decisión es "esta bodega usa anuncios o
+     * no", y quien la toma es Sistemas desde Configuraciones.
+     */
+    public function anunciosVozActivos(): bool
+    {
+        return Configuracion::obtener(self::CLAVE_ANUNCIOS_VOZ, '1') === '1';
+    }
+
+    public function definirAnunciosVoz(bool $activo, int $idUsuario): void
+    {
+        Configuracion::establecer(self::CLAVE_ANUNCIOS_VOZ, $activo ? '1' : '0', $idUsuario);
+    }
 
     // ------------------------------------------------------------------
     // Permisos
@@ -247,7 +283,20 @@ class HorarioEntregaService
      * son finalizados ya no deben salir". Ordenado por hora de llegada
      * ascendente (el próximo primero, como un tablero de aeropuerto).
      */
-    public function listarDeHoy(Usuario $usuario, int $idEmpresa, ?string $clasificacion = null): Collection
+    /**
+     * $incluirRecibidos lo usa SOLO el Modo TV. El resto de las pantallas
+     * (Seguimiento de hoy) siguen sin ver los Recibido, como hasta ahora.
+     *
+     * POR QUÉ HIZO FALTA: los anuncios por voz del Modo TV se disparan
+     * comparando el estado de cada fila contra el de la lectura anterior.
+     * Con los Recibido filtrados, ese proveedor no cambiaba de estado: la
+     * fila DESAPARECÍA, y "desapareció" no alcanza para anunciar que
+     * entregó (una fila también se va al cambiar de franja horaria o al
+     * recargar, y ahí se cantarían entregas que nunca pasaron). Devolviendo
+     * el estado real, el cambio Arribo/En_Recepcion -> Recibido es un
+     * cambio de estado normal y se anuncia como cualquier otro.
+     */
+    public function listarDeHoy(Usuario $usuario, int $idEmpresa, ?string $clasificacion = null, bool $incluirRecibidos = false): Collection
     {
         $this->verificarAccesoOperativo($usuario, $idEmpresa);
 
@@ -297,7 +346,7 @@ class HorarioEntregaService
                     'tiene_solicitud_pendiente' => $solicitudesPendientes->has($h->Id_Horario_Entrega_Proveedor),
                 ];
             })
-            ->filter(fn (array $fila) => $fila['estado'] !== self::ESTADO_RECIBIDO)
+            ->filter(fn (array $fila) => $incluirRecibidos || $fila['estado'] !== self::ESTADO_RECIBIDO)
             ->sort(fn ($a, $b) => strcmp($a['hora_llegada'] ?? '', $b['hora_llegada'] ?? ''))
             ->values();
     }

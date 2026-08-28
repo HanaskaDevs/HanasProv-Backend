@@ -8,6 +8,7 @@ use App\Modules\Configuraciones\Http\Controllers\LoginImagenController;
 use App\Modules\Configuraciones\Http\Controllers\MediaStreamController;
 use App\Modules\Configuraciones\Http\Controllers\PoliticaController;
 use App\Modules\Configuraciones\Http\Controllers\PublicConfigController;
+use App\Modules\Configuraciones\Http\Controllers\AnunciosVozController;
 use App\Modules\Configuraciones\Http\Controllers\SuspensionDocumentosController;
 use Illuminate\Support\Facades\Route;
 
@@ -82,4 +83,9 @@ Route::prefix('configuraciones')
         // Interruptor de la suspensión automática por documentos vencidos.
         Route::get('/suspension-documentos', [SuspensionDocumentosController::class, 'show']);
         Route::put('/suspension-documentos', [SuspensionDocumentosController::class, 'update']);
+
+        // Anuncios por voz del Modo TV. Solo la ESCRITURA vive acá; el Modo
+        // TV lee el valor por /horarios-entrega/config-anuncios.
+        Route::get('/anuncios-voz', [AnunciosVozController::class, 'show']);
+        Route::put('/anuncios-voz', [AnunciosVozController::class, 'update']);
     });
