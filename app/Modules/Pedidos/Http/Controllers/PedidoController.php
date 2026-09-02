@@ -50,7 +50,13 @@ class PedidoController extends Controller
     {
         $idEmpresaActiva = (int) $request->attributes->get('id_empresa_activa');
 
+        // fecha_recepcion_esperada = fecha de ENTREGA. Es la que manda la
+        // pantalla (siempre hoy, ver PedidosInternosPage) y también la que
+        // usa Hana para "quién entrega hoy". Las otras dos filtran por la
+        // fecha de REGISTRO del pedido en BC: se dejan porque el service ya
+        // las soporta, pero la pantalla ya no las envía.
         $filtros = $request->validate([
+            'fecha_recepcion_esperada' => ['nullable', 'date'],
             'fecha_desde' => ['nullable', 'date'],
             'fecha_hasta' => ['nullable', 'date'],
             'proveedor' => ['nullable', 'string', 'max:150'],

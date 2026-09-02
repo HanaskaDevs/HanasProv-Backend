@@ -85,6 +85,54 @@ class EndurecimientoTest extends TestCase
     }
 
     // ---------------------------------------------------------------
+    // Límite de intentos por correo (no por red)
+    // ---------------------------------------------------------------
+
+    /**
+     * Guarda contra la regresión reportada el 2-sep-2026: el límite de
+     * "olvidé mi contraseña" contaba por IP, así que el cupo lo compartía
+     * toda una red y una persona recibía 429 en SU PRIMER intento porque
+     * otras de la misma oficina ya lo habían gastado.
+     *
+     * Lo que se comprueba es el aislamiento: agotar el cupo de un correo NO
+     * debe afectar a otro.
+     */
+    public function test_agotar_el_cupo_de_un_correo_no_bloquea_a_otro(): void
+    {
+        $empresa = $this->crearEmpresa();
+        $unUsuario = $this->crearUsuarioInterno($empresa);
+        $otroUsuario = $this->crearUsuarioInterno($empresa);
+
+        // Se gastan los 10 intentos del primero.
+        for ($i = 1; $i <= 10; $i++) {
+            $this->postJson('/api/auth/olvide-password', ['email' => $unUsuario->Email])->assertOk();
+        }
+
+        // El 11 de ESE correo ya no pasa...
+        $this->postJson('/api/auth/olvide-password', ['email' => $unUsuario->Email])
+            ->assertStatus(429);
+
+        // ...pero el otro correo, desde la MISMA IP, arranca con su propio
+        // cupo. Antes de la corrección, esto devolvía 429.
+        $this->postJson('/api/auth/olvide-password', ['email' => $otroUsuario->Email])
+            ->assertOk();
+    }
+
+    /** Las mayúsculas del correo no abren un cupo nuevo. */
+    public function test_el_correo_se_normaliza_para_contar(): void
+    {
+        $empresa = $this->crearEmpresa();
+        $usuario = $this->crearUsuarioInterno($empresa);
+
+        for ($i = 1; $i <= 10; $i++) {
+            $this->postJson('/api/auth/olvide-password', ['email' => $usuario->Email])->assertOk();
+        }
+
+        $this->postJson('/api/auth/olvide-password', ['email' => strtoupper($usuario->Email)])
+            ->assertStatus(429);
+    }
+
+    // ---------------------------------------------------------------
     // Contraseñas
     // ---------------------------------------------------------------
 

@@ -186,11 +186,48 @@ class FichaProveedorService
      * Solo 3 secciones en total por ahora (Información, Clase, Categoría),
      * ponderadas 33% + 33% + 34% para sumar exactamente 100%.
      */
+    /**
+     * Columnas que la sección 1 (Datos Generales) considera obligatorias.
+     *
+     * TIENE QUE ESPEJAR GuardarSeccion1Request: si el formulario exige un
+     * campo y acá no está, la ficha se daría por completa sin él.
+     *
+     * Antes esta comprobación miraba SOLO Ruc y Razon_Social, y funcionaba
+     * por accidente: esos dos campos únicamente podían llegar desde este
+     * mismo formulario, que ya exigía todo el resto. Desde que la activación
+     * de la cuenta pide RUC y razón social por adelantado (1-sep-2026), esos
+     * dos campos existen desde el minuto cero -> la sección 1 se marcaba
+     * completa al instante y, con la clase y la categoría elegidas, la ficha
+     * saltaba a 100% y quedaba BLOQUEADA "pendiente de revisión" sin que el
+     * proveedor hubiera cargado su dirección, sus teléfonos ni sus
+     * contactos. Reportado el 2-sep-2026.
+     */
+    private const CAMPOS_OBLIGATORIOS_SECCION_1 = [
+        'Ruc', 'Clase_Contribuyente', 'Razon_Social', 'Nombre_Comercial',
+        'Email', 'Telefono', 'Direccion', 'Ciudad', 'Latitud', 'Longitud',
+        'Representante_Legal', 'Correo_Representante', 'Telefono_Representante',
+        'Contacto_Venta', 'Correo_Venta', 'Telefono_Contacto_Venta',
+        'Contacto_Calidad', 'Correo_Calidad', 'Telefono_Contacto_Calidad',
+        'Contacto_Contabilidad', 'Correo_Contabilidad', 'Telefono_Contabilidad',
+    ];
+
+    /** ¿Están cargados TODOS los datos que la sección 1 exige? */
+    public static function seccion1EstaCompleta(Proveedor $proveedor): bool
+    {
+        foreach (self::CAMPOS_OBLIGATORIOS_SECCION_1 as $campo) {
+            if (blank($proveedor->{$campo})) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     protected function recalcularProgreso(Proveedor $proveedor): void
     {
         $proveedor->refresh();
 
-        $seccion1Completa = filled($proveedor->Ruc) && filled($proveedor->Razon_Social);
+        $seccion1Completa = self::seccion1EstaCompleta($proveedor);
         $seccion2Completa = $proveedor->clases()->exists();
         $seccion3Completa = $proveedor->categoriasProducto()->exists();
 

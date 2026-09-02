@@ -18,7 +18,7 @@ class SuspensionDocumentosController extends Controller
     {
     }
 
-    public function show(): JsonResponse
+    public function show(VencimientoDocumentosService $servicio): JsonResponse
     {
         return response()->json([
             'activa' => $this->configuracionService->obtenerSuspensionAutomatica(),
@@ -28,6 +28,12 @@ class SuspensionDocumentosController extends Controller
             'dias_primer_aviso' => VencimientoDocumentosService::DIAS_PRIMER_AVISO,
             'dias_entre_avisos' => VencimientoDocumentosService::DIAS_ENTRE_AVISOS,
             'dias_gracia' => VencimientoDocumentosService::DIAS_GRACIA_SUSPENSION,
+            // Candado por fecha: hasta el 31-dic-2026 se avisa pero no se
+            // suspende. Se expone para que la pantalla lo explique: si no,
+            // Sistemas ve el interruptor encendido y a nadie suspendido, y
+            // parece que está roto.
+            'vigente_desde' => $servicio->suspensionVigenteDesde()->toDateString(),
+            'ya_es_exigible' => $servicio->suspensionYaEsExigible(),
         ]);
     }
 
@@ -37,6 +43,6 @@ class SuspensionDocumentosController extends Controller
 
         $this->configuracionService->definirSuspensionAutomatica($request->user(), $datos['activa']);
 
-        return $this->show();
+        return $this->show(app(VencimientoDocumentosService::class));
     }
 }

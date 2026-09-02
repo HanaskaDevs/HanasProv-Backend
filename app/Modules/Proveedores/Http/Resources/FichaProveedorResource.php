@@ -2,6 +2,7 @@
 
 namespace App\Modules\Proveedores\Http\Resources;
 
+use App\Modules\Proveedores\Services\FichaProveedorService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -33,6 +34,19 @@ class FichaProveedorResource extends JsonResource
                 'calificacionesCampos',
                 fn () => $this->estadoGeneralCalificacionFicha()
             ),
+
+            /**
+             * Lo calcula el BACKEND y la pantalla solo lo consume.
+             *
+             * Antes cada lado tenía su propia versión de "¿está completa?",
+             * y las dos miraban solo el RUC y la razón social. Cuando la
+             * activación de la cuenta empezó a pedir esos dos datos por
+             * adelantado, ambas dieron la sección por completa desde el
+             * primer día y la ficha aparecía al 100% y bloqueada estando
+             * vacía. Con un solo cálculo, del lado que además valida el
+             * formulario, no pueden volver a discrepar.
+             */
+            'seccion_1_completa' => FichaProveedorService::seccion1EstaCompleta($this->resource),
 
             'seccion_1' => [
                 'ruc' => $this->Ruc,

@@ -20,18 +20,21 @@ Route::prefix('auth')->group(function () {
      * es lento -> sin este techo, unas pocas peticiones por segundo bastan
      * para dejar el portal sin CPU.
      *
-     * 'activar-cuenta' y 'olvide-password' llevan un límite MÁS BAJO porque
-     * los dos terminan mandando un correo: sin él son un cañón para llenarle
-     * la casilla a cualquiera y, encima, cada envío bloquea al servidor
-     * mientras dura el SMTP.
+     * Los cuatro usan limitadores CON NOMBRE (ver
+     * AppServiceProvider::registrarLimitesDeCuenta) y no un 'throttle:3,10'
+     * suelto. Motivo: sin nombre, la clave del conteo es `dominio|IP`, así
+     * que el cupo lo comparte toda una red y una oficina detrás de una IP
+     * pública se bloqueaba entre sí. Los limitadores con nombre cuentan por
+     * CORREO (estricto, protege a la persona) y por IP (holgado, solo frena
+     * un abuso masivo).
      */
-    Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:10,1');
-    Route::post('/olvide-password', [AuthController::class, 'olvidePassword'])->middleware('throttle:3,10');
-    Route::post('/activar-cuenta', [AuthController::class, 'activarCuenta'])->middleware('throttle:5,10');
+    Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:login');
+    Route::post('/olvide-password', [AuthController::class, 'olvidePassword'])->middleware('throttle:recuperar-password');
+    Route::post('/activar-cuenta', [AuthController::class, 'activarCuenta'])->middleware('throttle:activar-cuenta');
     // Paso 1 de la pantalla de activación. Límite más holgado que el de
     // activar: acá no se manda ningún correo ni se cambia nada, solo se
     // comprueba el código, y la persona puede corregir un tipeo varias veces.
-    Route::post('/validar-codigo', [AuthController::class, 'validarCodigoActivacion'])->middleware('throttle:15,10');
+    Route::post('/validar-codigo', [AuthController::class, 'validarCodigoActivacion'])->middleware('throttle:validar-codigo');
 
     Route::middleware('auth:sanctum')->group(function () {
         Route::post('/logout', [AuthController::class, 'logout']);
