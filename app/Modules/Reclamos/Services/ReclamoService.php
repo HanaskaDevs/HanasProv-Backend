@@ -21,6 +21,24 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 class ReclamoService
 {
+    /**
+     * Todo el texto de un reclamo se guarda EN MAYÚSCULAS (decisión del
+     * negocio, 1-sep-2026): el asunto y también cada mensaje de la
+     * conversación, escriba quien escriba.
+     *
+     * Se normaliza al GUARDAR y no al mostrar, para que salga igual en
+     * todos lados: la pantalla, los correos que se le mandan al proveedor y
+     * cualquier exportación. Si solo se convirtiera en la vista, el correo
+     * saldría como lo tipearon y no coincidiría con el portal.
+     *
+     * mb_strtoupper y no strtoupper: sin él, strtoupper deja las vocales
+     * acentuadas intactas y "canción" quedaría como "CANCIóN".
+     */
+    protected function aMayusculas(string $texto): string
+    {
+        return mb_strtoupper(trim($texto), 'UTF-8');
+    }
+
     use VerificaArchivoFisico;
 
     protected const DISCO = 'reclamos';
@@ -117,7 +135,7 @@ class ReclamoService
             $reclamo = Reclamo::create([
                 'Id_Empresa' => $idEmpresaActiva,
                 'Id_Proveedor' => $proveedor->Id_Proveedor,
-                'Asunto' => $asunto,
+                'Asunto' => $this->aMayusculas($asunto),
                 'Tipo_Reclamo' => $tipoReclamo,
                 'Impacto_Proveedor' => $impactoProveedor,
                 'Estado' => 'Abierto',
@@ -197,7 +215,7 @@ class ReclamoService
         $mensaje = ReclamoMensaje::create([
             'Id_Reclamo' => $reclamo->Id_Reclamo,
             'Id_Usuario_Autor' => $usuario->Id_Usuario,
-            'Mensaje' => $texto,
+            'Mensaje' => $this->aMayusculas($texto),
             'Fecha_Creacion' => now(),
         ]);
 

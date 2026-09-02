@@ -141,5 +141,75 @@ class AppServiceProvider extends ServiceProvider
             return Limit::perMinute((int) config('portal.limite_peticiones_anonimo'))
                 ->by('ip:'.$request->ip());
         });
+
+        $this->registrarLimitesDeCuenta();
+    }
+
+    /**
+     * Límites de los endpoints anónimos de cuenta (login, recuperar
+     * contraseña, activar).
+     *
+     * POR QUÉ NO ALCANZA UN 'throttle:3,10' SUELTO EN LA RUTA. Cuando
+     * ThrottleRequests no recibe un limitador con nombre, arma la clave con
+     * `dominio|IP` (ver ThrottleRequests::resolveRequestSignature). O sea
+     * que el cupo lo comparte TODA la red: si tres personas de la oficina
+     * olvidan la contraseña en la misma ventana de 10 minutos, la cuarta
+     * recibe 429 aunque sea su primer intento. Reportado el 2-sep-2026,
+     * pasaba exactamente eso.
+     *
+     * Cada límite tiene DOS reglas, y se aplica la más restrictiva de las
+     * que correspondan:
+     *
+     *  - POR CORREO, estricta: es la que de verdad protege a la persona, e
+     *    impide inundarle la casilla o probar códigos contra su cuenta.
+     *  - POR IP, holgada: solo está para frenar un abuso masivo desde un
+     *    mismo origen, no para racionar a los usuarios legítimos.
+     *
+     * El correo se normaliza (minúsculas y sin espacios) para que
+     * "Juan@X.com" y "juan@x.com" compartan cupo; si no viniera correo en la
+     * petición, se cae a la IP para no meter a todos en la misma bolsa.
+     */
+    protected function registrarLimitesDeCuenta(): void
+    {
+        $porCorreo = function (Request $request): string {
+            $email = strtolower(trim((string) $request->input('email')));
+
+            return $email !== '' ? 'email:'.$email : 'ip:'.$request->ip();
+        };
+
+        // Recuperar contraseña: manda un correo, así que la regla por
+        // destinatario es la que importa.
+        // 10 intentos por correo cada 10 minutos (decisión del negocio,
+        // 2-sep-2026). El techo por IP queda más alto solo para frenar un
+        // abuso masivo: si fuera igual, una oficina entera detrás de una
+        // misma IP pública compartiría el cupo de una sola persona.
+        RateLimiter::for('recuperar-password', fn (Request $request) => [
+            Limit::perMinutes(10, 10)->by($porCorreo($request)),
+            Limit::perMinutes(10, 60)->by('ip:'.$request->ip()),
+        ]);
+
+        // Activar cuenta: define una contraseña, hay que ser estricto por
+        // cuenta; pero varias personas de una misma empresa pueden estar
+        // activándose el mismo día desde la misma red.
+        RateLimiter::for('activar-cuenta', fn (Request $request) => [
+            Limit::perMinutes(10, 10)->by($porCorreo($request)),
+            Limit::perMinutes(10, 60)->by('ip:'.$request->ip()),
+        ]);
+
+        // Validar el código (paso 1 de la pantalla): no manda correos ni
+        // cambia nada, y la persona puede corregir un tipeo varias veces.
+        RateLimiter::for('validar-codigo', fn (Request $request) => [
+            Limit::perMinutes(10, 20)->by($porCorreo($request)),
+            Limit::perMinutes(10, 80)->by('ip:'.$request->ip()),
+        ]);
+
+        // Login: el bloqueo por cuenta (3 fallos) y por IP (5 correos
+        // inexistentes) ya vive en AuthService; esto es solo el techo de
+        // caudal. Por IP va alto a propósito: a las 8 de la mañana entra
+        // toda la oficina por la misma IP pública.
+        RateLimiter::for('login', fn (Request $request) => [
+            Limit::perMinute(10)->by($porCorreo($request)),
+            Limit::perMinute(60)->by('ip:'.$request->ip()),
+        ]);
     }
 }

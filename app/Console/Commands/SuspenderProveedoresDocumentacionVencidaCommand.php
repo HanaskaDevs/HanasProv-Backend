@@ -17,9 +17,15 @@ use Illuminate\Support\Facades\Notification;
  * usuario trabaja con otra empresa del grupo y ahí está al día, sigue
  * entrando a esa sin problema.
  *
- * Separado del comando de avisos a propósito: este SÍ pasa por el
- * interruptor de Configuraciones ("suspension_automatica_documentos"), así
- * se pueden dejar los avisos andando y frenar solo la suspensión.
+ * Separado del comando de avisos a propósito: este SÍ pasa por dos
+ * candados, así se pueden dejar los avisos andando y frenar solo la
+ * suspensión:
+ *
+ *  1. Una FECHA (portal.suspension_documentos_desde, 1-ene-2027): hasta el
+ *     31-dic-2026 no se suspende a nadie. Se cumple sola el día que toca,
+ *     sin que nadie tenga que habilitar nada.
+ *  2. El interruptor manual de Configuraciones
+ *     ("suspension_automatica_documentos"), para poder frenarla a mano.
  *
  * Nota operativa: la regla se evalúa cada día sobre el estado actual. Si
  * Admin reactiva a un proveedor y el documento sigue vencido hace más de 15
@@ -39,6 +45,19 @@ class SuspenderProveedoresDocumentacionVencidaCommand extends Command
 
     public function handle(): int
     {
+        // Candado por FECHA: hasta el 31-dic-2026 se avisa pero no se
+        // suspende a nadie (decisión del negocio, 2-sep-2026). Va primero
+        // porque es la razón más probable de que este comando no haga nada
+        // durante todo 2026, y conviene que quede clara en el log antes que
+        // cualquier otra.
+        if (! $this->servicio->suspensionYaEsExigible() && ! $this->option('forzar')) {
+            $desde = $this->servicio->suspensionVigenteDesde()->format('d/m/Y');
+
+            $this->warn("La suspensión automática recién se aplica desde el {$desde}. Los avisos por correo siguen saliendo normalmente.");
+
+            return self::SUCCESS;
+        }
+
         if (! $this->servicio->suspensionAutomaticaActiva() && ! $this->option('forzar')) {
             $this->warn('La suspensión automática está APAGADA en Configuraciones. No se suspendió a nadie.');
 

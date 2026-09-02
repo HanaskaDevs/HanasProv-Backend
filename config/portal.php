@@ -89,6 +89,28 @@ return [
     'limite_peticiones_autenticado' => (int) env('LIMITE_PETICIONES_AUTENTICADO', 120),
     'limite_peticiones_anonimo' => (int) env('LIMITE_PETICIONES_ANONIMO', 300),
 
+    /*
+    | Desde cuándo la suspensión automática por documentación vencida
+    | empieza a aplicarse de verdad.
+    |
+    | Decisión del negocio (2-sep-2026): hasta el 31 de diciembre de 2026 el
+    | portal AVISA de los documentos vencidos pero NO suspende ni inactiva a
+    | nadie -> los proveedores están terminando de cargar su documentación y
+    | bloquearlos ahora los dejaría afuera por algo que todavía están
+    | resolviendo. A partir del 1 de enero de 2027 el ciclo funciona
+    | completo, como estaba pensado.
+    |
+    | Va como FECHA y no como un interruptor que alguien tiene que acordarse
+    | de prender: el cambio ocurre solo el día que corresponde. El
+    | interruptor manual de Configuraciones sigue existiendo y es
+    | independiente -> para suspender hacen falta las dos cosas (que la
+    | fecha haya llegado Y que el interruptor esté encendido).
+    |
+    | Los AVISOS por correo no pasan por acá: siguen saliendo igual todo
+    | 2026 (ver AvisarVencimientoDocumentosCommand).
+    */
+    'suspension_documentos_desde' => env('SUSPENSION_DOCUMENTOS_DESDE', '2027-01-01'),
+
     'proteccion_datos' => [
         'email' => env('PORTAL_EMAIL_PROTECCION_DATOS', 'protecciondedatos@hanaska.com'),
     ],

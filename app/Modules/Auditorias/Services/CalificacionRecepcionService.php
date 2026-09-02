@@ -427,10 +427,20 @@ class CalificacionRecepcionService
     }
 
     /** Mismos roles que el resto de Auditorías: Sistemas, Admin y Calidad. */
+    /**
+     * Calificar recepciones: Sistemas y Calidad. Admin quedó FUERA
+     * (decisión del negocio, 1-sep-2026): no califica ni auditorías ni
+     * recepciones, igual que ya pasaba con AuditoriaService.
+     *
+     * Admin NO se queda sin ver los resultados: la nota de auditoría y la
+     * de recepción son dos de los cinco componentes de la calificación
+     * global, y esa la sigue viendo en Reportes -> Calificación de
+     * proveedores. Lo que pierde es el permiso de PONER la nota, no el de
+     * leerla.
+     */
     protected function verificarAcceso(Usuario $usuario, int $idEmpresa): void
     {
         $tieneAcceso = $usuario->esSistemas($idEmpresa)
-            || $usuario->esAdmin($idEmpresa)
             || $usuario->esCalidad($idEmpresa);
 
         if (! $tieneAcceso) {

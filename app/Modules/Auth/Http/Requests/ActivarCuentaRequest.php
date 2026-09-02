@@ -21,21 +21,29 @@ class ActivarCuentaRequest extends FormRequest
             // Solo obligatorios en la primera activación (código tipo "Bienvenida").
             // La validación condicional real se hace en el UsuarioService,
             // porque depende de consultar el tipo de código en base de datos.
-            'nombre_completo' => ['nullable', 'string', 'max:200'],
-            'cargo' => ['nullable', 'string', 'max:100'],
-            'telefono' => ['nullable', 'string', 'max:20'],
+            // Los mismos formatos que exige el formulario. Se repiten acá a
+            // propósito: la pantalla evita el error, pero la API es pública y
+            // no puede confiar en que quien llama sea el formulario.
+            // \p{L} (con /u) cubre las tildes y la ñ; \w no las cubriría.
+            'nombre_completo' => ['nullable', 'string', 'min:3', 'max:200', 'regex:/^[\p{L}\s\'-]+$/u'],
+            'cargo' => ['nullable', 'string', 'min:2', 'max:100', 'regex:/^[\p{L}\s\'-]+$/u'],
+            'telefono' => ['nullable', 'string', 'regex:/^[0-9]{7,15}$/'],
             // Solo obligatorios en la primera activación de un usuario
             // Proveedor; como eso depende de consultar la base, la exigencia
             // real vive en UsuarioService (mismo criterio que los 3 de
             // arriba). Acá solo se valida el FORMATO de lo que venga.
             'ruc' => ['nullable', 'string', 'size:13'],
-            'razon_social' => ['nullable', 'string', 'max:200'],
+            'razon_social' => ['nullable', 'string', 'min:3', 'max:200'],
         ];
     }
 
     public function messages(): array
     {
         return [
+            'nombre_completo.regex' => 'El nombre completo solo puede tener letras.',
+            'cargo.regex' => 'El cargo solo puede tener letras.',
+            'telefono.regex' => 'El teléfono debe tener entre 7 y 15 dígitos, sin letras ni signos.',
+            'ruc.size' => 'El RUC debe tener exactamente 13 dígitos.',
             'password_nueva.min' => ReglaPasswordSegura::descripcion(),
             'password_nueva.numbers' => ReglaPasswordSegura::descripcion(),
             'password_nueva.symbols' => ReglaPasswordSegura::descripcion(),

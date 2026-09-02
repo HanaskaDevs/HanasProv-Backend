@@ -62,6 +62,29 @@ class VencimientoDocumentosService
         return Configuracion::obtener(self::CLAVE_SUSPENSION_AUTOMATICA, '1') === '1';
     }
 
+    /** Día a partir del cual la suspensión empieza a aplicarse. */
+    public function suspensionVigenteDesde(): Carbon
+    {
+        return Carbon::parse(config('portal.suspension_documentos_desde'))->startOfDay();
+    }
+
+    /**
+     * ¿Ya llegó la fecha desde la que se puede suspender?
+     *
+     * Es un CANDADO POR FECHA, distinto del interruptor manual de
+     * Configuraciones: hasta el 31-dic-2026 se avisa pero no se suspende a
+     * nadie (decisión del negocio, 2-sep-2026), y el 1-ene-2027 el ciclo
+     * arranca solo, sin que nadie tenga que acordarse de habilitarlo.
+     *
+     * Para suspender hacen falta las DOS condiciones. Se dejan separadas a
+     * propósito para que el comando pueda decir en el log cuál de las dos
+     * lo frenó.
+     */
+    public function suspensionYaEsExigible(?Carbon $hoy = null): bool
+    {
+        return ($hoy ?? now())->startOfDay()->greaterThanOrEqualTo($this->suspensionVigenteDesde());
+    }
+
     public function definirSuspensionAutomatica(bool $activa, int $idUsuario): void
     {
         Configuracion::establecer(self::CLAVE_SUSPENSION_AUTOMATICA, $activa ? '1' : '0', $idUsuario);

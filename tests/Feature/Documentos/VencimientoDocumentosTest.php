@@ -11,7 +11,9 @@ use App\Modules\Documentos_Proveedor\Notifications\ProveedorSuspendidoNotificati
 use App\Modules\Documentos_Proveedor\Services\VencimientoDocumentosService;
 use App\Modules\Proveedores\Models\EstadoProveedor;
 use App\Modules\Proveedores\Models\Proveedor;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Notification;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 /**
@@ -31,6 +33,30 @@ class VencimientoDocumentosTest extends TestCase
     {
         return app(VencimientoDocumentosService::class);
     }
+
+    /**
+     * Corre el comando de suspensión con el reloj YA PASADO el candado por
+     * fecha (portal.suspension_documentos_desde, 1-ene-2027).
+     *
+     * Hace falta porque durante 2026 el comando no suspende a nadie a
+     * propósito, y estos tests verifican la MECÁNICA de la suspensión (que
+     * respete los 15 días, que no cruce empresas, que deje historial), no
+     * el candado -- ese tiene sus propios tests más arriba.
+     *
+     * Los documentos se crean con fechas relativas a now(), así que al
+     * congelar el reloj todas se corren juntas y los plazos se mantienen.
+     */
+    private function correrSuspensionPasadoElCandado(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2027-03-01 08:30:00'));
+
+        try {
+            $this->artisan('documentos:suspender-vencidos')->assertSuccessful();
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
 
     /** Documento con fecha de caducidad para un proveedor. */
     private function documentoQueVence(Proveedor $proveedor, string $fechaCaducidad, int $idUsuarioCarga): DocumentoProveedor
@@ -59,6 +85,120 @@ class VencimientoDocumentosTest extends TestCase
             'Activo' => 1,
             'Fecha_Creacion' => now(),
         ]);
+    }
+
+    // ---------------------------------------------------------------
+    // Candado por fecha: hasta el 31-dic-2026 se avisa pero no se suspende
+    // ---------------------------------------------------------------
+
+    /**
+     * Decisión del negocio (2-sep-2026): durante todo 2026 el portal avisa
+     * de los documentos vencidos pero NO suspende ni inactiva a nadie. El
+     * 1-ene-2027 el ciclo arranca solo.
+     *
+     * Se prueba la FRONTERA, que es donde estaría el error si lo hubiera:
+     * el último día de 2026 no debe suspender y el primero de 2027 sí.
+     */
+    public static function fechasYSuspension(): array
+    {
+        return [
+            'hoy (2026)' => ['2026-09-02', false],
+            'un día antes del corte' => ['2026-12-31', false],
+            'el día del corte' => ['2027-01-01', true],
+            'bien entrado 2027' => ['2027-06-15', true],
+        ];
+    }
+
+    #[DataProvider('fechasYSuspension')]
+    public function test_la_suspension_recien_es_exigible_desde_2027(string $fecha, bool $esperado): void
+    {
+        $this->assertSame(
+            $esperado,
+            $this->servicio()->suspensionYaEsExigible(Carbon::parse($fecha)),
+            "El {$fecha} la suspensión ".($esperado ? 'debería' : 'NO debería').' poder aplicarse.'
+        );
+    }
+
+    public function test_el_comando_no_suspende_a_nadie_durante_2026(): void
+    {
+        Notification::fake();
+
+        $empresa = $this->crearEmpresa();
+        $sistemas = $this->crearUsuarioInterno($empresa, 'Sistemas');
+        [, $proveedor] = $this->crearProveedorConUsuario($empresa, [
+            'Id_Estado_Proveedor' => EstadoProveedor::APROBADO,
+        ]);
+
+        // Documento vencido hace mucho más que los 15 días de gracia: sin el
+        // candado por fecha, este proveedor se suspendería sí o sí.
+        $this->documentoQueVence($proveedor, now()->subDays(60)->toDateString(), $sistemas->Id_Usuario);
+
+        Carbon::setTestNow(Carbon::parse('2026-12-31 08:30:00'));
+
+        try {
+            $this->artisan('documentos:suspender-vencidos')->assertSuccessful();
+        } finally {
+            Carbon::setTestNow();
+        }
+
+        $this->assertSame(
+            EstadoProveedor::APROBADO,
+            (int) $proveedor->fresh()->Id_Estado_Proveedor,
+            'Durante 2026 el proveedor tiene que seguir Aprobado, con documento vencido y todo.'
+        );
+        Notification::assertNothingSent();
+    }
+
+    /** El mismo caso, un día después: ahí sí suspende. */
+    public function test_el_comando_si_suspende_a_partir_del_1_de_enero_de_2027(): void
+    {
+        Notification::fake();
+
+        $empresa = $this->crearEmpresa();
+        $sistemas = $this->crearUsuarioInterno($empresa, 'Sistemas');
+        [, $proveedor] = $this->crearProveedorConUsuario($empresa, [
+            'Id_Estado_Proveedor' => EstadoProveedor::APROBADO,
+        ]);
+
+        $this->documentoQueVence($proveedor, '2026-11-01', $sistemas->Id_Usuario);
+
+        Carbon::setTestNow(Carbon::parse('2027-01-01 08:30:00'));
+
+        try {
+            $this->artisan('documentos:suspender-vencidos')->assertSuccessful();
+        } finally {
+            Carbon::setTestNow();
+        }
+
+        $this->assertSame(
+            EstadoProveedor::SUSPENDIDO,
+            (int) $proveedor->fresh()->Id_Estado_Proveedor,
+            'Desde el 1-ene-2027 el ciclo completo tiene que volver a funcionar.'
+        );
+    }
+
+    /** Los AVISOS no pasan por el candado: siguen saliendo todo 2026. */
+    public function test_los_avisos_siguen_funcionando_durante_2026(): void
+    {
+        $empresa = $this->crearEmpresa();
+        $sistemas = $this->crearUsuarioInterno($empresa, 'Sistemas');
+        [, $proveedor] = $this->crearProveedorConUsuario($empresa);
+
+        $this->documentoQueVence($proveedor, now()->addDays(10)->toDateString(), $sistemas->Id_Usuario);
+
+        Carbon::setTestNow(Carbon::parse('2026-09-02 08:30:00'));
+
+        try {
+            $paraAvisar = $this->servicio()->documentosParaAvisar();
+        } finally {
+            Carbon::setTestNow();
+        }
+
+        $this->assertGreaterThan(
+            0,
+            $paraAvisar->count(),
+            'El candado es SOLO para suspender: los avisos tienen que seguir saliendo.'
+        );
     }
 
     public function test_avisa_treinta_dias_antes_y_no_antes(): void
@@ -160,7 +300,7 @@ class VencimientoDocumentosTest extends TestCase
         [, $proveedor] = $this->crearProveedorConUsuario($empresa, ['Id_Estado_Proveedor' => EstadoProveedor::APROBADO]);
         $this->documentoQueVence($proveedor, now()->subDays(20)->toDateString(), $admin->Id_Usuario);
 
-        $this->artisan('documentos:suspender-vencidos')->assertSuccessful();
+        $this->correrSuspensionPasadoElCandado();
 
         $this->assertSame(EstadoProveedor::SUSPENDIDO, (int) $proveedor->fresh()->Id_Estado_Proveedor);
 
@@ -189,7 +329,7 @@ class VencimientoDocumentosTest extends TestCase
 
         $this->servicio()->definirSuspensionAutomatica(false, $admin->Id_Usuario);
 
-        $this->artisan('documentos:suspender-vencidos')->assertSuccessful();
+        $this->correrSuspensionPasadoElCandado();
 
         $this->assertSame(
             EstadoProveedor::APROBADO,
@@ -200,7 +340,7 @@ class VencimientoDocumentosTest extends TestCase
 
         // Y encendido de nuevo, sí suspende.
         $this->servicio()->definirSuspensionAutomatica(true, $admin->Id_Usuario);
-        $this->artisan('documentos:suspender-vencidos')->assertSuccessful();
+        $this->correrSuspensionPasadoElCandado();
         $this->assertSame(EstadoProveedor::SUSPENDIDO, (int) $proveedor->fresh()->Id_Estado_Proveedor);
     }
 
@@ -221,7 +361,7 @@ class VencimientoDocumentosTest extends TestCase
 
         $this->documentoQueVence($proveedorA, now()->subDays(20)->toDateString(), $admin->Id_Usuario);
 
-        $this->artisan('documentos:suspender-vencidos')->assertSuccessful();
+        $this->correrSuspensionPasadoElCandado();
 
         $this->assertSame(EstadoProveedor::SUSPENDIDO, (int) $proveedorA->fresh()->Id_Estado_Proveedor);
         $this->assertSame(
@@ -241,7 +381,7 @@ class VencimientoDocumentosTest extends TestCase
         [, $proveedor] = $this->crearProveedorConUsuario($empresa, ['Id_Estado_Proveedor' => EstadoProveedor::ASPIRANTE]);
         $this->documentoQueVence($proveedor, now()->subDays(20)->toDateString(), $admin->Id_Usuario);
 
-        $this->artisan('documentos:suspender-vencidos')->assertSuccessful();
+        $this->correrSuspensionPasadoElCandado();
         $this->assertSame(EstadoProveedor::SUSPENDIDO, (int) $proveedor->fresh()->Id_Estado_Proveedor);
 
         $this->servicio()->levantarSuspension($proveedor->fresh(), $admin->Id_Usuario);

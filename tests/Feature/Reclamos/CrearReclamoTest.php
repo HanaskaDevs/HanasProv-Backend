@@ -51,9 +51,18 @@ class CrearReclamoTest extends TestCase
         );
 
         $this->assertSame('Abierto', $reclamo->Estado);
-        $this->assertSame($datos['asunto'], $reclamo->Asunto);
         $this->assertCount(1, $reclamo->destinatarios);
-        $this->assertSame($datos['mensajeTexto'], $reclamo->mensajes()->first()->Mensaje);
+
+        // Todo el texto del reclamo se guarda EN MAYÚSCULAS, tal como se
+        // escriba (decisión del negocio, 1-sep-2026, ver
+        // ReclamoService::aMayusculas). Se comprueba con mb_strtoupper y no
+        // con un literal para que el test siga valiendo si mañana cambia el
+        // texto de ejemplo.
+        $this->assertSame(mb_strtoupper($datos['asunto'], 'UTF-8'), $reclamo->Asunto);
+        $this->assertSame(
+            mb_strtoupper($datos['mensajeTexto'], 'UTF-8'),
+            $reclamo->mensajes()->first()->Mensaje
+        );
     }
 
     /**
