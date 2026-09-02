@@ -58,18 +58,46 @@
         </tr>
 
         {{-- Botón --}}
+        {{--
+          POR QUÉ ESTE BOTÓN ESTÁ DUPLICADO: Outlook para Windows no dibuja el
+          correo con un motor web, sino con el de Word, que IGNORA
+          display:inline-block y el padding de un <a>. Con la versión anterior
+          el fondo oscuro se veía como un botón grande, pero el enlace real
+          quedaba reducido al texto: el usuario pulsaba el botón y no pasaba
+          nada (copiar y pegar la URL a mano sí funcionaba).
+
+          La solución estándar son dos versiones excluyentes:
+          - <v:roundrect> (VML) para Outlook: un botón nativo, clicable entero.
+          - el <a> de siempre para el resto de clientes.
+          Los comentarios condicionales hacen que cada cliente vea solo una.
+          Si se cambia el texto del botón, hay que cambiarlo EN LOS DOS SITIOS.
+        --}}
         <tr>
           <td align="center" style="padding:8px 32px 24px 32px;">
-            <table role="presentation" cellpadding="0" cellspacing="0">
+            <!--[if mso]>
+            <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml"
+                         xmlns:w="urn:schemas-microsoft-com:office:word"
+                         href="{{ $urlActivacion }}"
+                         style="height:44px; v-text-anchor:middle; width:{{ $esReset ? '260' : '200' }}px;"
+                         arcsize="18%" stroke="f" fillcolor="#142831">
+              <w:anchorlock/>
+              <center style="color:#ffffff; font-family:Arial,sans-serif; font-size:14px; font-weight:bold;">
+                {{ $esReset ? 'Restablecer mi contraseña' : 'Activar mi cuenta' }}
+              </center>
+            </v:roundrect>
+            <![endif]-->
+            <!--[if !mso]><!-- -->
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0">
               <tr>
                 <td align="center" style="border-radius:8px; background-color:#142831;">
                   <a href="{{ $urlActivacion }}"
-                     style="display:inline-block; padding:12px 28px; font-size:14px; font-weight:bold; color:#ffffff; text-decoration:none; border-radius:8px;">
+                     style="display:inline-block; padding:12px 28px; font-family:Arial,sans-serif; font-size:14px; font-weight:bold; color:#ffffff; text-decoration:none; border-radius:8px;">
                     {{ $esReset ? 'Restablecer mi contraseña' : 'Activar mi cuenta' }}
                   </a>
                 </td>
               </tr>
             </table>
+            <!--<![endif]-->
           </td>
         </tr>
 

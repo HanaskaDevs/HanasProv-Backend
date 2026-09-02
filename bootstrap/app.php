@@ -13,6 +13,11 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
+        // El portal se publica detras del proxy TLS de redes (10.100.60.6).
+        // Sin esto Laravel no reconoce el HTTPS del cliente y genera las URLs
+        // de /media con http://, provocando Mixed Content en el navegador.
+        $middleware->trustProxies(at: "*");
+
         $middleware->api(prepend: [
             \App\Http\Middleware\ForceJsonResponse::class,
         ]);
