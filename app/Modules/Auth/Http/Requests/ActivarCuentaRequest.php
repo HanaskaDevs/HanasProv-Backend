@@ -32,8 +32,14 @@ class ActivarCuentaRequest extends FormRequest
             // Proveedor; como eso depende de consultar la base, la exigencia
             // real vive en UsuarioService (mismo criterio que los 3 de
             // arriba). Acá solo se valida el FORMATO de lo que venga.
-            'ruc' => ['nullable', 'string', 'size:13'],
-            'razon_social' => ['nullable', 'string', 'min:3', 'max:200'],
+            // El 'size:13' solo mide el largo: sin el regex, un RUC de 13
+            // LETRAS pasaba la validación y se guardaba en la ficha.
+            'ruc' => ['nullable', 'string', 'size:13', 'regex:/^\d{13}$/'],
+            // La razón social SÍ admite números y signos, porque los nombres
+            // legales los usan de verdad ("Comercial 2000 S.A.", "AGRO & MAR
+            // CÍA. LTDA."). Lo que no admite es '<' ni '>': sin esta regla
+            // entraba tal cual un "<script>alert(1)</script>".
+            'razon_social' => ['nullable', 'string', 'min:3', 'max:200', 'regex:/^[\p{L}\p{N}\s.,&\/()\'-]+$/u'],
         ];
     }
 
@@ -44,6 +50,8 @@ class ActivarCuentaRequest extends FormRequest
             'cargo.regex' => 'El cargo solo puede tener letras.',
             'telefono.regex' => 'El teléfono debe tener entre 7 y 15 dígitos, sin letras ni signos.',
             'ruc.size' => 'El RUC debe tener exactamente 13 dígitos.',
+            'ruc.regex' => 'El RUC solo puede tener números.',
+            'razon_social.regex' => 'La razón social solo puede tener letras, números y los signos . , & / ( ) - \'',
             'password_nueva.min' => ReglaPasswordSegura::descripcion(),
             'password_nueva.numbers' => ReglaPasswordSegura::descripcion(),
             'password_nueva.symbols' => ReglaPasswordSegura::descripcion(),
