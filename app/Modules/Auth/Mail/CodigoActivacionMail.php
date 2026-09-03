@@ -34,7 +34,33 @@ class CodigoActivacionMail extends Mailable implements ShouldQueue
         public string $codigo,
         public string $urlActivacion,
         public bool $esReset = false,
+        public int $minutosVigencia = 20,
     ) {
+    }
+
+    /**
+     * Convierte los minutos de vigencia en algo que se lea bien en el
+     * correo: "3 días" y no "4320 minutos". Redondea hacia abajo a la unidad
+     * exacta y solo cuando el número es redondo; si no lo es, se queda en
+     * minutos antes que mentir con un "casi 2 horas".
+     */
+    public function vigenciaEnTexto(): string
+    {
+        $minutos = max(1, $this->minutosVigencia);
+
+        if ($minutos % 1440 === 0) {
+            $dias = intdiv($minutos, 1440);
+
+            return $dias === 1 ? '1 día' : "{$dias} días";
+        }
+
+        if ($minutos % 60 === 0) {
+            $horas = intdiv($minutos, 60);
+
+            return $horas === 1 ? '1 hora' : "{$horas} horas";
+        }
+
+        return $minutos === 1 ? '1 minuto' : "{$minutos} minutos";
     }
 
     /**
@@ -72,6 +98,7 @@ class CodigoActivacionMail extends Mailable implements ShouldQueue
                 'codigo' => $this->codigo,
                 'urlActivacion' => $this->urlActivacion,
                 'esReset' => $this->esReset,
+                'vigenciaTexto' => $this->vigenciaEnTexto(),
             ],
         );
     }

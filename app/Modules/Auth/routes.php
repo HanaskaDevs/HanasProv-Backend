@@ -64,6 +64,22 @@ Route::prefix('usuarios')
         // Usuarios externos (Proveedores): rol Sistemas o Admin pueden crear
         Route::get('/externos', [UsuarioController::class, 'indexExternos']);
         Route::post('/externos', [UsuarioController::class, 'storeProveedor']);
+
+        /**
+         * Carga masiva desde Excel: SOLO rol Sistemas (lo valida
+         * UsuarioService::crearUsuariosProveedorEnLote, no alcanza con
+         * llegar hasta acá).
+         *
+         * Va con techo propio de peticiones porque una sola llamada puede
+         * crear hasta 500 usuarios y encolar 500 correos: sin esto, un
+         * doble clic o un script equivocado repite la carga completa. Al
+         * ser una ruta autenticada, el conteo de Laravel es POR USUARIO y
+         * no por IP, así que dos personas de Sistemas en la misma oficina
+         * no se quitan el cupo entre ellas.
+         */
+        Route::post('/externos/lote', [UsuarioController::class, 'storeProveedoresLote'])
+            ->middleware('throttle:6,1');
+
         Route::get('/externos/{usuario}', [UsuarioController::class, 'showExterno']);
 
         // Común a ambos

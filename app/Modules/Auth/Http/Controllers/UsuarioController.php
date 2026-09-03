@@ -5,6 +5,7 @@ namespace App\Modules\Auth\Http\Controllers;
 use App\Http\Controllers\Controller;
 use App\Modules\Auth\Http\Requests\CrearUsuarioInternoRequest;
 use App\Modules\Auth\Http\Requests\CrearUsuarioProveedorRequest;
+use App\Modules\Auth\Http\Requests\CrearUsuariosProveedorLoteRequest;
 use App\Modules\Auth\Http\Resources\UsuarioExternoResource;
 use App\Modules\Auth\Http\Resources\UsuarioInternoResource;
 use App\Modules\Auth\Models\Usuario;
@@ -94,6 +95,29 @@ class UsuarioController extends Controller
         );
 
         return response()->json(new UsuarioExternoResource($usuario->load('usuarioEmpresas.rol')), 201);
+    }
+
+    /**
+     * Carga masiva de usuarios externos (Proveedores) desde un Excel.
+     * Solo rol Sistemas (lo valida el Service, no basta con estar en este
+     * grupo de rutas).
+     *
+     * Devuelve 200 y NO 201/207 a propósito: la respuesta no es "se creó un
+     * recurso" sino un REPORTE fila por fila, donde conviven creados,
+     * omitidos y errores. Quien llama siempre tiene que leer el cuerpo, así
+     * que un código de éxito parcial solo agregaría ruido.
+     */
+    public function storeProveedoresLote(CrearUsuariosProveedorLoteRequest $request): JsonResponse
+    {
+        $idEmpresaActiva = (int) $request->attributes->get('id_empresa_activa');
+
+        $reporte = $this->usuarioService->crearUsuariosProveedorEnLote(
+            filas: $request->validated()['filas'],
+            creador: $request->user(),
+            idEmpresaActiva: $idEmpresaActiva,
+        );
+
+        return response()->json($reporte);
     }
 
     public function reenviarCodigo(Request $request, Usuario $usuario): JsonResponse

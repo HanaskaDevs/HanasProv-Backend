@@ -29,9 +29,17 @@ class CodigoActivacionNotification extends Notification implements ShouldQueue
 {
     use Queueable;
 
+    /**
+     * $minutosVigencia viaja hasta la plantilla para que el correo diga el
+     * plazo REAL. Antes el texto "válido por 20 minutos" estaba escrito a
+     * mano en el Blade: al cambiar la vigencia, el correo habría seguido
+     * diciendo 20 minutos y el proveedor tiraría el código creyéndolo
+     * vencido. Por defecto 20 para no romper una llamada antigua.
+     */
     public function __construct(
         protected string $codigo,
-        protected bool $esReset = false
+        protected bool $esReset = false,
+        protected int $minutosVigencia = 20,
     ) {
     }
 
@@ -49,7 +57,7 @@ class CodigoActivacionNotification extends Notification implements ShouldQueue
             'codigo' => $this->codigo,
         ]);
 
-        return (new CodigoActivacionMail($this->codigo, $urlActivacion, $this->esReset))
+        return (new CodigoActivacionMail($this->codigo, $urlActivacion, $this->esReset, $this->minutosVigencia))
             ->to($notifiable->Email);
     }
 }

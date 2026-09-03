@@ -90,6 +90,33 @@ return [
     'limite_peticiones_anonimo' => (int) env('LIMITE_PETICIONES_ANONIMO', 300),
 
     /*
+    | Cuánto vale un código de un solo uso, en minutos.
+    |
+    | SON DOS PLAZOS DISTINTOS A PROPÓSITO, aunque el correo y la pantalla
+    | se parezcan:
+    |
+    | - ACTIVACIÓN ('Bienvenida'): 3 días. Es el código que estrena la
+    |   cuenta de un proveedor. Se le manda a alguien que NO está esperando
+    |   el correo: puede llegarle un viernes a la tarde, caer en no
+    |   deseados, o simplemente no revisar el buzón hasta el lunes. Con 20
+    |   minutos, prácticamente todos vencían sin usarse y había que
+    |   reenviarlos a mano uno por uno. Con la carga masiva eso se
+    |   multiplica por la cantidad de filas del Excel.
+    |
+    | - RESTABLECER CONTRASEÑA ('Reset'): 20 minutos, como siempre. Acá SÍ
+    |   hay alguien esperando el correo (acaba de pedirlo), así que un plazo
+    |   corto no molesta a nadie. Y el riesgo es otro: ese código deja
+    |   cambiar la contraseña de una cuenta que YA está en uso. Un código de
+    |   reset vivo tres días en una bandeja es una ventana de tres días para
+    |   que alguien con acceso a ese correo se quede con la cuenta.
+    |
+    | Si se cambian estos valores hay que actualizar también el texto de la
+    | Política de Protección de Datos del frontend, que declara la vigencia.
+    */
+    'vigencia_codigo_activacion_minutos' => (int) env('PORTAL_VIGENCIA_CODIGO_ACTIVACION_MINUTOS', 4320),
+    'vigencia_codigo_reset_minutos' => (int) env('PORTAL_VIGENCIA_CODIGO_RESET_MINUTOS', 20),
+
+    /*
     | Desde cuándo la suspensión automática por documentación vencida
     | empieza a aplicarse de verdad.
     |

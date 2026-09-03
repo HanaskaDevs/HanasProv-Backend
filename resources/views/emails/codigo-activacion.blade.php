@@ -122,7 +122,7 @@
         <tr>
           <td style="padding:16px 32px 8px 32px;">
             <p style="margin:0 0 12px 0; font-size:13px; line-height:1.6; color:#6b7c82;">
-              Este código es válido por 20 minutos y de un solo uso. Si el botón no funciona, ingrese
+              Este código es válido por {{ $vigenciaTexto ?? '20 minutos' }} y de un solo uso. Si el botón no funciona, ingrese
               manualmente a la pantalla de activación con su correo y este código.
             </p>
           </td>
