@@ -120,6 +120,19 @@ class UsuarioController extends Controller
         return response()->json($reporte);
     }
 
+    /**
+     * Estado de la cola de correo, para avisar antes de una carga masiva.
+     * Solo Sistemas (lo valida el Service).
+     */
+    public function estadoColaCorreo(Request $request): JsonResponse
+    {
+        $idEmpresaActiva = (int) $request->attributes->get('id_empresa_activa');
+
+        return response()->json(
+            $this->usuarioService->estadoColaCorreo($request->user(), $idEmpresaActiva)
+        );
+    }
+
     public function reenviarCodigo(Request $request, Usuario $usuario): JsonResponse
     {
         $idEmpresa = (int) $request->attributes->get('id_empresa_activa');

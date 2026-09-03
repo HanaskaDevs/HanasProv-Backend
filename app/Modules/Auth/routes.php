@@ -80,6 +80,11 @@ Route::prefix('usuarios')
         Route::post('/externos/lote', [UsuarioController::class, 'storeProveedoresLote'])
             ->middleware('throttle:6,1');
 
+        // Estado de la cola de correo. Lo consulta el modal de carga masiva
+        // al abrirse, para avisar si el servidor de correo viene rechazando
+        // envíos antes de que alguien suba un archivo de 80 filas.
+        Route::get('/externos/estado-cola-correo', [UsuarioController::class, 'estadoColaCorreo']);
+
         Route::get('/externos/{usuario}', [UsuarioController::class, 'showExterno']);
 
         // Común a ambos

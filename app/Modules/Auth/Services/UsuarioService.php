@@ -372,7 +372,13 @@ if ((int) $data['id_rol'] === (int) $idRolProveedor) {
 
             return [
                 'estado' => 'creado',
-                'mensaje' => 'Usuario creado. Se envió el correo de activación.',
+                // "Quedó encolado" y no "se envió": lo único que este código
+                // garantiza es que el correo entró en la cola. El envío real
+                // lo hace el worker contra el servidor de correo, que puede
+                // rechazarlo (por ejemplo con "450 too much mail", que ya pasa
+                // en este servidor cuando salen muchos de golpe). Decir
+                // "se envió" hacía creer que el proveedor ya lo tenía.
+                'mensaje' => 'Usuario creado. El correo de activación quedó encolado.',
             ];
         }
 
@@ -413,6 +419,46 @@ if ((int) $data['id_rol'] === (int) $idRolProveedor) {
                 'El correo ya estaba registrado. Se le agregó acceso a: %s. No se reenvió el correo de activación.',
                 implode(', ', $nombres)
             ),
+        ];
+    }
+
+    /**
+     * Estado de la cola de correo: cuántos envíos fallaron últimamente.
+     *
+     * Existe para avisar ANTES de una carga masiva. El servidor de correo de
+     * Hanaska limita el volumen ("450 4.7.1 too much mail from ...") y una
+     * carga de decenas de filas es justo el patrón que lo dispara. Cuando eso
+     * pasa, el trabajo cae en failed_jobs y el proveedor NUNCA recibe su
+     * código, pero la pantalla ya dijo que la fila salió bien: el alta sí se
+     * hizo, lo que falló fue el correo.
+     *
+     * Sin este aviso, esa diferencia solo se descubre cuando un proveedor
+     * llama diciendo que no le llegó nada.
+     *
+     * @return array{fallidos_recientes: int, dias: int, ultimo_fallo: ?string}
+     */
+    public function estadoColaCorreo(Usuario $solicitante, int $idEmpresa, int $dias = 7): array
+    {
+        if (! $solicitante->esSistemas($idEmpresa)) {
+            throw new AccessDeniedHttpException('Solo usuarios con rol Sistemas pueden ver el estado de la cola de correo.');
+        }
+
+        $desde = now()->subDays($dias);
+
+        // failed_jobs es de Laravel: guarda el payload serializado del trabajo.
+        // Se filtra por nombre de clase dentro del payload para contar solo
+        // los correos y no cualquier otro trabajo que falle.
+        $consulta = DB::table('failed_jobs')
+            ->where('failed_at', '>=', $desde)
+            ->where(function ($q) {
+                $q->where('payload', 'like', '%Notification%')
+                    ->orWhere('payload', 'like', '%Mail%');
+            });
+
+        return [
+            'fallidos_recientes' => (int) (clone $consulta)->count(),
+            'dias' => $dias,
+            'ultimo_fallo' => (clone $consulta)->max('failed_at'),
         ];
     }
 
