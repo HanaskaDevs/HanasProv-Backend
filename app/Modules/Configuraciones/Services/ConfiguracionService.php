@@ -15,6 +15,7 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use App\Shared\OptimizadorImagen;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 
 class ConfiguracionService
@@ -130,8 +131,14 @@ class ConfiguracionService
         ];
 
         if ($media) {
-            $this->eliminarMediaFisica($slide->Ruta_Media);
+            // GUARDAR PRIMERO, BORRAR DESPUÉS. Antes era al revés: si la
+            // escritura del archivo nuevo fallaba, el slide se quedaba sin
+            // ninguno de los dos y el carrusel del home perdía esa imagen.
+            $anterior = $slide->Ruta_Media;
+
             [$cambios['Ruta_Media'], $cambios['Tipo_Media']] = $this->guardarMediaPublica($media, 'home');
+
+            $this->eliminarMediaFisica($anterior);
         }
 
         $slide->forceFill($cambios)->save();
@@ -160,11 +167,17 @@ class ConfiguracionService
         $this->verificarSistemas($usuario);
 
         $anterior = Configuracion::obtener('login_imagen_url');
-        $this->eliminarMediaFisica($anterior);
 
+        // GUARDAR PRIMERO, BORRAR DESPUÉS. Antes se borraba la imagen anterior
+        // antes de escribir la nueva: si la escritura fallaba, el portal se
+        // quedaba sin fondo de login y sin forma de recuperarlo.
+        // Si guardarMediaPublica lanza, la anterior sigue en su sitio y la
+        // configuración sigue apuntando a ella.
         [$ruta] = $this->guardarMediaPublica($imagen, 'login');
 
         Configuracion::establecer('login_imagen_url', $ruta, $usuario->Id_Usuario);
+
+        $this->eliminarMediaFisica($anterior);
 
         return $ruta;
     }
@@ -397,11 +410,31 @@ class ConfiguracionService
         $extension = $archivo->getClientOriginalExtension();
         $nombreFisico = uniqid($carpeta . '_') . '.' . $extension;
 
-        Storage::disk(self::DISCO_PUBLICO)->putFileAs($carpeta, $archivo, $nombreFisico);
+        $rutaRelativa = $carpeta . '/' . $nombreFisico;
+
+        // COMPROBAR QUE DE VERDAD SE ESCRIBIÓ. Antes el resultado de
+        // putFileAs se descartaba, y el disco 'multimedia' está declarado con
+        // 'throw' => false / 'report' => false: un fallo de escritura no
+        // lanzaba excepción ni dejaba rastro en el log.
+        //
+        // Eso fue un problema real: el 26-ago-2026 alguien cambió el fondo del
+        // login desde Configuraciones, la pantalla dijo "guardado" y el
+        // archivo nunca se escribió (PHP corre como 'nginx' y la carpeta no
+        // tenía permiso de escritura para el grupo). En la base quedó la ruta
+        // de un archivo inexistente y nadie se enteró, porque el login tiene
+        // una imagen de respaldo que tapa el síntoma.
+        //
+        // Se comprueba el retorno Y la existencia: putFileAs puede devolver
+        // la ruta y aun así dejar el archivo incompleto si el disco se llena.
+        $guardado = Storage::disk(self::DISCO_PUBLICO)->putFileAs($carpeta, $archivo, $nombreFisico);
+
+        if ($guardado === false || ! Storage::disk(self::DISCO_PUBLICO)->exists($rutaRelativa)) {
+            throw ValidationException::withMessages([
+                'media' => ['No se pudo guardar el archivo en el servidor. Avisa a Sistemas: revisar permisos de escritura en la carpeta de multimedia.'],
+            ]);
+        }
 
         $tipoMedia = str_starts_with($archivo->getMimeType(), 'video') ? 'video' : 'imagen';
-
-        $rutaRelativa = $carpeta . '/' . $nombreFisico;
 
         // Las imágenes se reducen ACÁ, al subirlas, y no con un script de
         // una sola vez: el fondo de login que había pesaba 1.8 MB a
