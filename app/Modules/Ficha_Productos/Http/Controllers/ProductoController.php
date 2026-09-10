@@ -46,6 +46,21 @@ class ProductoController extends Controller
         return response()->json(new ProductoResource($producto), 201);
     }
 
+    /**
+     * Edita un producto propio. Antes no existía: para corregir un dato
+     * había que borrar el producto y volver a cargarlo con todos sus
+     * documentos. Las reglas de qué se puede editar y cuándo las decide el
+     * Service (ver ProductoService::actualizar).
+     */
+    public function update(GuardarProductoRequest $request, int $producto): JsonResponse
+    {
+        $idEmpresaActiva = (int) $request->attributes->get('id_empresa_activa');
+
+        $actualizado = $this->productoService->actualizar($request->user(), $idEmpresaActiva, $producto, $request->validated());
+
+        return response()->json(new ProductoResource($actualizado));
+    }
+
     public function subirDocumento(SubirDocumentoProductoRequest $request, int $producto, int $tipoDocumento): JsonResponse
     {
         $idEmpresaActiva = (int) $request->attributes->get('id_empresa_activa');

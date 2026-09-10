@@ -3,6 +3,7 @@
 use App\Modules\Auth\Http\Middleware\EmpresaActiva;
 use App\Modules\Catalogos\Http\Controllers\CategoriaProductoController;
 use App\Modules\Catalogos\Http\Controllers\ClaseProveedorController;
+use App\Modules\Catalogos\Http\Controllers\GrupoProductoController;
 use App\Modules\Catalogos\Http\Controllers\TipoDocumentoController;
 use App\Modules\Catalogos\Http\Controllers\TipoDocumentoProductoController;
 use App\Modules\Catalogos\Http\Controllers\UnidadPresentacionAdminController;
@@ -40,6 +41,14 @@ Route::prefix('catalogos-admin')
             Route::put('/{categoria}', [CategoriaProductoController::class, 'update']);
             Route::delete('/{categoria}', [CategoriaProductoController::class, 'destroy']);
             Route::patch('/{categoria}/activar', [CategoriaProductoController::class, 'activar']);
+        });
+
+        Route::prefix('grupos-producto')->group(function () {
+            Route::get('/', [GrupoProductoController::class, 'index']);
+            Route::post('/', [GrupoProductoController::class, 'store']);
+            Route::put('/{grupo}', [GrupoProductoController::class, 'update']);
+            Route::delete('/{grupo}', [GrupoProductoController::class, 'destroy']);
+            Route::patch('/{grupo}/activar', [GrupoProductoController::class, 'activar']);
         });
 
         Route::prefix('tipos-documento')->group(function () {

@@ -63,4 +63,5 @@ Route::middleware(['auth:sanctum', EmpresaActiva::class])->group(function () {
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('/catalogos/clases-proveedor', [CatalogoController::class, 'clasesProveedor']);
     Route::get('/catalogos/categorias-producto', [CatalogoController::class, 'categoriasProducto']);
+    Route::get('/catalogos/grupos-producto', [CatalogoController::class, 'gruposProducto']);
 });

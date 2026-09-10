@@ -5,6 +5,7 @@ namespace App\Modules\Ficha_Productos\Models;
 use App\Modules\Proveedores\Models\Proveedor;
 use App\Models\BaseModel;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Producto extends BaseModel
@@ -54,5 +55,19 @@ class Producto extends BaseModel
     public function solicitudesCambioPrecio(): HasMany
     {
         return $this->hasMany(SolicitudCambioPrecio::class, 'Id_Producto');
+    }
+
+    /**
+     * Grupos de producto (EK, CD, PH, IM...) de este producto. Es opcional
+     * y múltiple: un producto puede no tener ninguno o tenerlos todos.
+     *
+     * Sin withPivot ni using: la tabla puente no guarda nada más que las
+     * dos claves, así que no hay nada que exponer.
+     */
+    public function grupos(): BelongsToMany
+    {
+        return $this->belongsToMany(GrupoProducto::class, 'Producto_Grupo', 'Id_Producto', 'Id_Grupo_Producto')
+            ->orderBy('Grupo_Producto.Orden')
+            ->orderBy('Grupo_Producto.Codigo');
     }
 }
