@@ -48,6 +48,11 @@ Route::prefix('mi-ficha')
         Route::put('/seccion-1', [FichaProveedorController::class, 'seccion1']);
         Route::put('/seccion-2', [FichaProveedorController::class, 'seccion2']);
         Route::put('/seccion-3', [FichaProveedorController::class, 'seccion3']);
+        // Cuenta bancaria: la declara el proveedor desde Documentación,
+        // junto al PDF del certificado bancario, pero es dato de ficha ->
+        // vive acá para reusar la resolución de "mi proveedor".
+        Route::get('/cuenta-bancaria', [FichaProveedorController::class, 'cuentaBancaria']);
+        Route::put('/cuenta-bancaria', [FichaProveedorController::class, 'guardarCuentaBancaria']);
     });
 
 // Calificación global del propio proveedor: la ve en su pantalla de
@@ -64,4 +69,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/catalogos/clases-proveedor', [CatalogoController::class, 'clasesProveedor']);
     Route::get('/catalogos/categorias-producto', [CatalogoController::class, 'categoriasProducto']);
     Route::get('/catalogos/grupos-producto', [CatalogoController::class, 'gruposProducto']);
+    // Clase de contribuyente (Sección 1) y bancos (cuenta bancaria).
+    Route::get('/catalogos/grupos-impuesto', [CatalogoController::class, 'gruposImpuesto']);
+    Route::get('/catalogos/bancos', [CatalogoController::class, 'bancos']);
 });

@@ -6,8 +6,10 @@ use App\Http\Controllers\Controller;
 use App\Modules\Ficha_Productos\Models\GrupoProducto;
 use App\Modules\Proveedores\Http\Resources\CategoriaProductoResource;
 use App\Modules\Proveedores\Http\Resources\ClaseProveedorResource;
+use App\Modules\Proveedores\Models\Banco;
 use App\Modules\Proveedores\Models\CategoriaProducto;
 use App\Modules\Proveedores\Models\ClaseProveedor;
+use App\Modules\Proveedores\Models\GrupoImpuestoBC;
 use Illuminate\Http\JsonResponse;
 
 /**
@@ -60,6 +62,42 @@ class CatalogoController extends Controller
             'codigo' => $grupo->Codigo,
             'nombre' => $grupo->Nombre,
             'descripcion' => $grupo->Descripcion,
+        ]));
+    }
+
+    /**
+     * Clase de contribuyente de la Sección 1 de la ficha. Se devuelve el
+     * Codigo Y la Descripcion: el front MUESTRA la descripción pero
+     * envía el código, que es el valor que BC espera en su campo "Grupo
+     * de impuesto" (LHCGrupoImpuesto en Ficha_proveedor_Excel).
+     */
+    public function gruposImpuesto(): JsonResponse
+    {
+        $grupos = GrupoImpuestoBC::where('Activo', true)
+            ->orderBy('Descripcion')
+            ->get(['Codigo', 'Descripcion']);
+
+        return response()->json($grupos->map(fn (GrupoImpuestoBC $g) => [
+            'codigo' => $g->Codigo,
+            'descripcion' => $g->Descripcion,
+        ]));
+    }
+
+    /**
+     * Bancos para el selector de la cuenta bancaria. A propósito NO se
+     * expone Codigo_BC: es un dato interno de la integración con BC (va
+     * en Bank_Branch_No), el proveedor solo elige por nombre y el código
+     * viaja solo al postear.
+     */
+    public function bancos(): JsonResponse
+    {
+        $bancos = Banco::where('Activo', true)
+            ->orderBy('Nombre_Banco')
+            ->get(['Id_Banco', 'Nombre_Banco']);
+
+        return response()->json($bancos->map(fn (Banco $b) => [
+            'id_banco' => $b->Id_Banco,
+            'nombre_banco' => $b->Nombre_Banco,
         ]));
     }
 }

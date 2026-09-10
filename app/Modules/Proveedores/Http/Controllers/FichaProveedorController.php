@@ -69,4 +69,23 @@ class FichaProveedorController extends Controller
 
         return response()->json(new FichaProveedorResource($proveedor));
     }
+
+    /** Cuenta bancaria declarada por el proveedor (null si aún no la registró). */
+    public function cuentaBancaria(Request $request): JsonResponse
+    {
+        $idEmpresa = (int) $request->attributes->get('id_empresa_activa');
+
+        return response()->json(
+            $this->fichaService->obtenerMiCuentaBancaria($request->user(), $idEmpresa)
+        );
+    }
+
+    public function guardarCuentaBancaria(Request $request): JsonResponse
+    {
+        $idEmpresa = (int) $request->attributes->get('id_empresa_activa');
+
+        return response()->json(
+            $this->fichaService->guardarMiCuentaBancaria($request->user(), $idEmpresa, $request->all())
+        );
+    }
 }

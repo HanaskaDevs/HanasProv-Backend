@@ -9,8 +9,10 @@ use App\Modules\Documentos_Proveedor\Models\TipoDocumento;
 use App\Modules\Documentos_Proveedor\Models\TipoDocumentoClaseExcluida;
 use App\Modules\Ficha_Productos\Models\Producto;
 use App\Modules\Proveedores\Models\CalificacionCampoFicha;
+use App\Modules\Proveedores\Models\ClaseProveedor;
 use App\Modules\Proveedores\Models\EstadoProveedor;
 use App\Modules\Proveedores\Models\Proveedor;
+use App\Modules\Proveedores\Models\ProveedorCuentaBancaria;
 use App\Modules\Proveedores\Notifications\ProveedorAprobadoNotification;
 use App\Modules\Proveedores\Notifications\ProveedorRechazadoNotification;
 use Illuminate\Notifications\AnonymousNotifiable;
@@ -218,6 +220,14 @@ class CalificacionProveedorService
                 'categoria' => $tipo->Categoria,
                 'nombre_documento' => $tipo->Nombre_Documento,
                 'obligatorio' => (bool) $tipo->Obligatorio,
+                // Solo en el Certificado bancario: los datos que el
+                // proveedor declaró junto al PDF. Sin esto, el admin
+                // aprobaba el PDF a ciegas y no tenía forma de verificar
+                // que el banco/cuenta declarados (que son los que se
+                // postean a BC) coincidan con lo que dice el documento.
+                'datos_bancarios' => $tipo->Codigo_Archivo === 'CBANCARIO'
+                    ? $this->datosBancariosDeclarados($proveedor)
+                    : null,
                 'documentos' => $tipo->documentosProveedor->map(fn (DocumentoProveedor $doc) => [
                     'id_documento_proveedor' => $doc->Id_Documento_Proveedor,
                     'nombre_original' => $doc->archivo->Nombre_Original,
@@ -228,6 +238,34 @@ class CalificacionProveedorService
                     'fecha_calificacion' => $doc->Fecha_Calificacion?->toIso8601String(),
                 ])->values(),
             ])->values(),
+        ];
+    }
+
+    /**
+     * Banco / tipo de cuenta / nro de cuenta que declaró el proveedor,
+     * para que el admin los contraste con el PDF del certificado antes
+     * de aprobarlo. null = todavía no los registró.
+     *
+     * Acá SÍ se incluye el Codigo_BC del banco (a diferencia de lo que
+     * ve el proveedor): es información útil para soporte cuando haya que
+     * revisar por qué un posteo a BC falló, y solo la ven Admin/Calidad.
+     */
+    protected function datosBancariosDeclarados(Proveedor $proveedor): ?array
+    {
+        $cuenta = ProveedorCuentaBancaria::with('banco')
+            ->where('Id_Proveedor', $proveedor->Id_Proveedor)
+            ->first();
+
+        if (! $cuenta) {
+            return null;
+        }
+
+        return [
+            'nombre_banco' => $cuenta->banco?->Nombre_Banco,
+            'codigo_bc_banco' => $cuenta->banco?->Codigo_BC,
+            'tipo_cuenta' => $cuenta->Tipo_Cuenta,
+            'nro_cuenta' => $cuenta->Nro_Cuenta,
+            'fecha_registro' => $cuenta->Fecha_Modificacion?->format('Y-m-d H:i'),
         ];
     }
 
@@ -568,12 +606,20 @@ class CalificacionProveedorService
     }
 
     /**
-     * Calcula las 3 condiciones para pasar a Aprobado, SIN escribir
+     * Calcula las condiciones para pasar a Aprobado, SIN escribir
      * nada -> separado de activarSiCorrespondeAprobado() para poder
      * mostrar el detalle de cada una (qué pasó y por qué) desde el
      * comando de diagnóstico, en vez de solo un sí/no.
      *
-     * @return array{ficha_aprobada: bool, documentacion_aprobada: bool, total_documentos: int, documentos_no_aprobados: int, hay_producto_aprobado: bool}
+     * 'requiere_productos' (pedido explícito del usuario, 09-sep-2026):
+     * un proveedor de SERVICIOS se aprueba solo con ficha +
+     * documentación, sin productos aprobados -> no carga catálogo de
+     * productos, así que exigírselo lo dejaba trabado en Aspirante para
+     * siempre. 'hay_producto_aprobado' sigue reportando la realidad
+     * (útil para el diagnóstico); es 'requiere_productos' lo que decide
+     * si esa condición pesa o no.
+     *
+     * @return array{ficha_aprobada: bool, documentacion_aprobada: bool, total_documentos: int, documentos_no_aprobados: int, hay_producto_aprobado: bool, requiere_productos: bool, es_solo_servicios: bool}
      */
     public function diagnosticarCondicionesAprobado(Proveedor $proveedor): array
     {
@@ -595,13 +641,53 @@ class CalificacionProveedorService
             ->where('Estado_Calificacion', 'Aprobado')
             ->exists();
 
+        $esSoloServicios = $this->esSoloServicios($proveedor);
+
         return [
             'ficha_aprobada' => $fichaAprobada,
             'documentacion_aprobada' => $documentacionAprobada,
             'total_documentos' => $totalDocumentos,
             'documentos_no_aprobados' => $documentosNoAprobados,
             'hay_producto_aprobado' => $hayProductoAprobado,
+            'requiere_productos' => ! $esSoloServicios,
+            'es_solo_servicios' => $esSoloServicios,
         ];
+    }
+
+    /**
+     * True solo si TODAS las clases del proveedor son "Servicio". Un
+     * proveedor mixto (ej. Servicio + Comercializador) SÍ vende
+     * productos, así que se le siguen exigiendo -> exceptuarlo por tener
+     * "Servicio" entre varias clases le dejaría pasar un catálogo sin
+     * calificar.
+     *
+     * Sin clases cargadas devuelve false (= sí requiere productos): es
+     * el criterio conservador, no auto-aprobar a alguien cuya ficha
+     * todavía no está completa.
+     */
+    protected function esSoloServicios(Proveedor $proveedor): bool
+    {
+        $clases = $proveedor->fresh('clases')->clases;
+
+        if ($clases->isEmpty()) {
+            return false;
+        }
+
+        return $clases->every(fn ($clase) => $clase->Nombre_Clase === ClaseProveedor::SERVICIO);
+    }
+
+    /**
+     * ¿Se cumplen todas las condiciones que aplican a ESTE proveedor?
+     * La de productos solo pesa si le corresponde (ver
+     * diagnosticarCondicionesAprobado).
+     */
+    protected function cumpleCondicionesAprobado(array $diagnostico): bool
+    {
+        if (! $diagnostico['ficha_aprobada'] || ! $diagnostico['documentacion_aprobada']) {
+            return false;
+        }
+
+        return ! $diagnostico['requiere_productos'] || $diagnostico['hay_producto_aprobado'];
     }
 
     protected function activarSiCorrespondeAprobado(Proveedor $proveedor): void
@@ -614,7 +700,7 @@ class CalificacionProveedorService
 
         $diagnostico = $this->diagnosticarCondicionesAprobado($proveedor);
 
-        if (! $diagnostico['ficha_aprobada'] || ! $diagnostico['documentacion_aprobada'] || ! $diagnostico['hay_producto_aprobado']) {
+        if (! $this->cumpleCondicionesAprobado($diagnostico)) {
             return;
         }
 
@@ -646,7 +732,7 @@ class CalificacionProveedorService
 
         $diagnostico = $this->diagnosticarCondicionesAprobado($proveedor);
 
-        if ($diagnostico['ficha_aprobada'] && $diagnostico['documentacion_aprobada'] && $diagnostico['hay_producto_aprobado']) {
+        if ($this->cumpleCondicionesAprobado($diagnostico)) {
             $this->activarSiCorrespondeAprobado($proveedor);
 
             return;
@@ -660,11 +746,16 @@ class CalificacionProveedorService
             ->with('tipoDocumento')
             ->get();
 
+        // "Le falta un producto aprobado" solo cuenta como motivo de
+        // rechazo si a este proveedor le corresponden productos -> a uno
+        // de puros servicios no se le puede reprochar no tenerlos.
+        $leFaltanProductos = $diagnostico['requiere_productos'] && ! $diagnostico['hay_producto_aprobado'];
+
         // Ninguna de las 3 condiciones de rechazo explícito se cumple
         // (lo más probable: la ficha o la documentación todavía no
         // terminan de calificarse en algún flujo distinto al normal) ->
         // no corresponde tomar todavía una decisión final.
-        if (! $fichaRechazada && $documentosRechazados->isEmpty() && $diagnostico['hay_producto_aprobado']) {
+        if (! $fichaRechazada && $documentosRechazados->isEmpty() && ! $leFaltanProductos) {
             return;
         }
 

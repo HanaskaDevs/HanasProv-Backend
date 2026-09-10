@@ -6,6 +6,8 @@ use App\Modules\Auth\Models\Usuario;
 use App\Modules\Proveedores\Models\CalificacionCampoFicha;
 use App\Modules\Proveedores\Models\EstadoProveedor;
 use App\Modules\Proveedores\Models\Proveedor;
+use App\Modules\Proveedores\Models\ProveedorCuentaBancaria;
+use Illuminate\Validation\Rule;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
@@ -151,6 +153,78 @@ class FichaProveedorService
             ->whereIn('Nombre_Campo', $camposDeEstaSeccion)
             ->where('Estado', 'Rechazado')
             ->delete();
+    }
+
+    /**
+     * Cuenta bancaria declarada por el proveedor (la que acompaña al PDF
+     * del certificado bancario). Devuelve null si todavía no la registró
+     * -> el front muestra el botón "Registre sus datos" en vez del
+     * resumen.
+     */
+    public function obtenerMiCuentaBancaria(Usuario $usuario, int $idEmpresaActiva): ?array
+    {
+        $proveedor = $this->miProveedor($usuario, $idEmpresaActiva);
+
+        $cuenta = ProveedorCuentaBancaria::with('banco')
+            ->where('Id_Proveedor', $proveedor->Id_Proveedor)
+            ->first();
+
+        return $cuenta ? $this->serializarCuenta($cuenta) : null;
+    }
+
+    /**
+     * Guarda (o reemplaza) la cuenta bancaria del proveedor. Es upsert
+     * por Id_Proveedor: la tabla tiene un unique ahí porque es LA cuenta
+     * donde se le paga, no un historial.
+     *
+     * A propósito NO se recibe el Codigo_BC del banco desde el cliente:
+     * llega el Id_Banco y el código se resuelve del catálogo al postear
+     * a BC -> un cliente manipulado no puede inventar un código de
+     * sucursal que BC no reconozca.
+     */
+    public function guardarMiCuentaBancaria(Usuario $usuario, int $idEmpresaActiva, array $data): array
+    {
+        $proveedor = $this->miProveedor($usuario, $idEmpresaActiva);
+
+        $validados = validator($data, [
+            'id_banco' => ['required', 'integer', Rule::exists('Banco', 'Id_Banco')->where('Activo', 1)],
+            'tipo_cuenta' => ['required', Rule::in(ProveedorCuentaBancaria::TIPOS_CUENTA)],
+            // Solo dígitos: los números de cuenta del país no llevan
+            // guiones ni espacios, y BC los rechaza. Se recorta antes de
+            // validar para no castigar un espacio pegado al copiar.
+            'nro_cuenta' => ['required', 'string', 'max:30', 'regex:/^\d+$/'],
+        ], [
+            'nro_cuenta.regex' => 'El número de cuenta debe contener solo dígitos, sin guiones ni espacios.',
+        ])->validate();
+
+        $ahora = now();
+
+        $cuenta = ProveedorCuentaBancaria::updateOrCreate(
+            ['Id_Proveedor' => $proveedor->Id_Proveedor],
+            [
+                'Id_Banco' => $validados['id_banco'],
+                'Tipo_Cuenta' => $validados['tipo_cuenta'],
+                'Nro_Cuenta' => trim($validados['nro_cuenta']),
+                'Registrado_Por' => $usuario->Id_Usuario,
+                'Fecha_Creacion' => $ahora,
+                'Fecha_Modificacion' => $ahora,
+            ]
+        );
+
+        return $this->serializarCuenta($cuenta->load('banco'));
+    }
+
+    private function serializarCuenta(ProveedorCuentaBancaria $cuenta): array
+    {
+        return [
+            'id_banco' => $cuenta->Id_Banco,
+            // Se devuelve el NOMBRE, nunca el Codigo_BC -> ese es interno
+            // de la integración con BC.
+            'nombre_banco' => $cuenta->banco?->Nombre_Banco,
+            'tipo_cuenta' => $cuenta->Tipo_Cuenta,
+            'nro_cuenta' => $cuenta->Nro_Cuenta,
+            'fecha_modificacion' => $cuenta->Fecha_Modificacion?->format('Y-m-d H:i'),
+        ];
     }
 
     /**
