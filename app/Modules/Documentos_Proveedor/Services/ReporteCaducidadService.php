@@ -3,6 +3,7 @@
 namespace App\Modules\Documentos_Proveedor\Services;
 
 use App\Modules\Auth\Models\Usuario;
+use App\Modules\Proveedores\Models\EstadoProveedor;
 use Illuminate\Support\Facades\DB;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 
@@ -126,9 +127,19 @@ class ReporteCaducidadService
                 'p.Razon_Social as razon_social',
                 'p.Nombre_Comercial as nombre_comercial',
                 'p.Ruc as ruc',
+                // Datos de contacto: el reporte existe para PERSEGUIR al
+                // proveedor, y hasta ahora obligaba a abrir su ficha en otra
+                // pantalla para saber a quién escribirle.
+                'p.Email as email',
+                'p.Telefono as telefono',
+                'p.Correo_Calidad as correo_calidad',
+                'p.Id_Estado_Proveedor as id_estado_proveedor',
+                'td.Id_Tipo_Documento as id_tipo_documento',
                 'td.Nombre_Documento as documento',
+                'td.Categoria as categoria',
                 'dp.Fecha_Caducidad as fecha_caducidad',
                 'dp.Estado_Calificacion as estado_calificacion',
+                'dp.Fecha_Ultima_Notificacion as fecha_ultima_notificacion',
                 DB::raw('DATEDIFF(day, CONVERT(date, ?, 120), dp.Fecha_Caducidad) as dias_restantes'),
             ])
             ->addBinding($hoy, 'select')
@@ -144,11 +155,34 @@ class ReporteCaducidadService
                 'razon_social' => $fila->razon_social,
                 'nombre_comercial' => $fila->nombre_comercial,
                 'ruc' => $fila->ruc,
+                // El correo de Calidad es el que corresponde para la
+                // documentación; el general queda de respaldo cuando el
+                // proveedor todavía no completó sus contactos.
+                'email' => $fila->correo_calidad ?: $fila->email,
+                'telefono' => $fila->telefono,
+                'proveedor_suspendido' => (int) $fila->id_estado_proveedor === EstadoProveedor::SUSPENDIDO,
+                'id_tipo_documento' => (int) $fila->id_tipo_documento,
                 'documento' => $fila->documento,
+                'categoria' => $fila->categoria,
                 'fecha_caducidad' => $fila->fecha_caducidad,
                 'estado_calificacion' => $fila->estado_calificacion,
+                'fecha_ultima_notificacion' => $fila->fecha_ultima_notificacion,
                 'dias_restantes' => $dias,
                 'tramo' => self::tramoDe($dias),
+                /*
+                 * Cuántos días le quedan al proveedor antes de que el
+                 * vencimiento lo suspenda. Es lo que de verdad le importa a
+                 * quien mira este reporte, y no se podía deducir de
+                 * 'dias_restantes': la suspensión no ocurre el día del
+                 * vencimiento sino DIAS_GRACIA_SUSPENSION días después.
+                 *
+                 * Null mientras el documento no haya vencido todavía: hasta
+                 * ahí no hay ninguna cuenta regresiva de suspensión corriendo
+                 * y mostrar un número sugeriría que sí.
+                 */
+                'dias_para_suspension' => $dias < 0
+                    ? VencimientoDocumentosService::DIAS_GRACIA_SUSPENSION + $dias
+                    : null,
             ];
         })->all();
     }

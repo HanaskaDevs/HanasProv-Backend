@@ -43,9 +43,10 @@ class ProductoService
         ?string $busqueda = null,
         int $pagina = 1,
         int $porPagina = 20,
-        ?string $estado = null
+        ?string $estado = null,
+        ?int $idProveedorObjetivo = null
     ) {
-        $proveedor = $this->miProveedor($usuario, $idEmpresaActiva);
+        $proveedor = $this->proveedorDeTrabajo($usuario, $idEmpresaActiva, $idProveedorObjetivo);
 
         if ($pagina === 1 && ! $busqueda) {
             $this->sincronizarDesdeBC($proveedor, $idEmpresaActiva);
@@ -97,35 +98,174 @@ class ProductoService
                     }
                 });
             })
-            ->with(['unidadPresentacion', 'documentos.tipoDocumento', 'documentos.archivo'])
+            ->with(['unidadPresentacion', 'grupos', 'documentos.tipoDocumento', 'documentos.archivo'])
             ->orderBy('Nombre_Producto')
             ->paginate($porPagina, ['*'], 'page', $pagina);
     }
 
-    public function crear(Usuario $usuario, int $idEmpresaActiva, array $data): Producto
+    public function crear(Usuario $usuario, int $idEmpresaActiva, array $data, ?int $idProveedorObjetivo = null): Producto
     {
-        $proveedor = $this->miProveedor($usuario, $idEmpresaActiva);
+        $proveedor = $this->proveedorDeTrabajo($usuario, $idEmpresaActiva, $idProveedorObjetivo);
 
         // Ya no se bloquea acá: un producto NUEVO no tiene nada que ver
         // con otros productos que estén en revisión -> nace con
         // Bloqueado=0, editable, sin importar cuántos lotes tenga el
         // proveedor pendientes de calificación en paralelo.
 
-        return Producto::create([
-            'Id_Proveedor' => $proveedor->Id_Proveedor,
-            'Id_Unidad_Presentacion' => $data['id_unidad_presentacion'],
-            // Homogeneizar mayúsculas sin importar cómo lo escriba el proveedor.
-            'Nombre_Producto' => mb_strtoupper($data['nombre_producto'], 'UTF-8'),
-            'Codigo_Barras' => $data['codigo_barras'] ?? null,
-            'Precio' => $data['precio'] ?? null,
-            'Peso' => $data['peso'] ?? null,
-            'Volumen' => $data['volumen'] ?? null,
-            'Unidad_Por_Caja' => $data['unidad_por_caja'] ?? null,
-            'Activo' => 1,
-            'Bloqueado' => 0,
-            'Creado_Por' => $usuario->Id_Usuario,
-            'Fecha_Creacion' => now(),
-        ]);
+        // Transacción porque son dos escrituras (el producto y sus grupos) y
+        // un producto a medio etiquetar no le sirve a nadie.
+        return DB::transaction(function () use ($usuario, $proveedor, $data) {
+            $producto = Producto::create([
+                'Id_Proveedor' => $proveedor->Id_Proveedor,
+                'Id_Unidad_Presentacion' => $data['id_unidad_presentacion'],
+                // Homogeneizar mayúsculas sin importar cómo lo escriba el proveedor.
+                'Nombre_Producto' => mb_strtoupper($data['nombre_producto'], 'UTF-8'),
+                'Codigo_Barras' => $data['codigo_barras'] ?? null,
+                'Precio' => $data['precio'] ?? null,
+                'Peso' => $data['peso'] ?? null,
+                'Volumen' => $data['volumen'] ?? null,
+                'Unidad_Por_Caja' => $data['unidad_por_caja'] ?? null,
+                'Activo' => 1,
+                'Bloqueado' => 0,
+                'Creado_Por' => $usuario->Id_Usuario,
+                'Fecha_Creacion' => now(),
+            ]);
+
+            $producto->grupos()->sync($data['grupos'] ?? []);
+
+            // Se carga también la unidad: ProductoResource la expone como
+            // texto ya resuelto, y sin el eager loading la respuesta del alta
+            // salía SIN esa clave, distinta en forma de la que devuelven el
+            // listado y la edición.
+            return $producto->load(['unidadPresentacion', 'grupos']);
+        });
+    }
+
+    /**
+     * Edita los datos de un producto que TODAVÍA se puede tocar.
+     *
+     * Hasta ahora no existía forma de editar un producto: se creaba y, si
+     * algo salía mal, había que borrarlo y volver a cargarlo con sus
+     * documentos otra vez. Con el catálogo del comprador (miles de
+     * productos por proveedor) eso dejó de ser aceptable.
+     *
+     * QUÉ SE PUEDE EDITAR Y CUÁNDO. Hay tres situaciones, y solo una
+     * bloquea:
+     *
+     *  - TODAVÍA NO ENVIADO (Bloqueado = 0). Se edita libremente y no pasa
+     *    nada más: nunca salió a calificación.
+     *
+     *  - RECHAZADO, con correcciones pendientes de confirmar. Se edita, y
+     *    tampoco cambia de estado acá: el reenvío lo hace después
+     *    confirmarCorreccionProducto, que además exige que se haya tocado
+     *    algún documento.
+     *
+     *  - YA APROBADO. TAMBIÉN SE EDITA (decisión del usuario,
+     *    10-sep-2026), pero editarlo lo DEVUELVE A CALIFICACIÓN: vuelve a
+     *    Bloqueado = 1 / Pendiente, exactamente como si se acabara de
+     *    registrar. Es la parte importante de la regla -sin ella, cualquiera
+     *    podría cambiarle el nombre o el precio a un producto aprobado y el
+     *    producto seguiría figurando como aprobado con datos que nadie
+     *    revisó-.
+     *
+     *  - EN REVISIÓN (Bloqueado = 1 y Pendiente). Esta sí se rechaza: hay
+     *    alguien de Calidad mirándolo AHORA, y cambiarle los datos por
+     *    debajo haría que apruebe o rechace algo distinto de lo que tiene
+     *    en pantalla.
+     *
+     * EL PRECIO VIAJA CON EL RESTO. Al editar un producto aprobado, el
+     * precio nuevo entra en la misma calificación que todo lo demás. La
+     * solicitud de cambio de precio (ver SolicitudCambioPrecioService)
+     * sigue existiendo para el caso en que SOLO se quiere mover el precio
+     * sin reenviar el producto entero -que es más barato para el proveedor,
+     * porque el resto del producto no pierde su aprobación-.
+     *
+     * La única excepción es el producto que YA tiene una solicitud de
+     * precio abierta: ahí el precio está congelado esperando esa
+     * resolución, y pisarlo por un costado dejaría a la solicitud
+     * comparando contra un precio que ya no existe.
+     */
+    public function actualizar(
+        Usuario $usuario,
+        int $idEmpresaActiva,
+        int $idProducto,
+        array $data,
+        ?int $idProveedorObjetivo = null
+    ): Producto {
+        $producto = $this->productoDeTrabajo($usuario, $idEmpresaActiva, $idProducto, $idProveedorObjetivo);
+
+        $estaAprobado = $producto->Estado_Calificacion === 'Aprobado';
+
+        $esCorreccionDeRechazado = $producto->proveedor->Correcciones_Pendientes_Productos
+            && $producto->Estado_Calificacion === 'Rechazado';
+
+        if ($producto->Bloqueado && ! $estaAprobado && ! $esCorreccionDeRechazado) {
+            throw new AccessDeniedHttpException(
+                'Este producto está en revisión en este momento y no se puede editar hasta que lo califiquen.'
+            );
+        }
+
+        $quiereCambiarPrecio = array_key_exists('precio', $data)
+            && (float) ($data['precio'] ?? 0) !== (float) ($producto->Precio ?? 0);
+
+        if ($producto->Precio_En_Revision && $quiereCambiarPrecio) {
+            throw ValidationException::withMessages([
+                'precio' => ['Este producto tiene un cambio de precio pendiente de aprobación; el precio no se puede editar hasta que se resuelva.'],
+            ]);
+        }
+
+        return DB::transaction(function () use ($usuario, $producto, $data, $estaAprobado) {
+            $cambios = [
+                'Id_Unidad_Presentacion' => $data['id_unidad_presentacion'],
+                'Nombre_Producto' => mb_strtoupper($data['nombre_producto'], 'UTF-8'),
+                'Codigo_Barras' => $data['codigo_barras'] ?? null,
+                'Precio' => $producto->Precio_En_Revision ? $producto->Precio : ($data['precio'] ?? null),
+                'Peso' => $data['peso'] ?? null,
+                'Volumen' => $data['volumen'] ?? null,
+                'Unidad_Por_Caja' => $data['unidad_por_caja'] ?? null,
+                'Modificado_Por' => $usuario->Id_Usuario,
+                'Fecha_Modificacion' => now(),
+            ];
+
+            if ($estaAprobado) {
+                // Mismos campos que escribe registrar(): el producto entra a
+                // la cola de calificación como cualquier otro, y se limpia la
+                // calificación anterior para que nadie lea el "Aprobado" de
+                // ayer como si fuera el de estos datos nuevos.
+                $cambios += [
+                    'Bloqueado' => 1,
+                    'Estado_Calificacion' => 'Pendiente',
+                    'Comentario_Calificacion' => null,
+                    'Calificado_Por' => null,
+                    'Fecha_Calificacion' => null,
+                ];
+            }
+
+            $producto->forceFill($cambios)->save();
+
+            // array_key_exists y no ?? : una petición que NO manda 'grupos'
+            // deja los grupos como estaban, mientras que una que manda un
+            // arreglo vacío los borra a propósito. Con ?? [] las dos cosas
+            // se verían igual y no habría forma de quitar todas las
+            // etiquetas de un producto.
+            if (array_key_exists('grupos', $data)) {
+                $producto->grupos()->sync($data['grupos'] ?? []);
+            }
+
+            if ($estaAprobado) {
+                // Igual que en registrar(): se está ABRIENDO una ronda nueva
+                // de calificación para este proveedor. Sin esto, el admin
+                // seguiría viendo "ya calificaste todo" para siempre y este
+                // producto no aparecería nunca en su bandeja.
+                $proveedor = $producto->proveedor;
+
+                if ($proveedor->Fecha_Registro_Calificacion_Productos !== null) {
+                    $proveedor->forceFill(['Fecha_Registro_Calificacion_Productos' => null])->save();
+                }
+            }
+
+            return $producto->load(['unidadPresentacion', 'grupos', 'documentos.tipoDocumento', 'documentos.archivo']);
+        });
     }
 
     /**
@@ -133,9 +273,9 @@ class ProductoService
      * enviado a calificación -> no requiere trazabilidad histórica). Solo
      * permitido mientras el proveedor NO esté bloqueado (envío pendiente).
      */
-    public function eliminar(Usuario $usuario, int $idEmpresaActiva, int $idProducto): void
+    public function eliminar(Usuario $usuario, int $idEmpresaActiva, int $idProducto, ?int $idProveedorObjetivo = null): void
     {
-        $producto = $this->miProducto($usuario, $idEmpresaActiva, $idProducto);
+        $producto = $this->productoDeTrabajo($usuario, $idEmpresaActiva, $idProducto, $idProveedorObjetivo);
 
         if ($producto->Bloqueado) {
             throw new AccessDeniedHttpException('No puede eliminar un producto mientras está en revisión.');
@@ -159,9 +299,9 @@ class ProductoService
      * se eliminaron -> no hace falta que el proveedor esté "libre de todo
      * bloqueo": alcanza con que ESOS productos puntuales no lo estén.
      */
-    public function eliminarMasivo(Usuario $usuario, int $idEmpresaActiva, array $idsProductos): int
+    public function eliminarMasivo(Usuario $usuario, int $idEmpresaActiva, array $idsProductos, ?int $idProveedorObjetivo = null): int
     {
-        $proveedor = $this->miProveedor($usuario, $idEmpresaActiva);
+        $proveedor = $this->proveedorDeTrabajo($usuario, $idEmpresaActiva, $idProveedorObjetivo);
 
         $productos = Producto::where('Id_Proveedor', $proveedor->Id_Proveedor)
             ->whereIn('Id_Producto', $idsProductos)
@@ -190,9 +330,9 @@ class ProductoService
      * nuevo desde cero, o quitarlo si ya no aplica). Solo mientras el
      * producto no esté bloqueado.
      */
-    public function eliminarDocumento(Usuario $usuario, int $idEmpresaActiva, int $idDocumentoProducto): void
+    public function eliminarDocumento(Usuario $usuario, int $idEmpresaActiva, int $idDocumentoProducto, ?int $idProveedorObjetivo = null): void
     {
-        $proveedor = $this->miProveedor($usuario, $idEmpresaActiva);
+        $proveedor = $this->proveedorDeTrabajo($usuario, $idEmpresaActiva, $idProveedorObjetivo);
 
         $documento = DocumentoProducto::whereHas('producto', fn($q) => $q->where('Id_Proveedor', $proveedor->Id_Proveedor))
             ->with('archivo', 'producto.proveedor', 'tipoDocumento')
@@ -269,9 +409,10 @@ class ProductoService
         int $idTipoDocumentoProducto,
         UploadedFile $archivo,
         ?string $fechaCaducidad = null,
-        ?string $nombreDocumento = null
+        ?string $nombreDocumento = null,
+        ?int $idProveedorObjetivo = null
     ): DocumentoProducto {
-        $producto = $this->miProducto($usuario, $idEmpresaActiva, $idProducto);
+        $producto = $this->productoDeTrabajo($usuario, $idEmpresaActiva, $idProducto, $idProveedorObjetivo);
 
         // Bloqueado normalmente impide tocar el producto -> EXCEPTO
         // mientras haya correcciones pendientes de confirmar Y este
@@ -526,9 +667,9 @@ class ProductoService
      * sigue usando la franja superior para saber si hay algo bloqueado,
      * algo que no depende de cuáles estén seleccionados).
      */
-    public function resumenRegistro(Usuario $usuario, int $idEmpresaActiva, ?array $idsProductos = null): array
+    public function resumenRegistro(Usuario $usuario, int $idEmpresaActiva, ?array $idsProductos = null, ?int $idProveedorObjetivo = null): array
     {
-        $proveedor = $this->miProveedor($usuario, $idEmpresaActiva);
+        $proveedor = $this->proveedorDeTrabajo($usuario, $idEmpresaActiva, $idProveedorObjetivo);
 
         $productos = $proveedor->productos()
             ->where('Activo', 1)
@@ -600,9 +741,9 @@ class ProductoService
      * cada producto tiene su propio Bloqueado, no hay un bloqueo único
      * por proveedor.
      */
-    public function registrar(Usuario $usuario, int $idEmpresaActiva, array $idsProductos): int
+    public function registrar(Usuario $usuario, int $idEmpresaActiva, array $idsProductos, ?int $idProveedorObjetivo = null): int
     {
-        $proveedor = $this->miProveedor($usuario, $idEmpresaActiva);
+        $proveedor = $this->proveedorDeTrabajo($usuario, $idEmpresaActiva, $idProveedorObjetivo);
 
         $productos = $proveedor->productos()
             ->where('Activo', 1)
@@ -677,9 +818,9 @@ class ProductoService
      * aunque sus casillas de documentos estén "llenas" con los mismos
      * archivos que el admin ya vio y rechazó.
      */
-    public function confirmarCorreccionProducto(Usuario $usuario, int $idEmpresaActiva, int $idProducto): void
+    public function confirmarCorreccionProducto(Usuario $usuario, int $idEmpresaActiva, int $idProducto, ?int $idProveedorObjetivo = null): void
     {
-        $proveedor = $this->miProveedor($usuario, $idEmpresaActiva);
+        $proveedor = $this->proveedorDeTrabajo($usuario, $idEmpresaActiva, $idProveedorObjetivo);
 
         $producto = Producto::where('Id_Proveedor', $proveedor->Id_Proveedor)
             ->where('Activo', 1)
@@ -746,33 +887,101 @@ class ProductoService
         });
     }
 
-    protected function miProveedor(Usuario $usuario, int $idEmpresaActiva): Proveedor
+    /**
+     * DE QUIÉN son los productos sobre los que se está trabajando.
+     *
+     * Es el ÚNICO punto de todo el servicio que decide eso, y por eso es el
+     * único que cambió cuando se le abrió la ficha de productos al rol
+     * Compras (10-sep-2026). Todo lo que viene después -qué se puede
+     * editar, cuándo un producto queda bloqueado, qué documentos son
+     * obligatorios para mandarlo a aprobar- corre exactamente igual sin
+     * enterarse de quién lo pidió.
+     *
+     * POR QUÉ ASÍ Y NO UN SERVICIO APARTE PARA EL COMPRADOR. La alternativa
+     * era duplicar este archivo entero recibiendo Id_Proveedor (como sí
+     * están separados FichaProveedorService y CalificacionProveedorService).
+     * Ahí tenía sentido porque son DOS OPERACIONES distintas: una llena la
+     * ficha, la otra la califica. Acá es la MISMA operación hecha por otra
+     * persona, así que dos copias significarían mantener dos veces las
+     * reglas de bloqueo, de correcciones y de documentos obligatorios, y
+     * que se separen en cuanto alguien corrija una sola de las dos.
+     *
+     * Dos caminos:
+     *
+     *  - SIN $idProveedorObjetivo (el de siempre): el usuario externo sobre
+     *    SU propia ficha. El Id_Proveedor NUNCA llega desde el cliente, se
+     *    resuelve del usuario autenticado + la empresa activa.
+     *
+     *  - CON $idProveedorObjetivo: personal interno cargando productos EN
+     *    NOMBRE de un proveedor. Acá el id SÍ viene del cliente, así que se
+     *    comprueban las dos cosas: que el rol pueda, y que ese proveedor
+     *    sea de la empresa activa. Sin lo segundo, cambiar un número en la
+     *    URL alcanzaría para editar el catálogo de otra empresa.
+     */
+    protected function proveedorDeTrabajo(Usuario $usuario, int $idEmpresaActiva, ?int $idProveedorObjetivo = null): Proveedor
     {
-        if ($usuario->Tipo_Usuario !== 'Proveedor') {
-            throw new AccessDeniedHttpException('Solo usuarios externos (Proveedor) gestionan su ficha de productos.');
+        if ($idProveedorObjetivo === null) {
+            if ($usuario->Tipo_Usuario !== 'Proveedor') {
+                throw new AccessDeniedHttpException('Solo usuarios externos (Proveedor) gestionan su ficha de productos.');
+            }
+
+            $proveedor = $usuario->proveedores()->where('Id_Empresa', $idEmpresaActiva)->first();
+
+            if (! $proveedor) {
+                throw new NotFoundHttpException('Este usuario no tiene un Proveedor asociado a la empresa activa.');
+            }
+
+            return $proveedor;
         }
 
-        $proveedor = $usuario->proveedores()->where('Id_Empresa', $idEmpresaActiva)->first();
+        $this->verificarAccesoInterno($usuario, $idEmpresaActiva);
+
+        $proveedor = Proveedor::where('Id_Empresa', $idEmpresaActiva)
+            ->where('Activo', 1)
+            ->find($idProveedorObjetivo);
 
         if (! $proveedor) {
-            throw new NotFoundHttpException('Este usuario no tiene un Proveedor asociado a la empresa activa.');
+            throw new NotFoundHttpException('El proveedor indicado no existe o no pertenece a la empresa activa.');
         }
 
         return $proveedor;
     }
 
-    protected function miProducto(Usuario $usuario, int $idEmpresaActiva, int $idProducto): Producto
+    /**
+     * Quién puede cargar productos en nombre de un proveedor: Compras (el
+     * "comprador"), Admin y Sistemas. Se valida por EMPRESA ACTIVA y no de
+     * forma global, porque los proveedores que se ven son los de esa
+     * empresa.
+     *
+     * Público porque la pantalla del comprador también necesita
+     * preguntarlo antes de listar proveedores (ver
+     * ProductosDeProveedorController::proveedores).
+     */
+    public function verificarAccesoInterno(Usuario $usuario, int $idEmpresaActiva): void
     {
-        $proveedor = $this->miProveedor($usuario, $idEmpresaActiva);
+        $puedeAcceder = $usuario->esCompras($idEmpresaActiva)
+            || $usuario->esAdmin($idEmpresaActiva)
+            || $usuario->esSistemas($idEmpresaActiva);
+
+        if (! $puedeAcceder) {
+            throw new AccessDeniedHttpException(
+                'Solo los roles Compras, Admin y Sistemas pueden gestionar los productos de un proveedor.'
+            );
+        }
+    }
+
+    protected function productoDeTrabajo(Usuario $usuario, int $idEmpresaActiva, int $idProducto, ?int $idProveedorObjetivo = null): Producto
+    {
+        $proveedor = $this->proveedorDeTrabajo($usuario, $idEmpresaActiva, $idProveedorObjetivo);
 
         return Producto::where('Id_Proveedor', $proveedor->Id_Proveedor)
             ->with('proveedor')
             ->findOrFail($idProducto);
     }
 
-    public function descargarDocumento(Usuario $usuario, int $idEmpresaActiva, int $idDocumentoProducto)
+    public function descargarDocumento(Usuario $usuario, int $idEmpresaActiva, int $idDocumentoProducto, ?int $idProveedorObjetivo = null)
     {
-        $proveedor = $this->miProveedor($usuario, $idEmpresaActiva);
+        $proveedor = $this->proveedorDeTrabajo($usuario, $idEmpresaActiva, $idProveedorObjetivo);
 
         $documento = DocumentoProducto::whereHas('producto', fn($q) => $q->where('Id_Proveedor', $proveedor->Id_Proveedor))
             ->with('archivo')
