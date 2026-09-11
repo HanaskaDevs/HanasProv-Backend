@@ -710,6 +710,14 @@ class CalificacionProveedorService
         ])->save();
 
         $this->notificarProveedorAprobado($proveedor);
+
+        // Registro en Business Central. Va DESPUÉS de guardar la
+        // aprobación y de notificar: si BC está caído o rechaza algo, el
+        // proveedor igual queda aprobado en el portal y el error se
+        // guarda en Error_Posteo_BC para reintentarlo. El servicio ya
+        // atrapa todo internamente, no lanza.
+        app(SincronizacionProveedorBcService::class)
+            ->sincronizarSiCorresponde($proveedor->load(['clases', 'empresa']));
     }
 
     /**
