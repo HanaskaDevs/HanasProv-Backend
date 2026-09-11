@@ -73,4 +73,21 @@ return [
      */
     'habilitado' => env('BC_POSTEO_HABILITADO', false),
 
+    /*
+     | Qué hacer cuando el proveedor YA existe en BC (se busca por
+     | noIdentificacion antes de crear).
+     |
+     | false (por defecto): solo se VINCULA -> se guarda su
+     |   Nro_Proveedor_BC en el portal y no se toca la ficha de BC. Es lo
+     |   seguro: ahí puede haber datos curados por Compras (términos de
+     |   pago, grupos contables) que el portal no conoce.
+     |
+     | true: además se actualizan los campos que el portal gobierna
+     |   (nombre, dirección, grupo de impuesto, tipo de proveedor).
+     |
+     | En ambos casos SÍ se agregan la cuenta bancaria y los datos
+     | adicionales si le faltaban.
+     */
+    'actualizar_existentes' => env('BC_ACTUALIZAR_EXISTENTES', false),
+
 ];

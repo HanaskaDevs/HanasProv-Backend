@@ -50,13 +50,11 @@ class SincronizacionProveedorBcService
             return false;
         }
 
-        // Ya registrado -> no se vuelve a crear. Sin esta guarda, una
-        // recalificación o el comando de reconciliación duplicarían el
-        // proveedor en BC.
-        if ($proveedor->Nro_Proveedor_BC) {
-            return true;
-        }
-
+        // NO se corta si ya tiene Nro_Proveedor_BC: el número se guarda
+        // apenas se crea la ficha, así que puede estar puesto y aun así
+        // faltar el banco o los datos adicionales (si ese intento falló
+        // a mitad). registrar() detecta que ya existe y solo completa lo
+        // que falte; los 3 pasos son idempotentes.
         try {
             $nroBc = $this->registrar($proveedor);
 
@@ -89,28 +87,113 @@ class SincronizacionProveedorBcService
         }
     }
 
-    /** @return string El "No" que BC asignó al proveedor. */
+    /** @return string El "No" que BC asignó (o el que ya tenía). */
     protected function registrar(Proveedor $proveedor): string
     {
         $company = $this->companyDe($proveedor);
+        $servicioFicha = config('bc.servicios.ficha_proveedor');
 
-        // 1. Ficha del proveedor. No se manda "No": BC lo asigna solo
-        //    desde su serie de numeración (PROV-00000XX).
-        $creado = $this->bc->crear($company, config('bc.servicios.ficha_proveedor'), $this->payloadFicha($proveedor));
+        // Ya se sabe su número (de un intento anterior que creó la ficha
+        // pero no llegó a terminar) -> no hay nada que crear ni que
+        // buscar, se va directo a completar los pasos que faltaron.
+        if ($proveedor->Nro_Proveedor_BC) {
+            $nroBc = $proveedor->Nro_Proveedor_BC;
 
-        $nroBc = $creado['No'] ?? null;
+            $this->sincronizarCuentaBancaria($company, $proveedor, $nroBc);
+            $this->sincronizarDatosAdicionales($company, $proveedor, $nroBc);
 
-        if (! $nroBc) {
-            throw new RuntimeException('BC creó la ficha pero no devolvió el campo "No".');
+            return $nroBc;
         }
 
-        // 2. Cuenta bancaria (si el proveedor la declaró).
+        // ¿Ya existe en BC? Muchos proveedores del portal NO son nuevos:
+        // ya estaban registrados en BC y el portal los está incorporando.
+        // Sin esta búsqueda, BC rechazaba con "Identificación ya
+        // registrada" y el proveedor quedaba trabado para siempre.
+        $existente = $this->buscarPorIdentificacion($company, $proveedor->Ruc);
+
+        if ($existente) {
+            $nroBc = $existente['No'];
+
+            // Por defecto solo se VINCULA, sin pisar la ficha que ya
+            // existe en BC: ahí puede haber datos curados por Compras
+            // (términos de pago, grupos contables) que el portal no
+            // conoce. Con BC_ACTUALIZAR_EXISTENTES=true, además se
+            // actualizan los campos que el portal sí gobierna.
+            if (config('bc.actualizar_existentes')) {
+                $this->actualizarIgnorandoReadOnly($company, $servicioFicha, "'{$nroBc}'", $this->payloadFicha($proveedor));
+            }
+
+            Log::info('BC: el proveedor ya existía, se vinculó al portal.', [
+                'id_proveedor' => $proveedor->Id_Proveedor,
+                'nro_proveedor_bc' => $nroBc,
+                'actualizado' => (bool) config('bc.actualizar_existentes'),
+            ]);
+        } else {
+            // No se manda "No": BC lo asigna solo desde su serie de
+            // numeración (PROV-00000XX).
+            $creado = $this->bc->crear($company, $servicioFicha, $this->payloadFicha($proveedor));
+
+            $nroBc = $creado['No'] ?? null;
+
+            if (! $nroBc) {
+                throw new RuntimeException('BC creó la ficha pero no devolvió el campo "No".');
+            }
+
+            // Se guarda YA, antes de los pasos que siguen. Si falla el
+            // banco o los datos adicionales, el proveedor igual quedó
+            // creado en BC: sin guardarlo acá se perdía el número y el
+            // reintento trataba de crearlo de nuevo, chocando con
+            // "Identificación ya registrada" (pasó en la primera prueba
+            // real, 11-sep-2026).
+            $proveedor->forceFill(['Nro_Proveedor_BC' => $nroBc])->save();
+        }
+
+        $this->sincronizarCuentaBancaria($company, $proveedor, $nroBc);
+        $this->sincronizarDatosAdicionales($company, $proveedor, $nroBc);
+
+        return $nroBc;
+    }
+
+    /** @return array<string, mixed>|null */
+    protected function buscarPorIdentificacion(string $company, ?string $ruc): ?array
+    {
+        if (! $ruc) {
+            return null;
+        }
+
+        $encontrados = $this->bc->consultar(
+            $company,
+            config('bc.servicios.ficha_proveedor'),
+            "noIdentificacion eq '{$ruc}'"
+        );
+
+        return $encontrados[0] ?? null;
+    }
+
+    /**
+     * Crea la cuenta bancaria solo si el proveedor no la tiene ya en BC
+     * -> reintentar el posteo no debe duplicarle las cuentas.
+     */
+    protected function sincronizarCuentaBancaria(string $company, Proveedor $proveedor, string $nroBc): void
+    {
         $cuenta = ProveedorCuentaBancaria::with('banco')
             ->where('Id_Proveedor', $proveedor->Id_Proveedor)
             ->first();
 
-        if ($cuenta && $cuenta->banco) {
-            $this->bc->crear($company, config('bc.servicios.banco_proveedor'), [
+        if (! $cuenta || ! $cuenta->banco) {
+            return;
+        }
+
+        $servicioBanco = config('bc.servicios.banco_proveedor');
+
+        $yaExiste = $this->bc->consultar(
+            $company,
+            $servicioBanco,
+            "Vendor_No eq '{$nroBc}' and Code eq '{$cuenta->Nro_Cuenta}'"
+        );
+
+        if (empty($yaExiste)) {
+            $this->bc->crear($company, $servicioBanco, [
                 'Vendor_No' => $nroBc,
                 // En el ejemplo de BC, Code y Bank_Account_No son el
                 // mismo número de cuenta.
@@ -121,21 +204,77 @@ class SincronizacionProveedorBcService
                 'NOVAccountType' => $cuenta->Tipo_Cuenta,
                 'Currency_Code' => config('bc.defaults.currency_code'),
             ]);
-
-            // 3. Marcarla como cuenta preferida. Va DESPUÉS de crearla:
-            //    BC no acepta apuntar a una cuenta que todavía no existe.
-            $this->bc->actualizar(
-                $company,
-                config('bc.servicios.ficha_proveedor'),
-                "'{$nroBc}'",
-                ['Preferred_Bank_Account_Code' => $cuenta->Nro_Cuenta]
-            );
         }
 
-        // 4. Datos adicionales (SRI).
-        $this->bc->crear($company, config('bc.servicios.datos_adicionales'), $this->payloadDatosAdicionales($proveedor, $nroBc));
+        // Marcarla como preferida. Va DESPUÉS de crearla: BC no acepta
+        // apuntar a una cuenta que todavía no existe.
+        $this->bc->actualizar(
+            $company,
+            config('bc.servicios.ficha_proveedor'),
+            "'{$nroBc}'",
+            ['Preferred_Bank_Account_Code' => $cuenta->Nro_Cuenta]
+        );
+    }
 
-        return $nroBc;
+    /**
+     * BC CREA SOLO este registro al crear el proveedor (con
+     * tipoIdentificacion/noIdentificacion ya cargados), y la página no
+     * admite inserción -> un POST devuelve 405 "Entity does not support
+     * insert". Por eso acá se ACTUALIZA, completando los campos que
+     * aporta el portal.
+     */
+    protected function sincronizarDatosAdicionales(string $company, Proveedor $proveedor, string $nroBc): void
+    {
+        $this->actualizarIgnorandoReadOnly(
+            $company,
+            config('bc.servicios.datos_adicionales'),
+            "'{$nroBc}'",
+            $this->payloadDatosAdicionales($proveedor)
+        );
+    }
+
+    /**
+     * PATCH que se autocorrige ante campos de solo lectura.
+     *
+     * No tenemos el metadata de qué campos de estas páginas admiten
+     * escritura, y varían entre entornos. BC igual lo dice en el error
+     * ("Control 'X' is read-only") -> se quita ese campo y se reintenta,
+     * en vez de fallar todo el posteo por un campo que BC deriva solo.
+     *
+     * El tope de intentos evita un bucle infinito si el mensaje cambia
+     * de formato y no se logra extraer el campo.
+     */
+    protected function actualizarIgnorandoReadOnly(string $company, string $servicio, string $clave, array $datos): void
+    {
+        for ($intento = 0; $intento < 10; $intento++) {
+            if (empty($datos)) {
+                return;
+            }
+
+            try {
+                $this->bc->actualizar($company, $servicio, $clave, $datos);
+
+                return;
+            } catch (\Throwable $e) {
+                $campo = $this->campoDeSoloLectura($e->getMessage());
+
+                if (! $campo || ! array_key_exists($campo, $datos)) {
+                    throw $e;
+                }
+
+                unset($datos[$campo]);
+
+                Log::info('BC: campo de solo lectura, se reintenta sin él.', [
+                    'servicio' => $servicio,
+                    'campo' => $campo,
+                ]);
+            }
+        }
+    }
+
+    private function campoDeSoloLectura(string $mensaje): ?string
+    {
+        return preg_match("/Control '([^']+)' is read-only/i", $mensaje, $m) ? $m[1] : null;
     }
 
     protected function payloadFicha(Proveedor $proveedor): array
@@ -181,15 +320,18 @@ class SincronizacionProveedorBcService
         return $texto ? mb_strtoupper(trim($texto), 'UTF-8') : '';
     }
 
-    protected function payloadDatosAdicionales(Proveedor $proveedor, string $nroBc): array
+    protected function payloadDatosAdicionales(Proveedor $proveedor): array
     {
+        // Solo los campos que BC deja escribir. Quedan FUERA a propósito:
+        //   - 'No': es la clave, viaja en la URL del PATCH.
+        //   - 'cuentaProveedor': BC lo marca read-only (lo deriva del
+        //     proveedor) -> mandarlo devuelve 400.
+        //   - 'razonSocial', 'tipoIdentificacion', 'noIdentificacion':
+        //     también los deriva/autocompleta BC desde la ficha, que ya
+        //     se creó con esos datos correctos.
+        // Lo que sí aporta el portal son los datos tributarios del SRI.
         return [
-            'No' => $nroBc,
-            'cuentaProveedor' => $nroBc,
-            'razonSocial' => $this->aMayusculas($proveedor->Razon_Social),
-            'tipoIdentificacion' => $this->tipoIdentificacion($proveedor),
-            'noIdentificacion' => $proveedor->Ruc,
-            // Acá el blanco SÍ es cadena vacía (a diferencia de
+            // Acá el blanco es cadena vacía (a diferencia de
             // AMNTipoProveedor en la ficha, que usa " ") -> así vienen
             // los registros existentes en BC.
             'tipoProveedor' => $this->tipoProveedorBc($proveedor) ?? '',
