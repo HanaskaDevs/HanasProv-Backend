@@ -31,10 +31,17 @@ class ReconciliarEstadosProveedoresCommand extends Command
                     . "{$diagnostico['documentos_no_aprobados']} sin aprobar)"
                 );
                 $this->line('  Tiene producto aprobado: ' . ($diagnostico['hay_producto_aprobado'] ? 'sí' : 'NO'));
+
+                // Un proveedor de puros servicios no necesita productos
+                // -> sin esta línea, ver "producto aprobado: NO" en uno
+                // que igual se activó parecía un bug del comando.
+                if (! $diagnostico['requiere_productos']) {
+                    $this->line('  (proveedor de solo servicios: no se le exigen productos)');
+                }
             }
         );
 
-        $this->info("Se activaron {$activados} proveedor(es) que ya cumplían las 3 condiciones.");
+        $this->info("Se activaron {$activados} proveedor(es) que ya cumplían las condiciones.");
 
         return self::SUCCESS;
     }

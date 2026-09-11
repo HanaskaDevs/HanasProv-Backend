@@ -87,6 +87,13 @@ class DocumentoProveedorService
                 // muestra un link "Descargar plantilla" junto al control
                 // de carga cuando esto es true.
                 'tiene_plantilla' => (bool) $tipo->Ruta_Plantilla,
+                // Solo el Certificado bancario: además del PDF, el
+                // proveedor tiene que declarar banco / tipo de cuenta /
+                // nro de cuenta, porque eso es lo que se postea a la
+                // Ficha de Bancos de Business Central (del PDF no se
+                // puede extraer). Se marca por Codigo_Archivo y no por
+                // Id_Tipo_Documento para no clavar un id en el front.
+                'requiere_datos_bancarios' => $tipo->Codigo_Archivo === 'CBANCARIO',
                 'documentos' => $tipo->documentosProveedor->map(fn (DocumentoProveedor $doc) => [
                     'id_documento_proveedor' => $doc->Id_Documento_Proveedor,
                     'nombre_original' => $doc->archivo->Nombre_Original,
