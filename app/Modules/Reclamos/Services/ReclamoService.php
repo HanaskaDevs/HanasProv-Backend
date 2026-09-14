@@ -3,6 +3,7 @@
 namespace App\Modules\Reclamos\Services;
 
 use App\Modules\Auth\Models\Usuario;
+use App\Shared\VerificaArchivoFisico;
 use App\Modules\Documentos_Proveedor\Models\Archivo;
 use App\Modules\Proveedores\Models\Proveedor;
 use App\Modules\Reclamos\Models\Reclamo;
@@ -20,7 +21,27 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 class ReclamoService
 {
-    protected const DISCO = 'repositorio_proveedores';
+    /**
+     * Todo el texto de un reclamo se guarda EN MAYÚSCULAS (decisión del
+     * negocio, 1-sep-2026): el asunto y también cada mensaje de la
+     * conversación, escriba quien escriba.
+     *
+     * Se normaliza al GUARDAR y no al mostrar, para que salga igual en
+     * todos lados: la pantalla, los correos que se le mandan al proveedor y
+     * cualquier exportación. Si solo se convirtiera en la vista, el correo
+     * saldría como lo tipearon y no coincidiría con el portal.
+     *
+     * mb_strtoupper y no strtoupper: sin él, strtoupper deja las vocales
+     * acentuadas intactas y "canción" quedaría como "CANCIóN".
+     */
+    protected function aMayusculas(string $texto): string
+    {
+        return mb_strtoupper(trim($texto), 'UTF-8');
+    }
+
+    use VerificaArchivoFisico;
+
+    protected const DISCO = 'reclamos';
     protected const MAX_IMAGENES = 5;
 
     /**
@@ -92,25 +113,31 @@ class ReclamoService
         int $idEmpresaActiva,
         int $idProveedor,
         string $asunto,
+        string $tipoReclamo,
+        string $impactoProveedor,
         string $mensajeTexto,
         array $destinatarios,
         array $imagenes = []
     ): Reclamo {
         $this->verificarEsInterno($usuario);
 
-        if (count($imagenes) > self::MAX_IMAGENES) {
-            throw new \Illuminate\Validation\ValidationException(
-                validator([], []),
-            );
-        }
+        // El tope de imágenes NO se valida acá: este bloque construía un
+        // ValidationException con un validador vacío, así que llegaba al
+        // front como un error 422 SIN ningún mensaje adentro (el usuario
+        // veía el formulario fallar sin saber por qué). El límite ya está
+        // cubierto dos veces y bien: CrearReclamoRequest ('imagenes' =>
+        // max:5) y crearMensaje() más abajo, que sí lanza el mensaje
+        // legible "Máximo N imágenes por mensaje.".
 
         $proveedor = Proveedor::where('Id_Empresa', $idEmpresaActiva)->findOrFail($idProveedor);
 
-        return DB::transaction(function () use ($usuario, $idEmpresaActiva, $proveedor, $asunto, $mensajeTexto, $destinatarios, $imagenes) {
+        return DB::transaction(function () use ($usuario, $idEmpresaActiva, $proveedor, $asunto, $tipoReclamo, $impactoProveedor, $mensajeTexto, $destinatarios, $imagenes) {
             $reclamo = Reclamo::create([
                 'Id_Empresa' => $idEmpresaActiva,
                 'Id_Proveedor' => $proveedor->Id_Proveedor,
-                'Asunto' => $asunto,
+                'Asunto' => $this->aMayusculas($asunto),
+                'Tipo_Reclamo' => $tipoReclamo,
+                'Impacto_Proveedor' => $impactoProveedor,
                 'Estado' => 'Abierto',
                 'Creado_Por' => $usuario->Id_Usuario,
                 'Fecha_Creacion' => now(),
@@ -188,7 +215,7 @@ class ReclamoService
         $mensaje = ReclamoMensaje::create([
             'Id_Reclamo' => $reclamo->Id_Reclamo,
             'Id_Usuario_Autor' => $usuario->Id_Usuario,
-            'Mensaje' => $texto,
+            'Mensaje' => $this->aMayusculas($texto),
             'Fecha_Creacion' => now(),
         ]);
 
@@ -306,9 +333,7 @@ class ReclamoService
 
         $rutaCompleta = Storage::disk(self::DISCO)->path($imagen->archivo->Ruta_Almacenamiento);
 
-        if (! is_file($rutaCompleta)) {
-            throw new NotFoundHttpException('El archivo físico no se encuentra en el repositorio.');
-        }
+        $this->verificarArchivoEntregable($rutaCompleta);
 
         return response()->file($rutaCompleta, [
             'Content-Type' => $imagen->archivo->Tipo_Mime,

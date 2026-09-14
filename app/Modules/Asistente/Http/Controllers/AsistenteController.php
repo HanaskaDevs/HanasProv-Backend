@@ -18,13 +18,34 @@ class AsistenteController extends Controller
     {
         $idEmpresaActiva = (int) $request->attributes->get('id_empresa_activa');
 
-        $respuesta = $this->asistenteService->responder(
+        $resultado = $this->asistenteService->responder(
             $request->user(),
             $idEmpresaActiva,
             $request->validated('mensaje'),
             $request->validated('historial', []),
         );
 
-        return response()->json(['respuesta' => $respuesta]);
+        // 'respuesta' se mantiene con ese nombre para no romper el frontend
+        // que ya lo lee. 'tabla' es nuevo: viene con filas cuando el modelo
+        // usó una herramienta de consulta, y es lo que habilita el botón de
+        // descarga en Excel bajo el mensaje.
+        return response()->json([
+            'respuesta' => $resultado['texto'],
+            'tabla' => $resultado['tabla'],
+        ]);
+    }
+
+    /**
+     * Se llama sola al cargar el dashboard (ver HanaBot.tsx), sin que el
+     * usuario abra el chat. Devuelve null casi siempre; solo trae texto
+     * la primera vez que un proveedor recién Aprobado entra al portal.
+     */
+    public function bienvenidaProactiva(Request $request): JsonResponse
+    {
+        $idEmpresaActiva = (int) $request->attributes->get('id_empresa_activa');
+
+        $mensaje = $this->asistenteService->obtenerBienvenidaProactiva($request->user(), $idEmpresaActiva);
+
+        return response()->json(['mensaje' => $mensaje]);
     }
 }

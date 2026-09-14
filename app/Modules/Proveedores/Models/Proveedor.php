@@ -24,20 +24,32 @@ class Proveedor extends BaseModel
         'Contacto_Calidad', 'Correo_Calidad', 'Telefono_Contacto_Calidad',
         'Contacto_Contabilidad', 'Correo_Contabilidad', 'Telefono_Contabilidad',
         'Seccion_Actual', 'Porcentaje_Completado_Ficha',
-        'Fecha_Registro_Documentacion', 'Fecha_Registro_Calificacion_Documentos', 'Correcciones_Pendientes',
+        'Fecha_Registro_Documentacion', 'Fecha_Registro_Calificacion_Documentos', 'Correcciones_Pendientes', 'Fecha_Registro_Calificacion_Productos', 'Correcciones_Pendientes_Productos',
         'Estado_Calificacion_Ficha', 'Comentario_Calificacion_Ficha',
         'Calificado_Por_Ficha', 'Fecha_Calificacion_Ficha',
-        'Fecha_Postulacion', 'Fecha_Aprobacion',
+        'Fecha_Postulacion', 'Fecha_Aprobacion', 'Felicitacion_Bienvenida_Mostrada',
+        'Felicitacion_Calificacion_Mostrada',
         'Activo', 'Creado_Por', 'Fecha_Creacion', 'Modificado_Por', 'Fecha_Modificacion',
     ];
 
     protected $casts = [
+        // Sin este cast, activarSiCorrespondeAprobado() comparaba este
+        // campo con === /!== contra constantes int (EstadoProveedor::
+        // ASPIRANTE, etc.) -> el driver de SQL Server puede devolver
+        // columnas int como string en PHP, así que esa comparación fallaba en
+        // silencio y la función se salía antes de siquiera revisar las 3
+        // condiciones. Con el cast, Eloquent siempre entrega un int real.
+        'Id_Estado_Proveedor' => 'integer',
         'Activo' => 'boolean',
         'Latitud' => 'decimal:7',
         'Longitud' => 'decimal:7',
         'Fecha_Registro_Documentacion' => 'datetime',
         'Fecha_Registro_Calificacion_Documentos' => 'datetime',
+        'Fecha_Registro_Calificacion_Productos' => 'datetime',
+        'Correcciones_Pendientes_Productos' => 'boolean',
         'Correcciones_Pendientes' => 'boolean',
+        'Felicitacion_Bienvenida_Mostrada' => 'boolean',
+        'Felicitacion_Calificacion_Mostrada' => 'boolean',
         'Fecha_Calificacion_Ficha' => 'datetime',
         'Fecha_Postulacion' => 'datetime',
         'Fecha_Aprobacion' => 'datetime',

@@ -8,4 +8,5 @@ Route::prefix('asistente')
     ->middleware(['auth:sanctum', EmpresaActiva::class, 'throttle:15,1'])
     ->group(function () {
         Route::post('/mensaje', [AsistenteController::class, 'enviarMensaje']);
+        Route::get('/bienvenida-proactiva', [AsistenteController::class, 'bienvenidaProactiva']);
     });

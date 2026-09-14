@@ -12,6 +12,26 @@ class GuardarEmpresaRequest extends FormRequest
         return true;
     }
 
+    /**
+     * El nombre de la empresa se guarda SIEMPRE en mayúsculas.
+     *
+     * Se normaliza acá, en prepareForValidation, y no en el controller: así
+     * vale para crear y para editar sin repetir la lógica, y las reglas de
+     * unicidad comparan el valor ya normalizado (si no, "Caterfood" y
+     * "CATERFOOD" pasarían como dos empresas distintas).
+     *
+     * mb_strtoupper y no strtoupper: strtoupper no toca las tildes ni la Ñ,
+     * y dejaría "COMPAÑIA ANDALUCÍA" como "COMPAÑíA ANDALUCíA".
+     */
+    protected function prepareForValidation(): void
+    {
+        foreach (['razon_social', 'nombre_comercial'] as $campo) {
+            if ($this->filled($campo)) {
+                $this->merge([$campo => mb_strtoupper(trim((string) $this->input($campo)), 'UTF-8')]);
+            }
+        }
+    }
+
     public function rules(): array
     {
         return [

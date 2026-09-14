@@ -138,6 +138,29 @@ return [
                     'language' => 'Spanish',
                 ],
 
+                // SIGH (192.168.1.135) — SOLO LECTURA. La usa
+                // SincronizarEstadosSighCommand para leer Documento/DocumentoInv
+                // y reflejar en vivo En_Recepcion/Recibido en el calendario de
+                // horarios de entrega (ver HorarioEntregaService). Es un
+                // servidor DISTINTO al de Portal_Proveedores (10.100.60.40),
+                // así que la sincronización va por este job programado y NO
+                // por un trigger SQL nativo cruzado entre motores.
+                'sqlsrv_sigh' => [
+                    'driver' => 'sqlsrv',
+                    'host' => env('DB_SIGH_HOST', 'localhost'),
+                    'port' => env('DB_SIGH_PORT', '1433'),
+                    'database' => env('DB_SIGH_DATABASE', 'SIGH'),
+                    'username' => env('DB_SIGH_USERNAME', ''),
+                    'password' => env('DB_SIGH_PASSWORD', ''),
+                    'charset' => env('DB_CHARSET', 'utf8'),
+                    'prefix' => '',
+                    'prefix_indexes' => true,
+                    'options' => [
+                        PDO::SQLSRV_ATTR_ENCODING => PDO::SQLSRV_ENCODING_UTF8,
+                    ],
+                    'language' => 'Spanish',
+                ],
+
     ],
 
     /*

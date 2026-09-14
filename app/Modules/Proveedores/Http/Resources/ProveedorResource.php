@@ -34,16 +34,22 @@ class ProveedorResource extends JsonResource
             // calificados y ninguno fue rechazado, null (sin calificar /
             // en revisión) en cualquier otro caso -> incluye "todavía no
             // cargó nada".
+            // OJO: el driver de SQL Server devuelve los COUNT() como
+            // string (ej. "0", no 0) -> comparar con === contra un
+            // entero literal siempre daba false, así que esto SIEMPRE
+            // caía al "return null" final sin importar el estado real
+            // (por eso se veía "Sin calificar" con todo aprobado).
+            // Casteando a (int) antes de comparar queda bien.
             'estado_calificacion_documentacion' => $this->when(
                 $this->documentos_totales_count !== null,
                 function () {
-                    if ($this->documentos_totales_count === 0) {
+                    if ((int) $this->documentos_totales_count === 0) {
                         return null;
                     }
-                    if ($this->documentos_rechazados_count > 0) {
+                    if ((int) $this->documentos_rechazados_count > 0) {
                         return 'Rechazado';
                     }
-                    if ($this->documentos_pendientes_calificar_count === 0) {
+                    if ((int) $this->documentos_pendientes_calificar_count === 0) {
                         return 'Aprobado';
                     }
 

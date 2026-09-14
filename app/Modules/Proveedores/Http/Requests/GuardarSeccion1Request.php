@@ -3,6 +3,7 @@
 namespace App\Modules\Proveedores\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 /**
  * Sección 1: Información del Proveedor (Datos Generales + Contactos).
@@ -19,7 +20,15 @@ class GuardarSeccion1Request extends FormRequest
     {
         return [
             'ruc' => ['required', 'string', 'size:13'],
-            'clase_contribuyente' => ['required', 'string', 'max:50'],
+            // Tiene que ser un Código real del catálogo de Grupos de
+            // impuesto: es el valor que se postea a BC, y cualquier otra
+            // cosa (texto libre, como era antes) haría que BC rechace el
+            // registro del proveedor recién al final del proceso.
+            'clase_contribuyente' => [
+                'required',
+                'string',
+                Rule::exists('Grupo_Impuesto_BC', 'Codigo')->where('Activo', 1),
+            ],
             'razon_social' => ['required', 'string', 'max:200'],
             'nombre_comercial' => ['required', 'string', 'max:200'],
             'email' => ['required', 'email', 'max:150'],
@@ -45,6 +54,16 @@ class GuardarSeccion1Request extends FormRequest
             'contacto_contabilidad' => ['required', 'string', 'max:100'],
             'correo_contabilidad' => ['required', 'email', 'max:200'],
             'telefono_contabilidad' => ['required', 'string', 'max:200'],
+        ];
+    }
+
+    public function messages(): array
+    {
+        return [
+            // El mensaje por defecto ("El campo clase contribuyente
+            // seleccionado no es válido") no dice qué hacer -> pasa
+            // sobre todo con una ficha vieja que traía texto libre.
+            'clase_contribuyente.exists' => 'Selecciona una clase de contribuyente de la lista.',
         ];
     }
 }

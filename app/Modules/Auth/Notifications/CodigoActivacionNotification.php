@@ -2,17 +2,44 @@
 
 namespace App\Modules\Auth\Notifications;
 
+use App\Modules\Auth\Mail\CodigoActivacionMail;
+use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Bus\Queueable;
-use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Notifications\Notification;
 
-class CodigoActivacionNotification extends Notification
+/**
+ * Antes esto devolvía un MailMessage (la plantilla genérica de Laravel:
+ * "Regards, Portal-Proveedores" sin logo ni colores de marca) -> ahora
+ * arma y devuelve un Mailable propio (ver CodigoActivacionMail) con su
+ * propia plantilla Blade con el logo, los colores de Hanaska y un saludo
+ * genérico ("Hola,") en vez de mostrar el correo del usuario como si
+ * fuera su nombre (a esta altura Nombre_Completo todavía es igual al
+ * Email, recién se completa cuando el usuario activa su cuenta).
+ */
+/**
+ * Encolado (ShouldQueue): el envío SMTP NO ocurre dentro de la petición.
+ *
+ * Medido antes del cambio: /auth/olvide-password tardaba 4,36 s porque
+ * esperaba al servidor de correo. Como el proceso atiende una petición por
+ * vez, unas pocas llamadas seguidas dejaban el portal sin atender a nadie.
+ * Encolado, la petición contesta al instante y el correo sale por el worker
+ * (ver routes/console.php).
+ */
+class CodigoActivacionNotification extends Notification implements ShouldQueue
 {
     use Queueable;
 
+    /**
+     * $minutosVigencia viaja hasta la plantilla para que el correo diga el
+     * plazo REAL. Antes el texto "válido por 20 minutos" estaba escrito a
+     * mano en el Blade: al cambiar la vigencia, el correo habría seguido
+     * diciendo 20 minutos y el proveedor tiraría el código creyéndolo
+     * vencido. Por defecto 20 para no romper una llamada antigua.
+     */
     public function __construct(
         protected string $codigo,
-        protected bool $esReset = false
+        protected bool $esReset = false,
+        protected int $minutosVigencia = 20,
     ) {
     }
 
@@ -21,30 +48,16 @@ class CodigoActivacionNotification extends Notification
         return ['mail'];
     }
 
-    public function toMail(object $notifiable): MailMessage
+    public function toMail(object $notifiable): CodigoActivacionMail
     {
-        $asunto = $this->esReset
-            ? 'Restablecimiento de contraseña - Portal de Proveedores'
-            : 'Bienvenido - Activa tu cuenta';
-
         $ruta = $this->esReset ? '/restablecer-password' : '/activar-cuenta';
 
-$urlActivacion = rtrim(config('app.frontend_url'), '/') . $ruta . '?' . http_build_query([
-    'email' => $notifiable->Email,
-    'codigo' => $this->codigo,
-]);
-       
+        $urlActivacion = rtrim(config('app.frontend_url'), '/') . $ruta . '?' . http_build_query([
+            'email' => $notifiable->Email,
+            'codigo' => $this->codigo,
+        ]);
 
-        return (new MailMessage)
-            ->subject($asunto)
-            ->greeting('Hola ' . $notifiable->Nombre_Completo . ',')
-            ->line($this->esReset
-                ? 'Solicitaste restablecer tu contraseña. Usa el siguiente código o el botón para continuar.'
-                : 'Se creó una cuenta para ti en el Portal de Proveedores. Usa el siguiente código o el botón para activarla.')
-            ->line('Correo: ' . $notifiable->Email)
-            ->line('Código de activación: ' . $this->codigo)
-            ->action($this->esReset ? 'Restablecer mi contraseña' : 'Activar mi cuenta', $urlActivacion)
-            ->line('Este código es válido por 20 minutos y de un solo uso.')
-            ->line('Si el botón no funciona, ingresa manualmente a la pantalla de activación con tu correo y este código.');
+        return (new CodigoActivacionMail($this->codigo, $urlActivacion, $this->esReset, $this->minutosVigencia))
+            ->to($notifiable->Email);
     }
 }

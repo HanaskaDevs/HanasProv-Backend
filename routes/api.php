@@ -11,3 +11,7 @@ require base_path('app/Modules/Reclamos/routes.php');
 require base_path('app/Modules/Asistente/routes.php');
 require base_path('app/Modules/Configuraciones/routes.php');
 require base_path('app/Modules/Auditorias/routes.php');
+require base_path('app/Modules/Catalogos/routes.php');
+require base_path('app/Modules/Catalogo_Productos/routes.php');
+require base_path('app/Modules/Horarios_Entrega/routes.php');
+require base_path('app/Modules/Legal/routes.php');

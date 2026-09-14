@@ -89,9 +89,35 @@ class AuthController extends Controller
     {
         $this->usuarioService->olvidePassword($request->validated('email'));
 
+        // SIEMPRE la misma respuesta, exista o no la cuenta. El service ya
+        // corta en silencio los casos que no corresponden -> si acá se
+        // devolviera un error distinto para un correo desconocido, este
+        // endpoint serviría para averiguar qué correos están registrados.
         return response()->json([
-            'message' => 'Se envió un código de recuperación al correo registrado.',
+            'message' => 'Si el correo está registrado, te enviamos un código de recuperación.',
         ]);
+    }
+
+    /**
+     * Paso 1 de la pantalla de activación: comprueba el código antes de que
+     * la persona llene el resto, y dice si además hay que pedirle los datos
+     * de su empresa (solo a un proveedor en su primera activación).
+     *
+     * Es anónimo por necesidad -- quien activa todavía no tiene sesión --
+     * pero solo responde a quien ya trae el código correcto, y ante
+     * cualquier problema devuelve el mismo mensaje que un código inválido,
+     * así no sirve para averiguar qué correos están registrados.
+     */
+    public function validarCodigoActivacion(Request $request): JsonResponse
+    {
+        $datos = $request->validate([
+            'email' => ['required', 'email'],
+            'codigo' => ['required', 'string', 'max:10'],
+        ]);
+
+        return response()->json(
+            $this->usuarioService->validarCodigoActivacion($datos['email'], $datos['codigo'])
+        );
     }
 
     public function activarCuenta(ActivarCuentaRequest $request): JsonResponse
@@ -104,6 +130,8 @@ class AuthController extends Controller
                 'nombre_completo' => $request->validated('nombre_completo'),
                 'cargo' => $request->validated('cargo'),
                 'telefono' => $request->validated('telefono'),
+                'ruc' => $request->validated('ruc'),
+                'razon_social' => $request->validated('razon_social'),
             ],
         );
 

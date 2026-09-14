@@ -21,23 +21,51 @@ class AuditoriaService
         return TipoAuditoria::where('Activo', true)->orderBy('Orden')->get();
     }
 
-    public function listarProveedoresParaAuditoria(Usuario $usuario, int $idEmpresa): Collection
+    /**
+     * $idTipoAuditoria (opcional): si viene, marca 'sugerido' = true en
+     * los proveedores cuya(s) Clase(s) de Proveedor correspondan a ese
+     * Tipo_Auditoria (ver Tipo_Auditoria_Clase) y los deja primero en la
+     * lista -> es la forma en que el wizard "sugiere automáticamente" el
+     * proveedor correcto sin obligar a cambiar el orden actual
+     * (tipo -> proveedor) del flujo.
+     */
+    public function listarProveedoresParaAuditoria(Usuario $usuario, int $idEmpresa, ?int $idTipoAuditoria = null): Collection
     {
         $this->verificarAcceso($usuario, $idEmpresa);
+
+        $idsClasesSugeridas = collect();
+
+        if ($idTipoAuditoria) {
+            $idsClasesSugeridas = TipoAuditoria::where('Activo', true)
+                ->findOrFail($idTipoAuditoria)
+                ->clasesRelacionadas()
+                ->where('Activo', true)
+                ->pluck('Id_Clase_Proveedor');
+        }
 
         return Proveedor::where('Id_Empresa', $idEmpresa)
             ->where('Activo', true)
             ->with(['estado', 'clases'])
             ->orderBy('Razon_Social')
             ->get()
-            ->map(fn($p) => [
-                'id_proveedor' => $p->Id_Proveedor,
-                'razon_social' => $p->Razon_Social,
-                'nombre_comercial' => $p->Nombre_Comercial,
-                'ruc' => $p->Ruc,
-                'estado' => $p->estado?->Nombre_Estado,
-                'clases' => $p->clases->pluck('Nombre_Clase')->values(),
-            ])
+            ->map(function ($p) use ($idsClasesSugeridas) {
+                $sugerido = $idsClasesSugeridas->isNotEmpty()
+                    && $p->clases->pluck('Id_Clase_Proveedor')->intersect($idsClasesSugeridas)->isNotEmpty();
+
+                return [
+                    'id_proveedor' => $p->Id_Proveedor,
+                    'razon_social' => $p->Razon_Social,
+                    'nombre_comercial' => $p->Nombre_Comercial,
+                    'ruc' => $p->Ruc,
+                    'estado' => $p->estado?->Nombre_Estado,
+                    'clases' => $p->clases->pluck('Nombre_Clase')->values(),
+                    'sugerido' => $sugerido,
+                ];
+            })
+            // Los sugeridos primero (orden estable: entre ellos y entre
+            // los demás se conserva el orden alfabético por Razon_Social
+            // ya aplicado en la consulta).
+            ->sortByDesc('sugerido')
             ->values();
     }
 
@@ -211,8 +239,20 @@ class AuditoriaService
             ]);
         }
 
+        // El puntaje se CONGELA acá, al finalizar, y no se vuelve a
+        // recalcular: si mañana alguien edita el Puntaje_Max de una
+        // pregunta o desactiva una, esta auditoría sigue valiendo lo que
+        // valía el día que se cerró. Además la calificación global del
+        // proveedor lee estas columnas en vez de rearmar la auditoría
+        // pregunta por pregunta (ver CalificacionGlobalService).
+        $resumen = $this->calcularResumen($auditoria);
+
         $auditoria->forceFill([
             'Estado' => 'Finalizada',
+            'Puntaje_Total_Posible' => $resumen['puntaje_total_posible'],
+            'Puntaje_No_Aplica' => $resumen['puntaje_no_aplica'],
+            'Puntaje_Obtenido' => $resumen['puntaje_total_obtenido'],
+            'Porcentaje_Cumplimiento' => $resumen['porcentaje_cumplimiento'],
             'Modificado_Por' => $usuario->Id_Usuario,
             'Fecha_Modificacion' => now(),
         ])->save();
@@ -256,10 +296,59 @@ class AuditoriaService
         ];
     }
 
+    /**
+     * Solo Sistemas y Calidad (pedido explícito del usuario, 26-ago-2026:
+     * "Auditorías solo para los roles CALIDAD y SISTEMAS") -> Admin quedó
+     * fuera a propósito, a diferencia de Calificación de Recepciones
+     * (CalificacionRecepcionService::verificarAcceso), que SÍ sigue
+     * incluyendo a Admin.
+     */
+    /**
+     * Resumen para el panel de bienvenida de Calidad (pedido explícito del
+     * usuario, 27-ago-2026: reemplazar el cartel genérico "usa el menú
+     * lateral..." por algo con información real). Solo cuenta lo que ya
+     * existe en Auditoria -> nada inventado ni calculado en el front.
+     */
+    public function resumenDashboard(Usuario $usuario, int $idEmpresa): array
+    {
+        $this->verificarAcceso($usuario, $idEmpresa);
+
+        $inicioMes = now()->startOfMonth()->toDateString();
+
+        $delMes = Auditoria::where('Id_Empresa', $idEmpresa)
+            ->where('Estado', 'Finalizada')
+            ->where('Fecha_Auditoria', '>=', $inicioMes)
+            ->get(['Porcentaje_Cumplimiento']);
+
+        $enBorrador = Auditoria::where('Id_Empresa', $idEmpresa)
+            ->where('Estado', 'Borrador')
+            ->count();
+
+        $ultimas = Auditoria::where('Id_Empresa', $idEmpresa)
+            ->where('Estado', 'Finalizada')
+            ->with('proveedor')
+            ->orderByDesc('Fecha_Auditoria')
+            ->limit(5)
+            ->get();
+
+        return [
+            'auditorias_mes' => $delMes->count(),
+            'promedio_cumplimiento_mes' => $delMes->isNotEmpty()
+                ? round((float) $delMes->avg(fn (Auditoria $a) => (float) $a->Porcentaje_Cumplimiento), 1)
+                : null,
+            'auditorias_en_borrador' => $enBorrador,
+            'ultimas' => $ultimas->map(fn (Auditoria $a) => [
+                'id_auditoria' => $a->Id_Auditoria,
+                'proveedor' => $a->proveedor ? ($a->proveedor->Nombre_Comercial ?: $a->proveedor->Razon_Social) : null,
+                'fecha_auditoria' => $a->Fecha_Auditoria?->format('Y-m-d'),
+                'porcentaje_cumplimiento' => (float) $a->Porcentaje_Cumplimiento,
+            ])->values(),
+        ];
+    }
+
     protected function verificarAcceso(Usuario $usuario, int $idEmpresa): void
     {
         $tieneAcceso = $usuario->esSistemas($idEmpresa)
-            || $usuario->esAdmin($idEmpresa)
             || $usuario->esCalidad($idEmpresa);
 
         if (! $tieneAcceso) {

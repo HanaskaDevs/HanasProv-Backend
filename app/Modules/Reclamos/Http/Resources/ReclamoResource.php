@@ -12,6 +12,8 @@ class ReclamoResource extends JsonResource
         return [
             'id_reclamo' => $this->Id_Reclamo,
             'asunto' => $this->Asunto,
+            'tipo_reclamo' => $this->Tipo_Reclamo,
+            'impacto_proveedor' => $this->Impacto_Proveedor,
             'estado' => $this->Estado,
             'fecha_creacion' => $this->Fecha_Creacion,
             'fecha_cierre' => $this->Fecha_Cierre,

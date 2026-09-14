@@ -87,9 +87,14 @@ return [
     |
     */
 
-    'locale' => env('APP_LOCALE', 'en'),
+    // 'es' y no 'en': el portal es en castellano y las fechas se muestran a
+    // usuarios finales (correos de vencimiento, alertas de recepción, el
+    // contexto del asistente). Con el locale en 'en', translatedFormat()
+    // devolvía "Wednesday 26 de August de 2026", mezclando los dos idiomas en
+    // la misma línea.
+    'locale' => env('APP_LOCALE', 'es'),
 
-    'fallback_locale' => env('APP_FALLBACK_LOCALE', 'en'),
+    'fallback_locale' => env('APP_FALLBACK_LOCALE', 'es'),
 
     'faker_locale' => env('APP_FAKER_LOCALE', 'en_US'),
 

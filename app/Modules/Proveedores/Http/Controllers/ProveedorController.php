@@ -5,6 +5,7 @@ namespace App\Modules\Proveedores\Http\Controllers;
 use App\Http\Controllers\Controller;
 use App\Modules\Proveedores\Http\Requests\StoreProveedorRequest;
 use App\Modules\Proveedores\Http\Resources\ProveedorResource;
+use App\Modules\Proveedores\Models\EstadoProveedor;
 use App\Modules\Proveedores\Models\Proveedor;
 use App\Modules\Proveedores\Services\ProveedorService;
 use Illuminate\Http\JsonResponse;
@@ -30,7 +31,7 @@ class ProveedorController extends Controller
         $proveedor = Proveedor::create([
             ...$request->validated(),
             'Id_Empresa' => $request->attributes->get('id_empresa_activa'),
-            'Id_Estado_Proveedor' => 1, // TODO: usar constante/enum del estado "Aspirante" inicial
+            'Id_Estado_Proveedor' => EstadoProveedor::ASPIRANTE,
             'Seccion_Actual' => 1,
             'Porcentaje_Completado_Ficha' => 0,
             'Fecha_Postulacion' => now(),

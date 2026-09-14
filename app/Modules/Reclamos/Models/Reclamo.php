@@ -16,7 +16,7 @@ class Reclamo extends BaseModel
     public $timestamps = false;
 
     protected $fillable = [
-        'Id_Empresa', 'Id_Proveedor', 'Asunto', 'Estado',
+        'Id_Empresa', 'Id_Proveedor', 'Asunto', 'Tipo_Reclamo', 'Impacto_Proveedor', 'Estado',
         'Creado_Por', 'Fecha_Creacion', 'Cerrado_Por', 'Fecha_Cierre', 'Activo',
     ];
 

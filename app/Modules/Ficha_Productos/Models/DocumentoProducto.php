@@ -13,12 +13,13 @@ class DocumentoProducto extends BaseModel
     public $timestamps = false;
 
     protected $fillable = [
-        'Id_Producto', 'Id_Tipo_Documento_Producto', 'Id_Archivo', 'Activo',
+        'Id_Producto', 'Id_Tipo_Documento_Producto', 'Id_Archivo', 'Fecha_Caducidad', 'Activo',
         'Creado_Por', 'Fecha_Creacion', 'Modificado_Por', 'Fecha_Modificacion',
     ];
 
     protected $casts = [
         'Activo' => 'boolean',
+        'Fecha_Caducidad' => 'date',
         'Fecha_Creacion' => 'datetime',
         'Fecha_Modificacion' => 'datetime',
     ];

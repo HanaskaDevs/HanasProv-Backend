@@ -84,4 +84,49 @@ class CalificacionProveedorController extends Controller
 
         return response()->json(['message' => 'Calificación de documentos registrada correctamente.']);
     }
+
+    public function mostrarProductos(Request $request, int $proveedor): JsonResponse
+    {
+        $idEmpresa = (int) $request->attributes->get('id_empresa_activa');
+
+        return response()->json(
+            $this->calificacionService->obtenerProductosCalificacion($request->user(), $idEmpresa, $proveedor)
+        );
+    }
+
+    public function calificarProducto(CalificarRequest $request, int $producto): JsonResponse
+    {
+        $idEmpresa = (int) $request->attributes->get('id_empresa_activa');
+
+        $productoActualizado = $this->calificacionService->calificarProducto(
+            $request->user(),
+            $idEmpresa,
+            $producto,
+            $request->boolean('aprobado'),
+            $request->validated('observacion')
+        );
+
+        return response()->json([
+            'id_producto' => $productoActualizado->Id_Producto,
+            'estado_calificacion' => $productoActualizado->Estado_Calificacion,
+            'comentario_calificacion' => $productoActualizado->Comentario_Calificacion,
+            'fecha_calificacion' => $productoActualizado->Fecha_Calificacion?->toIso8601String(),
+        ]);
+    }
+
+    public function verDocumentoProducto(Request $request, int $documentoProducto)
+    {
+        $idEmpresa = (int) $request->attributes->get('id_empresa_activa');
+
+        return $this->calificacionService->verDocumentoProductoInline($request->user(), $idEmpresa, $documentoProducto);
+    }
+
+    public function registrarCalificacionProductos(Request $request, int $proveedor): JsonResponse
+    {
+        $idEmpresa = (int) $request->attributes->get('id_empresa_activa');
+
+        $this->calificacionService->registrarCalificacionProductos($request->user(), $idEmpresa, $proveedor);
+
+        return response()->json(['message' => 'Calificación de productos registrada correctamente.']);
+    }
 }

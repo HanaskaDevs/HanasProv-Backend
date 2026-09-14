@@ -45,6 +45,13 @@ class DocumentoProveedorController extends Controller
         return $this->documentoService->descargar($request->user(), $idEmpresa, $documentoProveedor);
     }
 
+    public function plantilla(Request $request, int $tipoDocumento)
+    {
+        $idEmpresa = (int) $request->attributes->get('id_empresa_activa');
+
+        return $this->documentoService->descargarPlantilla($request->user(), $idEmpresa, $tipoDocumento);
+    }
+
     public function registrar(Request $request): JsonResponse
     {
         $idEmpresa = (int) $request->attributes->get('id_empresa_activa');
