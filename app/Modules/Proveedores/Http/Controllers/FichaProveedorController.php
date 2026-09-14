@@ -70,22 +70,35 @@ class FichaProveedorController extends Controller
         return response()->json(new FichaProveedorResource($proveedor));
     }
 
-    /** Cuenta bancaria declarada por el proveedor (null si aún no la registró). */
+    /**
+     * Cuenta bancaria declarada por el proveedor.
+     *
+     * ENVUELTA EN {"cuenta": ...} Y NO DEVUELTA PELADA, que es lo que hacía
+     * antes. `response()->json(null)` NO produce `null`: Symfony convierte
+     * el null en un ArrayObject vacío y el cuerpo sale como `{}`. Del otro
+     * lado, `{}` es un objeto TRUTHY, así que la pantalla daba por
+     * registrada una cuenta inexistente y dibujaba "Información de su
+     * cuenta completa" con los tres campos en blanco.
+     *
+     * Con el envoltorio, "no tiene cuenta" viaja como {"cuenta":null} y no
+     * hay forma de confundirlo con una cuenta cargada.
+     */
     public function cuentaBancaria(Request $request): JsonResponse
     {
         $idEmpresa = (int) $request->attributes->get('id_empresa_activa');
 
-        return response()->json(
-            $this->fichaService->obtenerMiCuentaBancaria($request->user(), $idEmpresa)
-        );
+        return response()->json([
+            'cuenta' => $this->fichaService->obtenerMiCuentaBancaria($request->user(), $idEmpresa),
+        ]);
     }
 
+    /** Misma forma que el GET, para que el front la lea igual en los dos casos. */
     public function guardarCuentaBancaria(Request $request): JsonResponse
     {
         $idEmpresa = (int) $request->attributes->get('id_empresa_activa');
 
-        return response()->json(
-            $this->fichaService->guardarMiCuentaBancaria($request->user(), $idEmpresa, $request->all())
-        );
+        return response()->json([
+            'cuenta' => $this->fichaService->guardarMiCuentaBancaria($request->user(), $idEmpresa, $request->all()),
+        ]);
     }
 }
