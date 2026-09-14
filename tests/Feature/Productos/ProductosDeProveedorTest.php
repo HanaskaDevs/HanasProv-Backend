@@ -369,6 +369,106 @@ class ProductosDeProveedorTest extends TestCase
         );
     }
 
+    public function test_el_volumen_se_calcula_de_las_medidas_de_la_unidad(): void
+    {
+        $empresa = $this->crearEmpresa();
+        [, $proveedor] = $this->crearProveedorConUsuario($empresa);
+        $compras = $this->crearUsuarioInterno($empresa, 'Compras');
+
+        $respuesta = $this->postJson(
+            "/api/productos-proveedor/{$proveedor->Id_Proveedor}",
+            $this->datosProducto([
+                'unidad_largo_cm' => 10,
+                'unidad_ancho_cm' => 5,
+                'unidad_alto_cm' => 3,
+                'masterpack_largo_cm' => 40,
+                'masterpack_ancho_cm' => 30,
+                'masterpack_alto_cm' => 25,
+                'unidad_por_caja' => 12,
+            ]),
+            $this->cabecerasComo($compras, $empresa)
+        );
+
+        $respuesta->assertCreated();
+
+        $producto = Producto::find($respuesta->json('id_producto'));
+
+        // 10 x 5 x 3 = 150 cm³ = 0,000150 m³. Con los decimal(10,3) de
+        // antes esto se guardaba como 0.000, que es justamente lo que la
+        // migración 2026_09_12_090000 vino a arreglar.
+        $this->assertSame(0.00015, (float) $producto->Volumen);
+
+        $this->assertSame(40.0, (float) $producto->Masterpack_Largo_Cm);
+        $this->assertSame(12, (int) $producto->Unidad_Por_Caja);
+
+        // El masterpack tiene su PROPIO volumen: 40 x 30 x 25 = 30.000 cm³
+        // = 0,03 m³. No es el de la unidad por las 12 que trae (0,0018),
+        // porque entre medio hay separadores, relleno y el cartón.
+        $this->assertSame(0.03, (float) $producto->Volumen_Masterpack);
+        $this->assertNotSame(
+            (float) $producto->Volumen_Masterpack,
+            (float) $producto->Volumen * 12
+        );
+    }
+
+    public function test_sin_las_tres_medidas_el_volumen_queda_vacio(): void
+    {
+        $empresa = $this->crearEmpresa();
+        [, $proveedor] = $this->crearProveedorConUsuario($empresa);
+        $compras = $this->crearUsuarioInterno($empresa, 'Compras');
+
+        $respuesta = $this->postJson(
+            "/api/productos-proveedor/{$proveedor->Id_Proveedor}",
+            // Falta el alto -> no hay volumen que calcular. Null y no 0:
+            // 0 se leería como "no ocupa lugar" en vez de "no se sabe".
+            $this->datosProducto(['unidad_largo_cm' => 10, 'unidad_ancho_cm' => 5]),
+            $this->cabecerasComo($compras, $empresa)
+        );
+
+        $respuesta->assertCreated();
+
+        $producto = Producto::find($respuesta->json('id_producto'));
+
+        $this->assertNull($producto->Volumen);
+        // Y el del masterpack tampoco, que ni siquiera se cargó.
+        $this->assertNull($producto->Volumen_Masterpack);
+    }
+
+    public function test_el_paquete_exige_decir_cuanto_trae(): void
+    {
+        $empresa = $this->crearEmpresa();
+        [, $proveedor] = $this->crearProveedorConUsuario($empresa);
+        $compras = $this->crearUsuarioInterno($empresa, 'Compras');
+
+        $idPaquete = (int) UnidadPresentacion::where('Nombre_Unidad', 'Paquete')->value('Id_Unidad_Presentacion');
+        $this->assertGreaterThan(0, $idPaquete, 'El catálogo de unidades debe tener "Paquete".');
+
+        $cabeceras = $this->cabecerasComo($compras, $empresa);
+
+        // Unidad = Paquete y sin contenido -> se rechaza.
+        $this->postJson(
+            "/api/productos-proveedor/{$proveedor->Id_Proveedor}",
+            $this->datosProducto(['id_unidad_presentacion' => $idPaquete]),
+            $cabeceras
+        )->assertStatus(422)->assertJsonValidationErrors('contenido_paquete');
+
+        // Con el contenido, pasa.
+        $ok = $this->postJson(
+            "/api/productos-proveedor/{$proveedor->Id_Proveedor}",
+            $this->datosProducto(['id_unidad_presentacion' => $idPaquete, 'contenido_paquete' => 6]),
+            $cabeceras
+        );
+        $ok->assertCreated();
+        $this->assertSame(6, (int) Producto::find($ok->json('id_producto'))->Contenido_Paquete);
+
+        // Con cualquier OTRA unidad el campo no se exige.
+        $this->postJson(
+            "/api/productos-proveedor/{$proveedor->Id_Proveedor}",
+            $this->datosProducto(),
+            $cabeceras
+        )->assertCreated();
+    }
+
     public function test_el_proveedor_sigue_viendo_y_editando_solo_lo_suyo(): void
     {
         $empresa = $this->crearEmpresa();

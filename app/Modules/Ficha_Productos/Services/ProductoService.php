@@ -122,9 +122,7 @@ class ProductoService
                 'Nombre_Producto' => mb_strtoupper($data['nombre_producto'], 'UTF-8'),
                 'Codigo_Barras' => $data['codigo_barras'] ?? null,
                 'Precio' => $data['precio'] ?? null,
-                'Peso' => $data['peso'] ?? null,
-                'Volumen' => $data['volumen'] ?? null,
-                'Unidad_Por_Caja' => $data['unidad_por_caja'] ?? null,
+                ...$this->medidasDelProducto($data),
                 'Activo' => 1,
                 'Bloqueado' => 0,
                 'Creado_Por' => $usuario->Id_Usuario,
@@ -220,9 +218,7 @@ class ProductoService
                 'Nombre_Producto' => mb_strtoupper($data['nombre_producto'], 'UTF-8'),
                 'Codigo_Barras' => $data['codigo_barras'] ?? null,
                 'Precio' => $producto->Precio_En_Revision ? $producto->Precio : ($data['precio'] ?? null),
-                'Peso' => $data['peso'] ?? null,
-                'Volumen' => $data['volumen'] ?? null,
-                'Unidad_Por_Caja' => $data['unidad_por_caja'] ?? null,
+                ...$this->medidasDelProducto($data),
                 'Modificado_Por' => $usuario->Id_Usuario,
                 'Fecha_Modificacion' => now(),
             ];
@@ -918,6 +914,73 @@ class ProductoService
      *    sea de la empresa activa. Sin lo segundo, cambiar un número en la
      *    URL alcanzaría para editar el catálogo de otra empresa.
      */
+    /**
+     * Campos físicos del producto, comunes al alta y a la edición.
+     *
+     * Están en un solo lugar porque son siete campos que tienen que
+     * escribirse EXACTAMENTE igual en los dos caminos: cuando estaban
+     * repetidos, cualquier campo nuevo (esto ya pasó con peso y volumen)
+     * terminaba guardándose solo en uno de los dos.
+     *
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     */
+    protected function medidasDelProducto(array $data): array
+    {
+        return [
+            'Peso' => $data['peso'] ?? null,
+            'Unidad_Por_Caja' => $data['unidad_por_caja'] ?? null,
+            'Contenido_Paquete' => $data['contenido_paquete'] ?? null,
+            'Masterpack_Largo_Cm' => $data['masterpack_largo_cm'] ?? null,
+            'Masterpack_Ancho_Cm' => $data['masterpack_ancho_cm'] ?? null,
+            'Masterpack_Alto_Cm' => $data['masterpack_alto_cm'] ?? null,
+            'Unidad_Largo_Cm' => $data['unidad_largo_cm'] ?? null,
+            'Unidad_Ancho_Cm' => $data['unidad_ancho_cm'] ?? null,
+            'Unidad_Alto_Cm' => $data['unidad_alto_cm'] ?? null,
+            // Los dos volúmenes salen de sus propias medidas. El del
+            // masterpack NO es el de la unidad por la cantidad que trae:
+            // entre las unidades hay separadores, relleno y el cartón de la
+            // caja.
+            'Volumen' => $this->volumenEnM3(
+                $data['unidad_largo_cm'] ?? null,
+                $data['unidad_ancho_cm'] ?? null,
+                $data['unidad_alto_cm'] ?? null
+            ),
+            'Volumen_Masterpack' => $this->volumenEnM3(
+                $data['masterpack_largo_cm'] ?? null,
+                $data['masterpack_ancho_cm'] ?? null,
+                $data['masterpack_alto_cm'] ?? null
+            ),
+        ];
+    }
+
+    /**
+     * Volumen en m³ a partir de tres medidas en cm. Sirve para los dos
+     * casos: la unidad suelta y el masterpack.
+     *
+     * Ya no se recibe del cliente (decisión del usuario, 12-sep-2026): un
+     * volumen escrito a mano podía contradecir a las medidas del mismo
+     * producto, y no había forma de saber cuál de los dos creer.
+     *
+     * Null si falta cualquiera de las tres: con dos medidas no hay volumen
+     * que calcular, y poner 0 se leería como "esto no ocupa lugar" en vez
+     * de "todavía no se sabe".
+     *
+     * La división entre un millón es el paso de cm³ a m³ (100³).
+     */
+    protected function volumenEnM3(mixed $largo, mixed $ancho, mixed $alto): ?float
+    {
+        $l = (float) ($largo ?? 0);
+        $a = (float) ($ancho ?? 0);
+        $h = (float) ($alto ?? 0);
+
+        if ($l <= 0 || $a <= 0 || $h <= 0) {
+            return null;
+        }
+
+        return round(($l * $a * $h) / 1_000_000, 6);
+    }
+
     protected function proveedorDeTrabajo(Usuario $usuario, int $idEmpresaActiva, ?int $idProveedorObjetivo = null): Proveedor
     {
         if ($idProveedorObjetivo === null) {

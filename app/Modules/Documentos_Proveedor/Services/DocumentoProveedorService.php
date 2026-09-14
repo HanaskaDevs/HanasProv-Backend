@@ -6,6 +6,7 @@ use App\Modules\Auth\Models\Usuario;
 use App\Modules\Documentos_Proveedor\Models\Archivo;
 use App\Modules\Documentos_Proveedor\Models\DocumentoProveedor;
 use App\Modules\Documentos_Proveedor\Models\TipoDocumento;
+use App\Modules\Proveedores\Models\ProveedorCuentaBancaria;
 use App\Modules\Documentos_Proveedor\Models\TipoDocumentoClaseExcluida;
 use App\Modules\Proveedores\Models\Proveedor;
 use App\Shared\MueveArchivoAHistorico;
@@ -25,6 +26,13 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
  */
 class DocumentoProveedorService
 {
+    /**
+     * Código del tipo de documento "Certificado bancario". Es el único que
+     * además del PDF pide datos estructurados (banco / tipo de cuenta /
+     * número), porque son los que viajan a Business Central.
+     */
+    public const CODIGO_CERTIFICADO_BANCARIO = 'CBANCARIO';
+
     use MueveArchivoAHistorico, VerificaArchivoFisico;
 
     protected const DISCO = 'repositorio_proveedores';
@@ -93,7 +101,7 @@ class DocumentoProveedorService
                 // Ficha de Bancos de Business Central (del PDF no se
                 // puede extraer). Se marca por Codigo_Archivo y no por
                 // Id_Tipo_Documento para no clavar un id en el front.
-                'requiere_datos_bancarios' => $tipo->Codigo_Archivo === 'CBANCARIO',
+                'requiere_datos_bancarios' => $tipo->Codigo_Archivo === self::CODIGO_CERTIFICADO_BANCARIO,
                 'documentos' => $tipo->documentosProveedor->map(fn (DocumentoProveedor $doc) => [
                     'id_documento_proveedor' => $doc->Id_Documento_Proveedor,
                     'nombre_original' => $doc->archivo->Nombre_Original,
@@ -467,6 +475,36 @@ class DocumentoProveedorService
         if ($faltantes->isNotEmpty()) {
             throw ValidationException::withMessages([
                 'documentacion' => ['Todavía falta cargar: '.$faltantes->implode(', ').'.'],
+            ]);
+        }
+
+        /*
+         * El Certificado bancario no se da por cumplido con el PDF solo:
+         * hace falta además que el proveedor haya declarado banco, tipo de
+         * cuenta y número.
+         *
+         * POR QUÉ SE VALIDA ACÁ Y NO SOLO EN LA PANTALLA: esos tres datos
+         * son los que se postean a la Ficha de Bancos de Business Central
+         * cuando el proveedor se aprueba (ver
+         * SincronizacionProveedorBcService::sincronizarCuentaBancaria). Sin
+         * ellos el proveedor queda registrado en BC sin cuenta donde
+         * pagarle, y eso recién se descubre al momento de pagar. Del PDF no
+         * se pueden sacar: es una imagen.
+         *
+         * Se pregunta por Codigo_Archivo y no por un Id fijo, y se mira la
+         * lista de obligatorios que YA se calculó arriba -> así respeta las
+         * exclusiones por clase de proveedor y las reglas de Quito: a quien
+         * no le corresponde el certificado, tampoco se le exigen los datos.
+         */
+        $leCorrespondeElCertificado = $tiposObligatorios->contains(
+            fn (TipoDocumento $tipo) => $tipo->Codigo_Archivo === self::CODIGO_CERTIFICADO_BANCARIO
+        );
+
+        $tieneCuentaDeclarada = ProveedorCuentaBancaria::where('Id_Proveedor', $proveedor->Id_Proveedor)->exists();
+
+        if ($leCorrespondeElCertificado && ! $tieneCuentaDeclarada) {
+            throw ValidationException::withMessages([
+                'documentacion' => ['Todavía falta completar los datos de tu cuenta bancaria (banco, tipo de cuenta y número de cuenta), junto al Certificado bancario.'],
             ]);
         }
 

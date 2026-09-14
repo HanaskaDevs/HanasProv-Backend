@@ -23,8 +23,21 @@ class ProductoResource extends JsonResource
             'id_unidad_presentacion' => $this->Id_Unidad_Presentacion,
             'precio' => $this->Precio,
             'peso' => $this->Peso,
+            // Calculado de las medidas de la unidad, no cargado a mano
+            // (ver ProductoService::volumenDeLaUnidad) -> la pantalla lo
+            // muestra en solo lectura.
             'volumen' => $this->Volumen,
+            'volumen_masterpack' => $this->Volumen_Masterpack,
+            // En pantalla es "Unidades x Masterpack (caja)"; la columna
+            // conserva su nombre histórico.
             'unidad_por_caja' => $this->Unidad_Por_Caja,
+            'contenido_paquete' => $this->Contenido_Paquete,
+            'masterpack_largo_cm' => $this->Masterpack_Largo_Cm,
+            'masterpack_ancho_cm' => $this->Masterpack_Ancho_Cm,
+            'masterpack_alto_cm' => $this->Masterpack_Alto_Cm,
+            'unidad_largo_cm' => $this->Unidad_Largo_Cm,
+            'unidad_ancho_cm' => $this->Unidad_Ancho_Cm,
+            'unidad_alto_cm' => $this->Unidad_Alto_Cm,
             'precio_en_revision' => (bool) $this->Precio_En_Revision,
             'bloqueado' => (bool) $this->Bloqueado,
             'estado_calificacion' => $this->Estado_Calificacion,

@@ -7,6 +7,7 @@ use App\Shared\VerificaArchivoFisico;
 use App\Modules\Documentos_Proveedor\Models\DocumentoProveedor;
 use App\Modules\Documentos_Proveedor\Models\TipoDocumento;
 use App\Modules\Documentos_Proveedor\Models\TipoDocumentoClaseExcluida;
+use App\Modules\Documentos_Proveedor\Services\DocumentoProveedorService;
 use App\Modules\Ficha_Productos\Models\Producto;
 use App\Modules\Proveedores\Models\CalificacionCampoFicha;
 use App\Modules\Proveedores\Models\ClaseProveedor;
@@ -225,7 +226,7 @@ class CalificacionProveedorService
                 // aprobaba el PDF a ciegas y no tenía forma de verificar
                 // que el banco/cuenta declarados (que son los que se
                 // postean a BC) coincidan con lo que dice el documento.
-                'datos_bancarios' => $tipo->Codigo_Archivo === 'CBANCARIO'
+                'datos_bancarios' => $tipo->Codigo_Archivo === DocumentoProveedorService::CODIGO_CERTIFICADO_BANCARIO
                     ? $this->datosBancariosDeclarados($proveedor)
                     : null,
                 'documentos' => $tipo->documentosProveedor->map(fn (DocumentoProveedor $doc) => [

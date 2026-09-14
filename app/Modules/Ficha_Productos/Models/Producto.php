@@ -16,7 +16,10 @@ class Producto extends BaseModel
 
     protected $fillable = [
         'Id_Proveedor', 'Id_Unidad_Presentacion', 'Nombre_Producto',
-        'Codigo_Barras', 'Precio', 'Peso', 'Volumen', 'Unidad_Por_Caja', 'Activo',
+        'Codigo_Barras', 'Precio', 'Peso', 'Volumen', 'Volumen_Masterpack', 'Unidad_Por_Caja', 'Activo',
+        'Contenido_Paquete',
+        'Masterpack_Largo_Cm', 'Masterpack_Ancho_Cm', 'Masterpack_Alto_Cm',
+        'Unidad_Largo_Cm', 'Unidad_Ancho_Cm', 'Unidad_Alto_Cm',
         'Bloqueado', 'Estado_Calificacion', 'Comentario_Calificacion',
         'Calificado_Por', 'Fecha_Calificacion',
         'Precio_En_Revision',
@@ -27,8 +30,19 @@ class Producto extends BaseModel
     protected $casts = [
         'Precio' => 'decimal:2',
         'Peso' => 'decimal:3',
-        'Volumen' => 'decimal:3',
+        // 6 decimales: el volumen es en m³ y sale de medidas en cm, así
+        // que una caja chica da valores como 0,000150 (ver la migración
+        // 2026_09_12_090000).
+        'Volumen' => 'decimal:6',
+        'Volumen_Masterpack' => 'decimal:6',
         'Unidad_Por_Caja' => 'integer',
+        'Contenido_Paquete' => 'integer',
+        'Masterpack_Largo_Cm' => 'decimal:2',
+        'Masterpack_Ancho_Cm' => 'decimal:2',
+        'Masterpack_Alto_Cm' => 'decimal:2',
+        'Unidad_Largo_Cm' => 'decimal:2',
+        'Unidad_Ancho_Cm' => 'decimal:2',
+        'Unidad_Alto_Cm' => 'decimal:2',
         'Activo' => 'boolean',
         'Bloqueado' => 'boolean',
         'Precio_En_Revision' => 'boolean',
