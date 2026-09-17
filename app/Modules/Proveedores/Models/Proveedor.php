@@ -8,6 +8,7 @@ use App\Models\BaseModel;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class Proveedor extends BaseModel
 {
@@ -130,6 +131,16 @@ class Proveedor extends BaseModel
     public function aceptacionesNormativa(): HasMany
     {
         return $this->hasMany(AceptacionNormativa::class, 'Id_Proveedor');
+    }
+
+    /**
+     * Aceptación de las Políticas de Hanaska al enviar la ficha a revisión.
+     * null mientras el proveedor no haya completado y enviado su ficha.
+     * Ver FichaProveedorService::registrarConfirmacionSiCorresponde().
+     */
+    public function confirmacionFicha(): HasOne
+    {
+        return $this->hasOne(ConfirmacionFicha::class, 'Id_Proveedor');
     }
 
     public function productos(): HasMany
