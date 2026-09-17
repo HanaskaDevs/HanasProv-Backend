@@ -57,9 +57,16 @@ class LoginRequest extends FormRequest
             // primer campo del formulario y la pantalla de login ya sabe
             // mostrar sus errores. Además no se le explica a un bot qué
             // fue exactamente lo que falló.
+            //
+            // Redactado como un tropiezo técnico y no como una acusación:
+            // el texto anterior ("no pudimos verificar que seas una
+            // persona") le salía a usuarios legítimos por fallas del propio
+            // captcha, y eso ofende. Tampoco pide recargar la página: el
+            // formulario pide un token nuevo en cada intento, así que
+            // alcanza con volver a pulsar Ingresar.
             $validator->errors()->add(
                 'email',
-                'No pudimos verificar que seas una persona. Recarga la página e intenta de nuevo.'
+                'No pudimos completar la verificación de seguridad. Espera unos segundos e intenta de nuevo.'
             );
         });
     }

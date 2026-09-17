@@ -84,4 +84,18 @@ return [
     */
     'accion_login' => env('TURNSTILE_ACCION_LOGIN', 'login'),
 
+    /*
+    | ¿Mandar la IP del cliente (remoteip) a siteverify?
+    |
+    | Es opcional para Cloudflare, y acá se APAGA por defecto (17-sep-2026):
+    | el portal está detrás del proxy TLS de redes y todo el personal sale
+    | por una IP compartida, así que la IP que ve Laravel no siempre es la
+    | misma que vio Cloudflare al emitir el token. Si no coinciden, el token
+    | puede ser rechazado aunque la persona sea legítima -y eso encaja con
+    | los usuarios que necesitaban 4 o 5 intentos para entrar-. Cloudflare
+    | ya evaluó la IP real al momento del desafío; mandarla otra vez no
+    | agrega seguridad, solo una forma más de fallar.
+    */
+    'enviar_ip' => env('TURNSTILE_ENVIAR_IP', false),
+
 ];

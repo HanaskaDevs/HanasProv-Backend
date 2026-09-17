@@ -59,7 +59,9 @@ class TurnstileService
                 ->post(config('turnstile.url_verificacion'), array_filter([
                     self::CAMPO_SECRET => config('turnstile.secret'),
                     self::CAMPO_TOKEN => $token,
-                    self::CAMPO_IP => $ip,
+                    // La IP solo viaja si está habilitado; ver el porqué en
+                    // config/turnstile.php ('enviar_ip').
+                    self::CAMPO_IP => config('turnstile.enviar_ip') ? $ip : null,
                 ]));
 
             if ($respuesta->failed()) {
@@ -73,12 +75,26 @@ class TurnstileService
         $datos = $respuesta->json();
 
         if (! ($datos['success'] ?? false)) {
-            Log::info('Turnstile: token rechazado.', [
+            $errores = $datos['error-codes'] ?? [];
+
+            // 'internal-error' es Cloudflare diciendo "fallé yo, reintentá":
+            // es el caso 3 (no se pudo verificar), no el 2 (token malo). Sin
+            // esta distinción, un tropiezo del lado de Cloudflare le salía al
+            // usuario como "no pudimos verificar que seas una persona".
+            if (in_array('internal-error', $errores, true)) {
+                return $this->noSePudoVerificar('Cloudflare devolvió internal-error');
+            }
+
+            // Nivel warning y no info a propósito: con LOG_LEVEL=warning en
+            // producción, info ni se escribe, y esto es lo PRIMERO que hay
+            // que mirar cuando la gente no puede entrar.
+            Log::warning('Turnstile: token rechazado.', [
                 'ip' => $ip,
-                // error-codes dice POR QUÉ: token vencido, ya usado, secret
-                // equivocada, hostname no autorizado... Es lo primero que
-                // hay que mirar cuando "el captcha no deja entrar a nadie".
-                'errores' => $datos['error-codes'] ?? [],
+                // error-codes dice POR QUÉ: timeout-or-duplicate (token
+                // vencido o ya usado), invalid-input-response (token
+                // inválido o de otro hostname), invalid-input-secret...
+                'errores' => $errores,
+                'hostname' => $datos['hostname'] ?? null,
             ]);
 
             return false;

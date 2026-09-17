@@ -48,6 +48,20 @@ class FichaProveedorResource extends JsonResource
              */
             'seccion_1_completa' => FichaProveedorService::seccion1EstaCompleta($this->resource),
 
+            /**
+             * Fecha (sin hora, 'Y-m-d') en que el proveedor aceptó las
+             * Políticas de Hanaska al enviar su ficha a revisión; null si
+             * todavía no la envió. El front la usa para decidir si tiene
+             * que mostrar la casilla de aceptación y para el mensaje de
+             * confirmación. Si la relación no viene cargada (respuestas de
+             * otros módulos que reusan este Resource) sale null.
+             */
+            'fecha_aceptacion_politicas' => $this->whenLoaded(
+                'confirmacionFicha',
+                fn ($confirmacion) => $confirmacion->Fecha_Confirmacion->format('Y-m-d'),
+                null
+            ),
+
             'seccion_1' => [
                 'ruc' => $this->Ruc,
                 'clase_contribuyente' => $this->Clase_Contribuyente,

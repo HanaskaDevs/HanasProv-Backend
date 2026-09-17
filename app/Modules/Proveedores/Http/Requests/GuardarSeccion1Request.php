@@ -54,6 +54,10 @@ class GuardarSeccion1Request extends FormRequest
             'contacto_contabilidad' => ['required', 'string', 'max:100'],
             'correo_contabilidad' => ['required', 'email', 'max:200'],
             'telefono_contabilidad' => ['required', 'string', 'max:200'],
+
+            // Ver GuardarSeccion3Request: mismo mecanismo, por si esta es la
+            // sección que completa la ficha (se llenan fuera de orden).
+            'acepta_politicas' => ['sometimes', 'boolean'],
         ];
     }
 

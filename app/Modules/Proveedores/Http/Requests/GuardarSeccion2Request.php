@@ -19,6 +19,9 @@ class GuardarSeccion2Request extends FormRequest
         return [
             'id_clases' => ['required', 'array', 'min:1'],
             'id_clases.*' => ['integer', 'exists:Clase_Proveedor,Id_Clase_Proveedor'],
+            // Ver GuardarSeccion3Request: mismo mecanismo, por si esta es la
+            // sección que completa la ficha (se llenan fuera de orden).
+            'acepta_politicas' => ['sometimes', 'boolean'],
         ];
     }
 }

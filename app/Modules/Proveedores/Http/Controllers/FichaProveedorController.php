@@ -47,7 +47,14 @@ class FichaProveedorController extends Controller
     {
         $idEmpresa = (int) $request->attributes->get('id_empresa_activa');
 
-        $proveedor = $this->fichaService->guardarSeccion1($request->user(), $idEmpresa, $request->validated());
+        // acepta_politicas: casilla "acepto las Políticas de Hanaska". Solo
+        // cuenta cuando este guardado completa la ficha; ver el Service.
+        $proveedor = $this->fichaService->guardarSeccion1(
+            $request->user(),
+            $idEmpresa,
+            $request->safe()->except('acepta_politicas'),
+            $request->boolean('acepta_politicas')
+        );
 
         return response()->json(new FichaProveedorResource($proveedor));
     }
@@ -56,7 +63,12 @@ class FichaProveedorController extends Controller
     {
         $idEmpresa = (int) $request->attributes->get('id_empresa_activa');
 
-        $proveedor = $this->fichaService->guardarSeccion2($request->user(), $idEmpresa, $request->validated('id_clases'));
+        $proveedor = $this->fichaService->guardarSeccion2(
+            $request->user(),
+            $idEmpresa,
+            $request->validated('id_clases'),
+            $request->boolean('acepta_politicas')
+        );
 
         return response()->json(new FichaProveedorResource($proveedor));
     }
@@ -65,7 +77,12 @@ class FichaProveedorController extends Controller
     {
         $idEmpresa = (int) $request->attributes->get('id_empresa_activa');
 
-        $proveedor = $this->fichaService->guardarSeccion3($request->user(), $idEmpresa, $request->validated('id_categorias'));
+        $proveedor = $this->fichaService->guardarSeccion3(
+            $request->user(),
+            $idEmpresa,
+            $request->validated('id_categorias'),
+            $request->boolean('acepta_politicas')
+        );
 
         return response()->json(new FichaProveedorResource($proveedor));
     }
