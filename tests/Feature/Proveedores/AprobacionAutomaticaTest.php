@@ -60,6 +60,12 @@ class AprobacionAutomaticaTest extends TestCase
             'Activo' => 1,
             'Bloqueado' => 1,
             'Estado_Calificacion' => 'Pendiente',
+            // Desde el 23-sep-2026 el producto pasa primero por Compras y
+            // recién después llega a Calidad. Estos tests son sobre la
+            // APROBACIÓN DEL PROVEEDOR, no sobre el circuito del producto,
+            // así que arrancan en la etapa de Calidad -el paso de Compras
+            // tiene sus propios tests en RevisionComprasProductoTest-.
+            'Etapa_Aprobacion' => Producto::ETAPA_CALIDAD,
             'Fecha_Creacion' => now(),
         ]);
     }

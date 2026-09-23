@@ -438,7 +438,14 @@ class CalificacionProveedorService
         bool $aprobado,
         ?string $observacion
     ): Producto {
-        $this->verificarEsAdmin($admin, $idEmpresaActiva);
+        /*
+         * SEGUNDO paso del circuito (23-sep-2026). Antes calificaban solo
+         * Admin y Sistemas; ahora el dueño de esta etapa es CALIDAD, con
+         * Admin y Sistemas habilitados también -pedido explícito del
+         * usuario: "admin pueden aprobar tanto en el proceso de compras
+         * como en el de calidad"-.
+         */
+        $this->verificarPuedeCalificarProductos($admin, $idEmpresaActiva);
 
         $producto = Producto::whereHas(
             'proveedor',
@@ -448,6 +455,19 @@ class CalificacionProveedorService
             ->with('proveedor')
             ->findOrFail($idProducto);
 
+        /*
+         * No se puede calificar lo que Compras todavía no miró. Sin esta
+         * comprobación, Calidad podría aprobar desde su pantalla un
+         * producto recién enviado y el paso de Compras quedaría en
+         * adorno: el circuito nuevo dejaría de tener efecto sin que nadie
+         * se entere.
+         */
+        if ($producto->Etapa_Aprobacion !== Producto::ETAPA_CALIDAD) {
+            throw ValidationException::withMessages([
+                'producto' => ['Este producto todavía está en revisión de Compras. Calidad lo puede calificar recién cuando Compras lo apruebe.'],
+            ]);
+        }
+
         if ($producto->proveedor->Fecha_Registro_Calificacion_Productos !== null) {
             throw ValidationException::withMessages([
                 'producto' => ['Ya registraste la calificación de productos. Solo se puede volver a calificar cuando se reabra.'],
@@ -456,6 +476,10 @@ class CalificacionProveedorService
 
         $producto->forceFill([
             'Estado_Calificacion' => $aprobado ? 'Aprobado' : 'Rechazado',
+            // La etapa queda en Calidad: si se rechazó, es lo que le dice
+            // al proveedor QUIÉN se lo rechazó. Al reenviarlo, registrar()
+            // lo devuelve a la etapa de Compras.
+            'Etapa_Aprobacion' => Producto::ETAPA_CALIDAD,
             'Comentario_Calificacion' => $observacion,
             'Calificado_Por' => $admin->Id_Usuario,
             'Fecha_Calificacion' => now(),
@@ -695,7 +719,37 @@ class CalificacionProveedorService
     {
         $proveedor->refresh();
 
-        if ($proveedor->Id_Estado_Proveedor !== EstadoProveedor::ASPIRANTE) {
+        /*
+         * Se entra a Aprobado desde DOS estados (23-sep-2026):
+         *
+         *  - ASPIRANTE: el alta normal.
+         *  - SUSPENDIDO: el proveedor al que se le venció la documentación
+         *    y ya la regularizó. Antes esto no existía y el estado no se
+         *    movía nunca: Calidad aprobaba todo y el portal seguía
+         *    mostrándolo suspendido, tanto al personal interno como al
+         *    propio proveedor, sin forma de destrabarlo salvo a mano.
+         */
+        $reactivable = in_array(
+            $proveedor->Id_Estado_Proveedor,
+            [EstadoProveedor::ASPIRANTE, EstadoProveedor::SUSPENDIDO],
+            true
+        );
+
+        if (! $reactivable) {
+            return;
+        }
+
+        /*
+         * OJO CON EL SUSPENDIDO: un documento puede estar APROBADO y
+         * VENCIDO a la vez. Si solo se miraran las calificaciones, un
+         * proveedor suspendido por vencimiento cumpliría las condiciones
+         * al instante, volvería a Aprobado, y el comando de la mañana
+         * siguiente lo suspendería otra vez -un ida y vuelta diario, con
+         * su correo cada vez-. Por eso acá se exige además que no le quede
+         * ningún documento vencido.
+         */
+        if ($proveedor->Id_Estado_Proveedor === EstadoProveedor::SUSPENDIDO
+            && $this->tieneDocumentosVencidos($proveedor)) {
             return;
         }
 
@@ -735,7 +789,9 @@ class CalificacionProveedorService
     {
         $proveedor->refresh();
 
-        if ($proveedor->Id_Estado_Proveedor !== EstadoProveedor::ASPIRANTE) {
+        // Mismo criterio que activarSiCorrespondeAprobado: el suspendido
+        // que regulariza también tiene que poder volver a Aprobado.
+        if (! in_array($proveedor->Id_Estado_Proveedor, [EstadoProveedor::ASPIRANTE, EstadoProveedor::SUSPENDIDO], true)) {
             return;
         }
 
@@ -852,6 +908,42 @@ class CalificacionProveedorService
      * (antes eran 2 consultas separadas: pivote + Rol::find) -> esto se
      * ejecuta en CADA calificación, así que vale la pena que sea liviano.
      */
+    /**
+     * Quién resuelve la SEGUNDA etapa de un producto: Calidad, Admin y
+     * Sistemas. Se separa de verificarEsAdmin() -que sigue gobernando la
+     * ficha y los documentos- porque son permisos distintos: Calidad
+     * califica productos pero no la ficha del proveedor.
+     */
+    /**
+     * ¿Le queda algún documento ya vencido? Se mira la fecha de hoy y no
+     * los 15 días de gracia de la suspensión: para VOLVER a estar
+     * aprobado no alcanza con estar dentro del plazo de gracia, hay que
+     * estar al día.
+     */
+    protected function tieneDocumentosVencidos(Proveedor $proveedor): bool
+    {
+        return DocumentoProveedor::where('Id_Proveedor', $proveedor->Id_Proveedor)
+            ->where('Activo', 1)
+            ->whereNotNull('Fecha_Caducidad')
+            ->whereDate('Fecha_Caducidad', '<', now()->toDateString())
+            ->exists();
+    }
+
+    protected function verificarPuedeCalificarProductos(Usuario $usuario, int $idEmpresaActiva): void
+    {
+        if ($usuario->Tipo_Usuario !== 'Interno') {
+            throw new AccessDeniedHttpException('Solo usuarios internos pueden calificar productos.');
+        }
+
+        $puede = $usuario->esCalidad($idEmpresaActiva)
+            || $usuario->esAdmin($idEmpresaActiva)
+            || $usuario->esSistemas($idEmpresaActiva);
+
+        if (! $puede) {
+            throw new AccessDeniedHttpException('Solo los roles Calidad, Admin y Sistemas pueden calificar productos.');
+        }
+    }
+
     protected function verificarEsAdmin(Usuario $usuario, int $idEmpresaActiva): void
     {
         if ($usuario->Tipo_Usuario !== 'Interno') {
