@@ -70,6 +70,21 @@ return [
     )))),
 
     /*
+    | Correos que SIEMPRE reciben el aviso de "hay productos esperando a
+    | Compras", además de los usuarios con rol Compras de esa empresa.
+    |
+    | Son las jefaturas (pedido explícito del usuario, 23-sep-2026): no
+    | tienen el rol Compras en el portal, pero quieren enterarse igual.
+    | Van en configuración y no escritas en el service porque es una lista
+    | de personas: cambia cuando alguien entra o sale del puesto, y eso no
+    | debería necesitar un despliegue.
+    */
+    'copias_aviso_compras' => array_filter(array_map('trim', explode(',', (string) env(
+        'PORTAL_COPIAS_AVISO_COMPRAS',
+        'mlopez@hanaska.com,mpruna@hanaska.com'
+    )))),
+
+    /*
     | Cuánto se espera, después de marcada la entrega, antes de escalar.
     */
     'horas_para_alertar_recepcion' => (int) env('PORTAL_HORAS_ALERTA_RECEPCION', 1),

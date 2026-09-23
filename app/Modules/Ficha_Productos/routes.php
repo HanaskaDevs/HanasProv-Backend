@@ -3,6 +3,7 @@
 use App\Modules\Auth\Http\Middleware\EmpresaActiva;
 use App\Modules\Ficha_Productos\Http\Controllers\ProductoController;
 use App\Modules\Ficha_Productos\Http\Controllers\ProductosDeProveedorController;
+use App\Modules\Ficha_Productos\Http\Controllers\RevisionComprasController;
 use App\Modules\Ficha_Productos\Http\Controllers\SolicitudCambioPrecioController;
 use App\Modules\Ficha_Productos\Http\Controllers\UnidadPresentacionController;
 use Illuminate\Support\Facades\Route;
@@ -75,4 +76,23 @@ Route::prefix('productos-proveedor')
         Route::post('/{proveedor}', [ProductosDeProveedorController::class, 'store']);
         Route::put('/{proveedor}/{producto}', [ProductosDeProveedorController::class, 'update']);
         Route::delete('/{proveedor}/{producto}', [ProductosDeProveedorController::class, 'destroy']);
+    });
+
+
+/**
+ * PRIMER PASO del circuito de aprobación de productos (23-sep-2026):
+ * la bandeja de Compras.
+ *
+ *     proveedor envía  ->  COMPRAS  ->  Calidad  ->  aprobado
+ *
+ * La resuelven Compras, Admin y Sistemas (lo valida
+ * RevisionComprasProductoService::verificarAcceso).
+ */
+Route::prefix('productos-revision')
+    ->middleware(['auth:sanctum', EmpresaActiva::class])
+    ->group(function () {
+        Route::get('/', [RevisionComprasController::class, 'pendientes']);
+        Route::post('/{producto}/aprobar', [RevisionComprasController::class, 'aprobar']);
+        Route::post('/{producto}/rechazar', [RevisionComprasController::class, 'rechazar']);
+        Route::post('/{producto}/eliminar', [RevisionComprasController::class, 'eliminar']);
     });

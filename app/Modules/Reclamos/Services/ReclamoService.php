@@ -45,12 +45,14 @@ class ReclamoService
     protected const MAX_IMAGENES = 5;
 
     /**
-     * Listado para usuarios internos: todos los reclamos de la empresa activa,
-     * cualquier rol interno puede verlos y crearlos (no hay restricción de rol).
+     * Listado para usuarios internos: todos los reclamos de la empresa
+     * activa. Cualquier rol interno puede verlos y crearlos MENOS el
+     * Guardia (23-sep-2026), que es un rol de un solo propósito y no ve
+     * ninguna otra pantalla del portal.
      */
     public function listarInterno(Usuario $usuario, int $idEmpresaActiva, string $estado): Collection
     {
-        $this->verificarEsInterno($usuario);
+        $this->verificarEsInterno($usuario, $idEmpresaActiva);
 
         return Reclamo::where('Id_Empresa', $idEmpresaActiva)
             ->where('Estado', $estado)
@@ -119,7 +121,7 @@ class ReclamoService
         array $destinatarios,
         array $imagenes = []
     ): Reclamo {
-        $this->verificarEsInterno($usuario);
+        $this->verificarEsInterno($usuario, $idEmpresaActiva);
 
         // El tope de imágenes NO se valida acá: este bloque construía un
         // ValidationException con un validador vacío, así que llegaba al
@@ -283,10 +285,23 @@ class ReclamoService
         }
     }
 
-    protected function verificarEsInterno(Usuario $usuario): void
+    /**
+     * Reclamos los crea CUALQUIER usuario interno, con una excepción: el
+     * Guardia (confirmado con el usuario, 23-sep-2026).
+     *
+     * El Guardia es un rol de un solo propósito -marcar que un proveedor
+     * arribó en el seguimiento del día- y no ve ninguna otra pantalla del
+     * portal; un reclamo suyo no tendría de dónde salir. Los proveedores
+     * tampoco crean: ellos responden los reclamos que reciben.
+     */
+    protected function verificarEsInterno(Usuario $usuario, ?int $idEmpresaActiva = null): void
     {
         if ($usuario->Tipo_Usuario !== 'Interno') {
             throw new AccessDeniedHttpException('Solo usuarios internos pueden crear reclamos.');
+        }
+
+        if ($idEmpresaActiva !== null && $usuario->esGuardia($idEmpresaActiva)) {
+            throw new AccessDeniedHttpException('El rol Guardia no crea reclamos.');
         }
     }
 

@@ -111,7 +111,25 @@ class DocumentoProveedorService
                     // reemplazar ESTE documento puntual aunque el resto
                     // de su documentación ya esté aprobada y bloqueada
                     // (ver ChecklistDocumentos.tsx en el frontend).
-                    'proximo_a_vencer' => $doc->Fecha_Caducidad !== null && $doc->Fecha_Caducidad->lte(now()->addDays(30)),
+                    /*
+                     * OJO: 'proximo_a_vencer' significa "está por vencer,
+                     * TODAVÍA NO venció". Antes era `fecha <= hoy+30`, que
+                     * también daba verdadero para uno vencido hace 241
+                     * días: la tarjeta decía "Próximo a vencer" sobre un
+                     * documento caducado mientras el panel de inicio, que
+                     * sí mira el signo, decía "caducado". Dos pantallas
+                     * contradiciéndose sobre el mismo documento.
+                     */
+                    'proximo_a_vencer' => $doc->Fecha_Caducidad !== null
+                        && $doc->Fecha_Caducidad->gte(now()->startOfDay())
+                        && $doc->Fecha_Caducidad->lte(now()->addDays(30)),
+                    'vencido' => $doc->Fecha_Caducidad !== null
+                        && $doc->Fecha_Caducidad->lt(now()->startOfDay()),
+                    // Negativo = ya venció. Lo usa la pantalla para decir
+                    // "venció hace N días" sin recalcularlo por su cuenta.
+                    'dias_para_vencer' => $doc->Fecha_Caducidad !== null
+                        ? (int) now()->startOfDay()->diffInDays($doc->Fecha_Caducidad, false)
+                        : null,
                     'estado' => $doc->Estado,
                     'fecha_creacion' => $doc->Fecha_Creacion,
                     // Lo que calificó el admin sobre ESTE archivo puntual.
