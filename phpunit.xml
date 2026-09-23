@@ -35,6 +35,11 @@
              RefreshDatabase): cada test corre dentro de una transacción que
              se revierte al terminar, así la base queda igual que antes. Ver
              el comentario largo en tests/TestCase.php. -->
+        <!-- El captcha del login se apaga en los tests: si dependiera del
+             .env, toda la suite de autenticación fallaría en cuanto alguien
+             lo encienda en su máquina (pasó el 23-sep-2026). El captcha
+             tiene sus propios tests, que lo encienden a mano. -->
+        <env name="TURNSTILE_HABILITADO" value="false"/>
         <env name="MAIL_MAILER" value="array"/>
         <env name="QUEUE_CONNECTION" value="sync"/>
         <env name="SESSION_DRIVER" value="array"/>

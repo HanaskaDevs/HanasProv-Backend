@@ -10,6 +10,14 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Producto extends BaseModel
 {
+    /**
+     * Etapas del circuito de aprobación (ver la migración
+     * 2026_09_23_090000). Estado_Calificacion sigue siendo el VEREDICTO;
+     * esto dice en qué escritorio está parado el producto.
+     */
+    public const ETAPA_COMPRAS = 'Compras';
+    public const ETAPA_CALIDAD = 'Calidad';
+
     protected $table = 'Producto';
     protected $primaryKey = 'Id_Producto';
     public $timestamps = false;
@@ -20,7 +28,7 @@ class Producto extends BaseModel
         'Contenido_Paquete',
         'Masterpack_Largo_Cm', 'Masterpack_Ancho_Cm', 'Masterpack_Alto_Cm',
         'Unidad_Largo_Cm', 'Unidad_Ancho_Cm', 'Unidad_Alto_Cm',
-        'Bloqueado', 'Estado_Calificacion', 'Comentario_Calificacion',
+        'Bloqueado', 'Estado_Calificacion', 'Etapa_Aprobacion', 'Comentario_Calificacion',
         'Calificado_Por', 'Fecha_Calificacion',
         'Precio_En_Revision',
         'Bc_Nro_Producto',

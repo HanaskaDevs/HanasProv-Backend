@@ -184,9 +184,16 @@ class VencimientoDocumentosTest extends TestCase
         $sistemas = $this->crearUsuarioInterno($empresa, 'Sistemas');
         [, $proveedor] = $this->crearProveedorConUsuario($empresa);
 
-        $this->documentoQueVence($proveedor, now()->addDays(10)->toDateString(), $sistemas->Id_Usuario);
+        // La fecha del documento se calcula DESDE el día congelado, no
+        // desde hoy: escrita como now()->addDays(10) con el reloj real, el
+        // test se rompía solo con el paso del calendario (en septiembre de
+        // 2026 el documento ya caía fuera de la ventana de 30 días que se
+        // mira desde el 2 de septiembre).
+        $diaDePrueba = Carbon::parse('2026-09-02 08:30:00');
 
-        Carbon::setTestNow(Carbon::parse('2026-09-02 08:30:00'));
+        $this->documentoQueVence($proveedor, $diaDePrueba->copy()->addDays(10)->toDateString(), $sistemas->Id_Usuario);
+
+        Carbon::setTestNow($diaDePrueba);
 
         try {
             $paraAvisar = $this->servicio()->documentosParaAvisar();

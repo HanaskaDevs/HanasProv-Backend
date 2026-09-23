@@ -11,6 +11,13 @@ class ProductoResource extends JsonResource
     {
         return [
             'id_producto' => $this->Id_Producto,
+            // Para la bandeja de Compras, que lista productos de muchos
+            // proveedores y necesita decir de quién es cada uno.
+            'proveedor' => $this->whenLoaded('proveedor', fn () => [
+                'id_proveedor' => $this->proveedor->Id_Proveedor,
+                'razon_social' => $this->proveedor->Razon_Social,
+                'nombre_comercial' => $this->proveedor->Nombre_Comercial,
+            ]),
             'nombre_producto' => $this->Nombre_Producto,
             'codigo_barras' => $this->Codigo_Barras,
             'unidad_presentacion' => $this->whenLoaded('unidadPresentacion', fn() => $this->unidadPresentacion->Nombre_Unidad),
@@ -41,6 +48,15 @@ class ProductoResource extends JsonResource
             'precio_en_revision' => (bool) $this->Precio_En_Revision,
             'bloqueado' => (bool) $this->Bloqueado,
             'estado_calificacion' => $this->Estado_Calificacion,
+            /*
+             * En qué escritorio está parado el producto: 'Compras',
+             * 'Calidad' o null. Estado_Calificacion sigue siendo el
+             * veredicto; esto es la etapa (ver la migración
+             * 2026_09_23_090000). La pantalla lo necesita para poder
+             * decirle al proveedor "lo está revisando Compras" en vez de
+             * un "en revisión" que no dice a quién preguntarle.
+             */
+            'etapa_aprobacion' => $this->Etapa_Aprobacion,
             'comentario_calificacion' => $this->Comentario_Calificacion,
             // Grupos de producto (EK, CD, PH, IM...). whenLoaded para no
             // disparar una consulta por producto: el listado los trae con

@@ -777,6 +777,10 @@ class ProductoService
                 ->update([
                     'Bloqueado' => 1,
                     'Estado_Calificacion' => 'Pendiente',
+                    // Entra por COMPRAS, que es el primer escritorio del
+                    // circuito desde el 23-sep-2026. Recién cuando Compras
+                    // apruebe pasa a Calidad.
+                    'Etapa_Aprobacion' => Producto::ETAPA_COMPRAS,
                     'Comentario_Calificacion' => null,
                     'Calificado_Por' => null,
                     'Fecha_Calificacion' => null,
@@ -791,6 +795,14 @@ class ProductoService
                 $proveedor->forceFill(['Fecha_Registro_Calificacion_Productos' => null])->save();
             }
         });
+
+        // Aviso a Compras DESPUÉS de la transacción: si el correo fallara
+        // dentro, haría rollback de un envío que el proveedor ya dio por
+        // hecho. El servicio de avisos además atrapa todo por su cuenta.
+        app(AvisoProductosService::class)->avisarACompras(
+            $productos->fresh()->load('proveedor'),
+            $usuario
+        );
 
         return $productos->count();
     }

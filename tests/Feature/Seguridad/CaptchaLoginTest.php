@@ -70,10 +70,14 @@ class CaptchaLoginTest extends TestCase
         ]);
 
         $respuesta->assertStatus(422);
-        $this->assertStringContainsString(
-            'no pudimos verificar',
-            mb_strtolower((string) $respuesta->json('message'))
-        );
+
+        // Se comprueba que el rechazo sea DEL CAPTCHA y no de credenciales,
+        // sin clavar el texto exacto: el mensaje es copy y ya cambió una vez
+        // (23-sep-2026), dejando este test en rojo sin que nada del
+        // comportamiento se hubiera roto.
+        $mensaje = mb_strtolower((string) $respuesta->json('message'));
+        $this->assertStringContainsString('verifica', $mensaje);
+        $this->assertStringNotContainsString('credenciales', $mensaje);
 
         // Lo importante: sin token ni siquiera se consulta a Cloudflare, y
         // el intento muere antes del Hash::check, que es lo caro y lo que
