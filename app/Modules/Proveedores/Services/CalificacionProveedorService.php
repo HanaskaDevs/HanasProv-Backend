@@ -391,7 +391,7 @@ class CalificacionProveedorService
      */
     public function obtenerProductosCalificacion(Usuario $admin, int $idEmpresaActiva, int $idProveedor): array
     {
-        $this->verificarEsAdmin($admin, $idEmpresaActiva);
+        $this->verificarPuedeCalificarProductos($admin, $idEmpresaActiva);
 
         $proveedor = $this->proveedorDeLaEmpresa($idEmpresaActiva, $idProveedor);
 
@@ -507,7 +507,7 @@ class CalificacionProveedorService
      */
     public function registrarCalificacionProductos(Usuario $admin, int $idEmpresaActiva, int $idProveedor): void
     {
-        $this->verificarEsAdmin($admin, $idEmpresaActiva);
+        $this->verificarPuedeCalificarProductos($admin, $idEmpresaActiva);
 
         $proveedor = $this->proveedorDeLaEmpresa($idEmpresaActiva, $idProveedor);
 
@@ -556,7 +556,9 @@ class CalificacionProveedorService
      */
     public function verDocumentoProductoInline(Usuario $admin, int $idEmpresaActiva, int $idDocumentoProducto)
     {
-        $this->verificarEsAdmin($admin, $idEmpresaActiva);
+        // Mismo permiso que calificar el producto: no se puede juzgar una
+        // ficha técnica sin poder abrirla.
+        $this->verificarPuedeCalificarProductos($admin, $idEmpresaActiva);
 
         $documento = \App\Modules\Ficha_Productos\Models\DocumentoProducto::whereHas(
             'producto.proveedor',
@@ -901,20 +903,6 @@ class CalificacionProveedorService
     }
 
     /**
-     * Solo Admin/Sistemas pueden calificar. Se resuelve el rol desde el
-     * pivote Usuario_Empresa de la empresa activa (no desde un campo
-     * fijo del usuario), porque el mismo usuario puede tener roles
-     * distintos en distintas empresas. Un solo query con join a Rol
-     * (antes eran 2 consultas separadas: pivote + Rol::find) -> esto se
-     * ejecuta en CADA calificación, así que vale la pena que sea liviano.
-     */
-    /**
-     * Quién resuelve la SEGUNDA etapa de un producto: Calidad, Admin y
-     * Sistemas. Se separa de verificarEsAdmin() -que sigue gobernando la
-     * ficha y los documentos- porque son permisos distintos: Calidad
-     * califica productos pero no la ficha del proveedor.
-     */
-    /**
      * ¿Le queda algún documento ya vencido? Se mira la fecha de hoy y no
      * los 15 días de gracia de la suspensión: para VOLVER a estar
      * aprobado no alcanza con estar dentro del plazo de gracia, hay que
@@ -929,6 +917,21 @@ class CalificacionProveedorService
             ->exists();
     }
 
+    /**
+     * Permiso de la ETAPA DE CALIDAD del circuito de productos
+     * (proveedor -> Compras -> Calidad), separado de verificarEsAdmin.
+     *
+     * POR QUÉ NO ALCANZA CON Admin/Sistemas: el aviso de "Compras aprobó,
+     * falta Calidad" le llega a los usuarios con rol Calidad. Mientras
+     * estas tres operaciones -ver la lista, abrir los documentos y cerrar
+     * la calificación- pidieron Admin/Sistemas, esos usuarios recibían el
+     * correo y se topaban con un 403: el paso de Calidad existía en el
+     * flujo pero no se podía ejecutar desde el rol que lo nombra.
+     *
+     * La ficha general y los documentos del proveedor NO se tocan: esos
+     * siguen siendo Admin/Sistemas (ver verificarEsAdmin). Calidad resuelve
+     * productos, nada más.
+     */
     protected function verificarPuedeCalificarProductos(Usuario $usuario, int $idEmpresaActiva): void
     {
         if ($usuario->Tipo_Usuario !== 'Interno') {
@@ -944,6 +947,14 @@ class CalificacionProveedorService
         }
     }
 
+    /**
+     * Solo Admin/Sistemas pueden calificar. Se resuelve el rol desde el
+     * pivote Usuario_Empresa de la empresa activa (no desde un campo
+     * fijo del usuario), porque el mismo usuario puede tener roles
+     * distintos en distintas empresas. Un solo query con join a Rol
+     * (antes eran 2 consultas separadas: pivote + Rol::find) -> esto se
+     * ejecuta en CADA calificación, así que vale la pena que sea liviano.
+     */
     protected function verificarEsAdmin(Usuario $usuario, int $idEmpresaActiva): void
     {
         if ($usuario->Tipo_Usuario !== 'Interno') {

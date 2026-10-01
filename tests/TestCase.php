@@ -175,6 +175,18 @@ abstract class TestCase extends BaseTestCase
      */
     protected function cabecerasComo(Usuario $usuario, ?Empresa $empresa = null): array
     {
+        /*
+         * El guard de Sanctum CACHEA el usuario que resolvió. En un test
+         * que pega varias veces a la API con usuarios distintos (ej. el
+         * proveedor carga su ficha y después un interno la califica), la
+         * aplicación es la misma entre peticiones, así que la segunda
+         * seguiría viéndose como el PRIMER usuario por más que se manden
+         * las cabeceras correctas -> aparecían 403 fantasma que no pasan
+         * en producción, donde cada petición arranca con una aplicación
+         * nueva. Se olvidan los guards para forzar que vuelva a resolver.
+         */
+        $this->app['auth']->forgetGuards();
+
         $tokenResult = $usuario->createToken('test');
 
         Sesion::create([
