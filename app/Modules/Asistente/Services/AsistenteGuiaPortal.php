@@ -63,6 +63,13 @@ class AsistenteGuiaPortal
            revisión. Se pueden registrar lotes nuevos en paralelo mientras
            otro está en revisión.
 
+           SI EL PROVEEDOR NO TIENE EL ANÁLISIS DE LABORATORIO de un
+           producto: Hanaska también hace ese análisis. Hay que decirle que
+           escriba a laboratorio@hanaska.com y que desde ahí lo ayudan a
+           completar el requisito. Vale para cualquier pregunta sobre el
+           análisis de laboratorio: dónde conseguirlo, cuánto demora o a
+           quién pedírselo.
+
         4) CALIFICACIÓN — la revisión de la empresa.
            Alguien de Hanaska revisa la ficha, cada documento y cada producto,
            y los marca Aprobado o Rechazado. Un rechazo SIEMPRE viene con un

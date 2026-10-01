@@ -95,7 +95,9 @@ class CatalogosSeeder extends Seeder
         $tipos = [
             ['Categoria' => 'General', 'Nombre_Documento' => 'Certificado de afiliación al IESS', 'Carpeta_Slug' => 'certificado-iess', 'Codigo_Archivo' => 'IESS', 'Obligatorio' => true, 'Permite_Multiples' => false, 'Requiere_Fecha_Caducidad' => false, 'Requiere_Solo_Quito' => false, 'Requiere_Excepto_Quito' => false],
             ['Categoria' => 'General', 'Nombre_Documento' => 'Carta de Garantia', 'Carpeta_Slug' => 'carta-garantia', 'Codigo_Archivo' => 'CGARANTIA', 'Ruta_Plantilla' => 'carta-garantia.docx', 'Obligatorio' => true, 'Permite_Multiples' => false, 'Requiere_Fecha_Caducidad' => false, 'Requiere_Solo_Quito' => false, 'Requiere_Excepto_Quito' => false],
-            ['Categoria' => 'General', 'Nombre_Documento' => 'Permiso de funcionamiento ARCSA', 'Carpeta_Slug' => 'permiso-arcsa', 'Codigo_Archivo' => 'ARCSA', 'Obligatorio' => true, 'Permite_Multiples' => false, 'Requiere_Fecha_Caducidad' => true, 'Requiere_Solo_Quito' => false, 'Requiere_Excepto_Quito' => false],
+            // Opcional para todos (01-oct-2026) -> ver
+            // 2026_10_01_090000_arcsa_siempre_opcional.
+            ['Categoria' => 'General', 'Nombre_Documento' => 'Permiso de funcionamiento ARCSA', 'Carpeta_Slug' => 'permiso-arcsa', 'Codigo_Archivo' => 'ARCSA', 'Obligatorio' => false, 'Permite_Multiples' => false, 'Requiere_Fecha_Caducidad' => true, 'Requiere_Solo_Quito' => false, 'Requiere_Excepto_Quito' => false],
             // Solo fuera de Quito -> en Quito se pide LUAE en su lugar.
             ['Categoria' => 'General', 'Nombre_Documento' => 'Permiso de funcionamiento Bomberos', 'Carpeta_Slug' => 'permiso-bomberos', 'Codigo_Archivo' => 'PBOMBEROS', 'Obligatorio' => true, 'Permite_Multiples' => false, 'Requiere_Fecha_Caducidad' => false, 'Requiere_Solo_Quito' => false, 'Requiere_Excepto_Quito' => true],
             ['Categoria' => 'General', 'Nombre_Documento' => 'RUC', 'Carpeta_Slug' => 'ruc', 'Codigo_Archivo' => 'RUC', 'Obligatorio' => true, 'Permite_Multiples' => false, 'Requiere_Fecha_Caducidad' => false, 'Requiere_Solo_Quito' => false, 'Requiere_Excepto_Quito' => false],

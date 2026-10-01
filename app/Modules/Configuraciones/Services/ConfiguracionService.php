@@ -27,6 +27,9 @@ class ConfiguracionService
     // expuesto vía symlink public/media (config/filesystems.php -> 'links').
     protected const DISCO_PUBLICO = 'multimedia';
 
+    /** Clave en la tabla Configuracion del video tutorial del proveedor. */
+    protected const CLAVE_VIDEO_TUTORIAL = 'video_tutorial_url';
+
     protected function verificarSistemas(Usuario $usuario): void
     {
         if (! $usuario->esSistemasGlobal()) {
@@ -373,6 +376,102 @@ class ConfiguracionService
         app(VencimientoDocumentosService::class)->definirSuspensionAutomatica($activa, $usuario->Id_Usuario);
 
         return $activa;
+    }
+
+    // ---------- Video tutorial para proveedores ----------
+
+    /**
+     * URL del video de YouTube que el proveedor ve desde "Ver video
+     * tutorial" en su panel (01-oct-2026).
+     *
+     * SE GUARDA LA URL TAL COMO LA PEGA EL ADMINISTRADOR y, aparte, se
+     * devuelve el id ya extraído. Así el administrador vuelve a ver en el
+     * formulario exactamente lo que escribió (si guardáramos solo el id,
+     * la próxima vez que abra la pantalla encontraría otra cosa), y el
+     * frontend no tiene que volver a parsear nada: recibe la URL para el
+     * enlace "Abrir en YouTube" y la de embed para el iframe.
+     *
+     * El parseo vive SOLO acá. Hacerlo también en el frontend sería tener
+     * dos reglas distintas sobre qué es una URL válida, y la del navegador
+     * no es la que valida al guardar.
+     *
+     * @return array{url: ?string, video_id: ?string, url_embed: ?string}
+     */
+    public function obtenerVideoTutorial(): array
+    {
+        $url = Configuracion::obtener(self::CLAVE_VIDEO_TUTORIAL);
+
+        if ($url === null || trim($url) === '') {
+            return ['url' => null, 'video_id' => null, 'url_embed' => null];
+        }
+
+        $videoId = self::idDeVideoYoutube($url);
+
+        return [
+            'url' => $url,
+            'video_id' => $videoId,
+            // rel=0 para que al terminar no ofrezca videos de otros
+            // canales, que en un tutorial corporativo queda pésimo.
+            'url_embed' => $videoId ? "https://www.youtube.com/embed/{$videoId}?rel=0" : null,
+        ];
+    }
+
+    /**
+     * Guarda la URL. Una cadena vacía BORRA la configuración -> es la
+     * forma de apagar el botón sin tener que tocar código ni desplegar.
+     *
+     * @return array{url: ?string, video_id: ?string, url_embed: ?string}
+     */
+    public function definirVideoTutorial(Usuario $usuario, ?string $url): array
+    {
+        $this->verificarSistemas($usuario);
+
+        $url = trim((string) $url);
+
+        if ($url === '') {
+            Configuracion::establecer(self::CLAVE_VIDEO_TUTORIAL, '', $usuario->Id_Usuario);
+
+            return ['url' => null, 'video_id' => null, 'url_embed' => null];
+        }
+
+        if (self::idDeVideoYoutube($url) === null) {
+            throw ValidationException::withMessages([
+                'url' => ['Pega el enlace de un video de YouTube (youtube.com/watch?v=... o youtu.be/...).'],
+            ]);
+        }
+
+        Configuracion::establecer(self::CLAVE_VIDEO_TUTORIAL, $url, $usuario->Id_Usuario);
+
+        return $this->obtenerVideoTutorial();
+    }
+
+    /**
+     * Id del video dentro de una URL de YouTube, o null si no es una.
+     *
+     * Se contemplan las cuatro formas con las que alguien llega pegando
+     * desde el navegador o desde el botón "Compartir": el watch de
+     * siempre, el enlace corto youtu.be, el /embed/ (por si pega uno ya
+     * armado) y /shorts/. Un id de YouTube son 11 caracteres de
+     * [A-Za-z0-9_-]; cualquier cosa que no encaje se rechaza al guardar,
+     * para no descubrir el error recién cuando un proveedor abre el modal
+     * y ve un recuadro negro.
+     */
+    public static function idDeVideoYoutube(string $url): ?string
+    {
+        $patrones = [
+            '~youtube\.com/watch\?(?:.*&)?v=([A-Za-z0-9_-]{11})~',
+            '~youtu\.be/([A-Za-z0-9_-]{11})~',
+            '~youtube\.com/embed/([A-Za-z0-9_-]{11})~',
+            '~youtube\.com/shorts/([A-Za-z0-9_-]{11})~',
+        ];
+
+        foreach ($patrones as $patron) {
+            if (preg_match($patron, $url, $coincidencia) === 1) {
+                return $coincidencia[1];
+            }
+        }
+
+        return null;
     }
 
     // ---------- Anuncios por voz del Modo TV ----------
