@@ -10,6 +10,7 @@ use App\Modules\Configuraciones\Http\Controllers\PoliticaController;
 use App\Modules\Configuraciones\Http\Controllers\PublicConfigController;
 use App\Modules\Configuraciones\Http\Controllers\AnunciosVozController;
 use App\Modules\Configuraciones\Http\Controllers\SuspensionDocumentosController;
+use App\Modules\Configuraciones\Http\Controllers\VideoTutorialController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -52,6 +53,12 @@ Route::prefix('public-config')->group(function () {
 Route::middleware(['auth:sanctum', EmpresaActiva::class])
     ->get('/politicas', [PoliticaController::class, 'verActivas']);
 
+// El video tutorial lo LEE el proveedor desde su panel -> cualquier
+// usuario logueado. Escribirlo es solo de Sistemas y vive en el grupo de
+// abajo, en /configuraciones/video-tutorial.
+Route::middleware(['auth:sanctum', EmpresaActiva::class])
+    ->get('/video-tutorial', [VideoTutorialController::class, 'show']);
+
 // Administración: solo Sistemas (la verificación real ocurre en el service).
 Route::prefix('configuraciones')
     ->middleware(['auth:sanctum', EmpresaActiva::class])
@@ -63,6 +70,9 @@ Route::prefix('configuraciones')
 
         Route::get('/login-imagen', [LoginImagenController::class, 'show']);
         Route::post('/login-imagen', [LoginImagenController::class, 'update']);
+
+        Route::get('/video-tutorial', [VideoTutorialController::class, 'show']);
+        Route::post('/video-tutorial', [VideoTutorialController::class, 'update']);
 
         Route::get('/bot-reglas', [BotReglaController::class, 'index']);
         Route::post('/bot-reglas', [BotReglaController::class, 'store']);
