@@ -3,6 +3,7 @@
 namespace App\Modules\Configuraciones\Services;
 
 use App\Modules\Auth\Models\Usuario;
+use App\Modules\Configuraciones\Models\BannerInformativo;
 use App\Modules\Configuraciones\Models\BotRegla;
 use App\Modules\Configuraciones\Models\Configuracion;
 use App\Modules\Configuraciones\Models\GuiaPaso;
@@ -15,6 +16,7 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use App\Shared\OptimizadorImagen;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 
@@ -29,6 +31,25 @@ class ConfiguracionService
 
     /** Clave en la tabla Configuracion del video tutorial del proveedor. */
     protected const CLAVE_VIDEO_TUTORIAL = 'video_tutorial_url';
+
+    /** Interruptor, textos y versión del banner informativo. */
+    protected const CLAVE_BANNER_ACTIVO = 'banner_informativo_activo';
+
+    protected const CLAVE_BANNER_TITULO = 'banner_informativo_titulo';
+
+    protected const CLAVE_BANNER_MENSAJE = 'banner_informativo_mensaje';
+
+    protected const CLAVE_BANNER_VERSION = 'banner_informativo_version';
+
+    /** A quién se le muestra: todos, internos o proveedores. */
+    protected const CLAVE_BANNER_AUDIENCIA = 'banner_informativo_audiencia';
+
+    /** Cada cuánto vuelve a aparecer: una_vez o siempre (en cada inicio de sesión). */
+    protected const CLAVE_BANNER_FRECUENCIA = 'banner_informativo_frecuencia';
+
+    public const AUDIENCIAS_BANNER = ['todos', 'internos', 'proveedores'];
+
+    public const FRECUENCIAS_BANNER = ['una_vez', 'siempre'];
 
     protected function verificarSistemas(Usuario $usuario): void
     {
@@ -376,6 +397,238 @@ class ConfiguracionService
         app(VencimientoDocumentosService::class)->definirSuspensionAutomatica($activa, $usuario->Id_Usuario);
 
         return $activa;
+    }
+
+    // ---------- Banner informativo ----------
+
+    /**
+     * El banner que ve cualquier usuario al iniciar sesión.
+     *
+     * LA VERSIÓN ES LA PIEZA CLAVE. El banner se cierra con la X y no
+     * tiene que volver a aparecer en cada pantalla, pero SÍ tiene que
+     * volver a aparecer cuando Sistemas lo cambia. La versión es una marca
+     * de tiempo que se renueva con cualquier edición: el navegador recuerda
+     * cuál cerró y, si la versión cambió, lo muestra de nuevo. Sin esto,
+     * la única forma de que un aviso nuevo llegara a quien ya cerró el
+     * anterior sería pedirle que borre los datos del navegador.
+     *
+     * Cuando está apagado se devuelve lo mínimo y NO se consultan las
+     * piezas: esto lo pide cada usuario al entrar, y el caso normal es
+     * que esté apagado.
+     *
+     * @return array<string, mixed>
+     */
+    public function obtenerBannerInformativo(bool $incluirInactivas = false, ?Usuario $para = null): array
+    {
+        $activo = Configuracion::obtener(self::CLAVE_BANNER_ACTIVO, '0') === '1';
+        $audiencia = Configuracion::obtener(self::CLAVE_BANNER_AUDIENCIA, 'todos');
+
+        /*
+         * LA AUDIENCIA SE FILTRA ACÁ, NO EN LA PANTALLA. A quien no le
+         * corresponde el aviso no se le manda: ni el texto, ni las URLs de
+         * las imágenes. Resolverlo en el frontend significaría que el
+         * contenido igual viajó y basta mirar la respuesta para leerlo, y
+         * un aviso interno puede decir cosas que un proveedor no tiene por
+         * qué ver.
+         */
+        if ($activo && $para !== null && ! $this->leCorrespondeElBanner($para, $audiencia)) {
+            $activo = false;
+        }
+
+        /*
+         * ENCENDIDO PERO VACÍO NO ES ENCENDIDO, para quien lo consume.
+         * Si se borra la última imagen y no quedan título ni mensaje, no
+         * hay nada que mostrar: el modal dibujaba una tarjeta vacía sobre
+         * la pantalla oscurecida y parecía la página colgada (pasó al
+         * borrar una pieza desde Configuraciones).
+         *
+         * La pantalla de administración NO pasa por acá -usa
+         * incluirInactivas-, así que sigue viendo el interruptor en su
+         * estado real y puede avisar "encendido, pero sin piezas".
+         */
+        if ($activo && ! $incluirInactivas && ! $this->bannerTieneContenido()) {
+            $activo = false;
+        }
+
+        if (! $activo && ! $incluirInactivas) {
+            return [
+                'activo' => false,
+                'titulo' => null,
+                'mensaje' => null,
+                'version' => null,
+                'audiencia' => null,
+                'frecuencia' => null,
+                'piezas' => [],
+            ];
+        }
+
+        $piezas = BannerInformativo::query()
+            ->when(! $incluirInactivas, fn ($query) => $query->where('Activo', 1))
+            ->orderBy('Orden')
+            ->get()
+            ->map(fn (BannerInformativo $pieza) => [
+                'id_banner_informativo' => $pieza->Id_Banner_Informativo,
+                'orden' => $pieza->Orden,
+                'titulo' => $pieza->Titulo,
+                'descripcion' => $pieza->Descripcion,
+                'tipo_media' => $pieza->Tipo_Media,
+                'url_media' => $this->urlAbsolutaMedia($pieza->Ruta_Media),
+                'activo' => (bool) $pieza->Activo,
+            ])
+            ->values()
+            ->all();
+
+        return [
+            'activo' => $activo,
+            'titulo' => Configuracion::obtener(self::CLAVE_BANNER_TITULO),
+            'mensaje' => Configuracion::obtener(self::CLAVE_BANNER_MENSAJE),
+            'version' => Configuracion::obtener(self::CLAVE_BANNER_VERSION),
+            'audiencia' => $audiencia,
+            'frecuencia' => Configuracion::obtener(self::CLAVE_BANNER_FRECUENCIA, 'una_vez'),
+            'piezas' => $piezas,
+        ];
+    }
+
+    /** ¿Hay al menos una pieza activa con archivo, o algún texto? */
+    protected function bannerTieneContenido(): bool
+    {
+        $hayPiezas = BannerInformativo::query()
+            ->where('Activo', 1)
+            ->whereNotNull('Ruta_Media')
+            ->exists();
+
+        if ($hayPiezas) {
+            return true;
+        }
+
+        return trim((string) Configuracion::obtener(self::CLAVE_BANNER_TITULO)) !== ''
+            || trim((string) Configuracion::obtener(self::CLAVE_BANNER_MENSAJE)) !== '';
+    }
+
+    /**
+     * "Internos" es el personal de Hanaska; "proveedores", los externos.
+     * La distinción sale de Usuario.Tipo_Usuario, que es el mismo campo
+     * con el que el portal decide todo lo demás.
+     */
+    protected function leCorrespondeElBanner(Usuario $usuario, string $audiencia): bool
+    {
+        return match ($audiencia) {
+            'internos' => $usuario->Tipo_Usuario === 'Interno',
+            'proveedores' => $usuario->Tipo_Usuario === 'Proveedor',
+            default => true,
+        };
+    }
+
+    /** Interruptor y textos generales. */
+    public function guardarBannerInformativo(Usuario $usuario, array $datos): array
+    {
+        $this->verificarSistemas($usuario);
+
+        $validados = validator($datos, [
+            'activo' => ['required', 'boolean'],
+            'titulo' => ['nullable', 'string', 'max:200'],
+            'mensaje' => ['nullable', 'string', 'max:1000'],
+            'audiencia' => ['required', Rule::in(self::AUDIENCIAS_BANNER)],
+            'frecuencia' => ['required', Rule::in(self::FRECUENCIAS_BANNER)],
+        ])->validate();
+
+        Configuracion::establecer(self::CLAVE_BANNER_ACTIVO, $validados['activo'] ? '1' : '0', $usuario->Id_Usuario);
+        Configuracion::establecer(self::CLAVE_BANNER_TITULO, (string) ($validados['titulo'] ?? ''), $usuario->Id_Usuario);
+        Configuracion::establecer(self::CLAVE_BANNER_MENSAJE, (string) ($validados['mensaje'] ?? ''), $usuario->Id_Usuario);
+        Configuracion::establecer(self::CLAVE_BANNER_AUDIENCIA, $validados['audiencia'], $usuario->Id_Usuario);
+        Configuracion::establecer(self::CLAVE_BANNER_FRECUENCIA, $validados['frecuencia'], $usuario->Id_Usuario);
+
+        $this->renovarVersionBanner($usuario);
+
+        return $this->obtenerBannerInformativo(incluirInactivas: true);
+    }
+
+    public function crearPiezaBanner(Usuario $usuario, array $datos, ?UploadedFile $media = null): BannerInformativo
+    {
+        $this->verificarSistemas($usuario);
+
+        if (! $media) {
+            throw ValidationException::withMessages([
+                'media' => ['Sube una imagen o un video para esta pieza del banner.'],
+            ]);
+        }
+
+        [$rutaMedia, $tipoMedia] = $this->guardarMediaPublica($media, 'banner');
+
+        $pieza = BannerInformativo::create([
+            'Orden' => $datos['orden'] ?? ((int) BannerInformativo::max('Orden') + 1),
+            'Titulo' => $datos['titulo'] ?? null,
+            'Descripcion' => $datos['descripcion'] ?? null,
+            'Ruta_Media' => $rutaMedia,
+            'Tipo_Media' => $tipoMedia,
+            'Activo' => true,
+            'Creado_Por' => $usuario->Id_Usuario,
+            'Fecha_Creacion' => $this->ahoraSql(),
+        ]);
+
+        $this->renovarVersionBanner($usuario);
+
+        return $pieza;
+    }
+
+    public function actualizarPiezaBanner(
+        Usuario $usuario,
+        int $idPieza,
+        array $datos,
+        ?UploadedFile $media = null
+    ): BannerInformativo {
+        $this->verificarSistemas($usuario);
+
+        $pieza = BannerInformativo::findOrFail($idPieza);
+
+        $cambios = [
+            'Titulo' => array_key_exists('titulo', $datos) ? $datos['titulo'] : $pieza->Titulo,
+            'Descripcion' => array_key_exists('descripcion', $datos) ? $datos['descripcion'] : $pieza->Descripcion,
+            'Orden' => $datos['orden'] ?? $pieza->Orden,
+            'Activo' => array_key_exists('activo', $datos) ? (bool) $datos['activo'] : $pieza->Activo,
+            'Modificado_Por' => $usuario->Id_Usuario,
+            'Fecha_Modificacion' => $this->ahoraSql(),
+        ];
+
+        if ($media) {
+            // Guardar primero, borrar después: si la escritura del nuevo
+            // falla, la pieza no puede quedarse sin ninguno de los dos
+            // (mismo criterio que actualizarSlide).
+            $anterior = $pieza->Ruta_Media;
+
+            [$cambios['Ruta_Media'], $cambios['Tipo_Media']] = $this->guardarMediaPublica($media, 'banner');
+
+            $this->eliminarMediaFisica($anterior);
+        }
+
+        $pieza->forceFill($cambios)->save();
+
+        $this->renovarVersionBanner($usuario);
+
+        return $pieza;
+    }
+
+    public function eliminarPiezaBanner(Usuario $usuario, int $idPieza): void
+    {
+        $this->verificarSistemas($usuario);
+
+        $pieza = BannerInformativo::findOrFail($idPieza);
+
+        $this->eliminarMediaFisica($pieza->Ruta_Media);
+        $pieza->delete();
+
+        $this->renovarVersionBanner($usuario);
+    }
+
+    /**
+     * Renueva la marca de versión. Se llama ante CUALQUIER cambio -el
+     * interruptor, un texto, una pieza nueva, una borrada- porque desde
+     * el navegador no hay forma de saber qué cambió: solo si la versión
+     * que cerró sigue siendo la vigente.
+     */
+    protected function renovarVersionBanner(Usuario $usuario): void
+    {
+        Configuracion::establecer(self::CLAVE_BANNER_VERSION, (string) now()->getTimestamp(), $usuario->Id_Usuario);
     }
 
     // ---------- Video tutorial para proveedores ----------
