@@ -49,12 +49,18 @@ class UsuarioController extends Controller
     {
         $idEmpresaActiva = (int) $request->attributes->get('id_empresa_activa');
 
-        $usuario = $this->usuarioService->crearUsuarioInterno(
+        $resultado = $this->usuarioService->crearUsuarioInterno(
             data: $request->validated(),
             creador: $request->user(),
         );
 
-        return response()->json(new UsuarioInternoResource($usuario->load('usuarioEmpresas.rol')), 201);
+        // El alta y el envío del código son dos cosas distintas: el usuario
+        // puede quedar creado y el correo no salir. Se devuelven por
+        // separado para que la pantalla pueda decirlo tal cual.
+        return response()->json([
+            'usuario' => new UsuarioInternoResource($resultado['usuario']->load('usuarioEmpresas.rol')),
+            'envio' => $resultado['envio']->toArray(),
+        ], 201);
     }
 
     /**
@@ -89,12 +95,15 @@ class UsuarioController extends Controller
     {
         $idEmpresaActiva = (int) $request->attributes->get('id_empresa_activa');
 
-        $usuario = $this->usuarioService->crearUsuarioProveedor(
+        $resultado = $this->usuarioService->crearUsuarioProveedor(
             data: $request->validated(),
             creador: $request->user(),
         );
 
-        return response()->json(new UsuarioExternoResource($usuario->load('usuarioEmpresas.rol')), 201);
+        return response()->json([
+            'usuario' => new UsuarioExternoResource($resultado['usuario']->load('usuarioEmpresas.rol')),
+            'envio' => $resultado['envio']->toArray(),
+        ], 201);
     }
 
     /**
@@ -137,9 +146,22 @@ class UsuarioController extends Controller
     {
         $idEmpresa = (int) $request->attributes->get('id_empresa_activa');
 
-        $this->usuarioService->reenviarCodigoActivacion($usuario, $request->user(), $idEmpresa);
+        return response()->json(
+            $this->usuarioService->reenviarCodigoActivacion($usuario, $request->user(), $idEmpresa)->toArray()
+        );
+    }
 
-        return response()->json(['message' => 'Código de activación reenviado correctamente.']);
+    /**
+     * Borrado DEFINITIVO de una cuenta que nunca se activó. Las reglas
+     * (solo Sistemas, solo sin activar, sin información asociada) las
+     * valida el Service: acá no se repiten para que no puedan quedar
+     * desalineadas.
+     */
+    public function eliminarDefinitivamente(Request $request, Usuario $usuario): JsonResponse
+    {
+        $this->usuarioService->eliminarDefinitivamente($usuario, $request->user());
+
+        return response()->json(['message' => 'Cuenta eliminada definitivamente.']);
     }
 
     public function inactivar(Request $request, Usuario $usuario): JsonResponse
@@ -154,16 +176,16 @@ class UsuarioController extends Controller
     {
         $idEmpresa = (int) $request->attributes->get('id_empresa_activa');
 
-        $this->usuarioService->reactivar($usuario, $request->user(), $idEmpresa);
-
-        return response()->json(['message' => 'Usuario reactivado correctamente.']);
+        return response()->json(
+            $this->usuarioService->reactivar($usuario, $request->user(), $idEmpresa)->toArray()
+        );
     }
 
     public function reenviarActivacion(Request $request, Usuario $usuario): JsonResponse
     {
-        $this->usuarioService->reenviarActivacion($usuario, $request->user());
-
-        return response()->json(['message' => 'Correo de activación reenviado correctamente.']);
+        return response()->json(
+            $this->usuarioService->reenviarActivacion($usuario, $request->user())->toArray()
+        );
     }
 
     public function agregarEmpresa(Request $request, Usuario $usuario): JsonResponse

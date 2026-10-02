@@ -48,7 +48,31 @@ Schedule::command('queue:work --stop-when-empty --tries=3 --max-time=50')
 */
 Schedule::command('sanctum:prune-expired --hours=24')->daily();
 
-Schedule::command(SincronizarPedidosDiario::class)->dailyAt('08:00');
+/*
+| PEDIDOS: CUATRO CORRIDAS AL DÍA (02-oct-2026), no una.
+|
+| La tabla espejo BC_Cab_Pedido_Compra la refresca un proceso externo cada
+| 2 horas, pero el portal la leía una sola vez, a las 08:00. Medido: un
+| pedido que entraba al espejo a las 10:00 recién se le mostraba al
+| proveedor al día siguiente. Con estos horarios la espera máxima baja de
+| 24 horas a unas 5, y a cero si el proveedor aprieta "Actualizar pedidos".
+|
+| Los horarios los eligió el usuario para cubrir la jornada: temprano,
+| media mañana, después de almuerzo y al cierre.
+|
+| withoutOverlapping: si una corrida se demora, la siguiente no se le monta
+| encima. Importa más ahora que son cuatro y no una.
+|
+| NO SE PONE CADA 2 HORAS a propósito: cada corrida barre la ventana
+| completa de días contra las tablas de BC, y duplicar la frecuencia no
+| traería un pedido antes de que el proceso externo lo deje. Cuatro
+| corridas alcanzan y dejan la base tranquila el resto del día.
+*/
+foreach (['08:00', '11:00', '15:00', '20:00'] as $hora) {
+    Schedule::command(SincronizarPedidosDiario::class)
+        ->dailyAt($hora)
+        ->withoutOverlapping();
+}
 Schedule::command(CerrarPedidosVencidosCommand::class)->daily();
 Schedule::command(ActualizarCantidadesRecibidasCommand::class)->everyThirtyMinutes();
 Schedule::command(ReconciliarEstadosProveedoresCommand::class)->everyThirtyMinutes();

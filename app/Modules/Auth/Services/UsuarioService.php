@@ -9,6 +9,7 @@ use App\Modules\Auth\Models\Usuario;
 use App\Modules\Auth\Models\UsuarioBodega;
 use App\Modules\Auth\Models\UsuarioEmpresa;
 use App\Modules\Auth\Notifications\CodigoActivacionNotification;
+use App\Modules\Pedidos\Services\PedidoInternoService;
 use App\Modules\Proveedores\Models\EstadoProveedor;
 use App\Modules\Proveedores\Models\Proveedor;
 use Illuminate\Database\Eloquent\Collection;
@@ -51,7 +52,8 @@ class UsuarioService
      * lo crea tenga rol "Sistemas". El propio usuario completa
      * Nombre_Completo/Cargo/Telefono al activar su cuenta con el código.
      */
-    public function crearUsuarioInterno(array $data, Usuario $creador): Usuario
+    /** @return array{usuario: Usuario, envio: ResultadoEnvioCodigo} */
+    public function crearUsuarioInterno(array $data, Usuario $creador): array
     {
         if (! $creador->esSistemasGlobal()) {
     throw new AccessDeniedHttpException('Solo usuarios con rol Sistemas pueden crear usuarios internos.');
@@ -64,7 +66,14 @@ if ((int) $data['id_rol'] === (int) $idRolProveedor) {
     ]);
 }
 
-        return DB::transaction(function () use ($data, $creador) {
+        /*
+         * EL CORREO SALE FUERA DE LA TRANSACCIÓN. Adentro se crea el
+         * usuario y su código; el envío espera a que la transacción
+         * cierre, porque ahora se aguarda la respuesta del servidor de
+         * correo (ver enviarCodigo) y eso dejaría la transacción abierta
+         * varios segundos contra un servidor remoto.
+         */
+        [$usuario, $codigo] = DB::transaction(function () use ($data, $creador) {
             $usuario = $this->crearUsuarioBase([
                 'Email' => $data['email'],
                 'Nombre_Completo' => $data['email'],
@@ -82,10 +91,13 @@ if ((int) $data['id_rol'] === (int) $idRolProveedor) {
                 ]);
             }
 
-            $this->generarYEnviarCodigo($usuario, tipo: 'Bienvenida', creadoPor: $creador->Id_Usuario);
-
-            return $usuario;
+            return [$usuario, $this->crearCodigo($usuario, 'Bienvenida', $creador->Id_Usuario)];
         });
+
+        return [
+            'usuario' => $usuario,
+            'envio' => $this->enviarCodigo($usuario, $codigo, 'Bienvenida', esperarRespuesta: true),
+        ];
     }
 
     /**
@@ -118,7 +130,8 @@ if ((int) $data['id_rol'] === (int) $idRolProveedor) {
      * su cuenta por primera vez.
      * Permitido para rol "Sistemas" o "Admin" en cada empresa seleccionada.
      */
-    public function crearUsuarioProveedor(array $data, Usuario $creador): Usuario
+    /** @return array{usuario: Usuario, envio: ResultadoEnvioCodigo} */
+    public function crearUsuarioProveedor(array $data, Usuario $creador): array
     {
         $idRolProveedor = Rol::where('Nombre_Rol', 'Proveedor')->value('Id_Rol');
 
@@ -134,7 +147,9 @@ if ((int) $data['id_rol'] === (int) $idRolProveedor) {
             }
         }
 
-        return DB::transaction(function () use ($data, $creador, $idRolProveedor) {
+        // Mismo criterio que el alta de internos: el correo sale después
+        // de cerrar la transacción.
+        [$usuario, $codigo] = DB::transaction(function () use ($data, $creador, $idRolProveedor) {
             $usuario = $this->crearUsuarioBase([
                 'Email' => $data['email'],
                 'Nombre_Completo' => $data['email'],
@@ -152,10 +167,13 @@ if ((int) $data['id_rol'] === (int) $idRolProveedor) {
                 ]);
             }
 
-            $this->generarYEnviarCodigo($usuario, tipo: 'Bienvenida', creadoPor: $creador->Id_Usuario);
-
-            return $usuario;
+            return [$usuario, $this->crearCodigo($usuario, 'Bienvenida', $creador->Id_Usuario)];
         });
+
+        return [
+            'usuario' => $usuario,
+            'envio' => $this->enviarCodigo($usuario, $codigo, 'Bienvenida', esperarRespuesta: true),
+        ];
     }
     /**
      * CARGA MASIVA de usuarios externos (Proveedores) desde un Excel.
@@ -638,7 +656,7 @@ if ((int) $data['id_rol'] === (int) $idRolProveedor) {
      * activó -> ese caso usa el flujo de "olvidé mi contraseña", no
      * este.
      */
-    public function reenviarActivacion(Usuario $usuario, Usuario $solicitante): void
+    public function reenviarActivacion(Usuario $usuario, Usuario $solicitante): ResultadoEnvioCodigo
     {
         if (! $usuario->Requiere_Cambio_Password) {
             throw ValidationException::withMessages([
@@ -646,7 +664,11 @@ if ((int) $data['id_rol'] === (int) $idRolProveedor) {
             ]);
         }
 
-        $this->generarYEnviarCodigo($usuario, tipo: 'Bienvenida', creadoPor: $solicitante->Id_Usuario);
+        $codigo = $this->crearCodigo($usuario, 'Bienvenida', $solicitante->Id_Usuario);
+
+        // Se espera la respuesta: alguien apretó el botón y está mirando
+        // la pantalla para saber si salió.
+        return $this->enviarCodigo($usuario, $codigo, 'Bienvenida', esperarRespuesta: true);
     }
 
     /**
@@ -663,30 +685,90 @@ if ((int) $data['id_rol'] === (int) $idRolProveedor) {
         string $tipo,
         ?int $creadoPor = null,
     ): CodigoActivacion {
+        $codigoActivacion = $this->crearCodigo($usuario, $tipo, $creadoPor);
+
+        $this->enviarCodigo($usuario, $codigoActivacion, $tipo, esperarRespuesta: false);
+
+        return $codigoActivacion;
+    }
+
+    /**
+     * Crea el código invalidando los anteriores sin usar. NO envía nada.
+     *
+     * ESTÁ SEPARADO DEL ENVÍO a propósito: las altas de usuario ocurren
+     * dentro de una transacción, y esperar ahí adentro la respuesta de un
+     * servidor de correo remoto dejaría la transacción abierta varios
+     * segundos por cada alta. El código se crea dentro; el correo sale
+     * después de que la transacción cerró.
+     */
+    protected function crearCodigo(Usuario $usuario, string $tipo, ?int $creadoPor = null): CodigoActivacion
+    {
         CodigoActivacion::where('Email', $usuario->Email)
             ->where('Usado', false)
             ->update(['Usado' => true, 'Fecha_Uso' => now()->format('Y-m-d\TH:i:s')]);
 
-        $codigo = $this->generarCodigo();
         $minutosVigencia = $this->minutosVigenciaCodigo($tipo);
 
-        $codigoActivacion = CodigoActivacion::create([
+        return CodigoActivacion::create([
             'Email' => $usuario->Email,
             'Tipo' => $tipo,
-            'Codigo' => $codigo,
+            'Codigo' => $this->generarCodigo(),
             'Fecha_Expiracion' => now()->addMinutes($minutosVigencia),
             'Usado' => false,
             'Creado_Por' => $creadoPor,
             'Fecha_Creacion' => now(),
         ]);
+    }
 
-        $usuario->notify(new CodigoActivacionNotification(
-            $codigo,
+    /**
+     * Manda el código por correo.
+     *
+     * $esperarRespuesta decide CÓMO, y la diferencia es de fondo:
+     *
+     *  - false (notify): el correo se encola y la petición termina sin
+     *    esperar al servidor. Es lo correcto cuando nadie está mirando el
+     *    resultado de un envío puntual: la carga masiva de proveedores y
+     *    el "olvidé mi contraseña" público, donde además la demora se
+     *    nota (ese endpoint tardaba 4,36 s cuando enviaba en línea).
+     *
+     *  - true (notifyNow): se espera la respuesta del servidor para poder
+     *    decir si salió o no. Es lo correcto cuando alguien de Sistemas
+     *    acaba de apretar un botón y está esperando una respuesta: ahí,
+     *    dos segundos de espera valen muchísimo más que un "enviado
+     *    correctamente" que no sabe si es verdad.
+     */
+    protected function enviarCodigo(
+        Usuario $usuario,
+        CodigoActivacion $codigoActivacion,
+        string $tipo,
+        bool $esperarRespuesta,
+    ): ResultadoEnvioCodigo {
+        $minutosVigencia = $this->minutosVigenciaCodigo($tipo);
+
+        $notificacion = new CodigoActivacionNotification(
+            $codigoActivacion->Codigo,
             esReset: $tipo === 'Reset',
             minutosVigencia: $minutosVigencia,
-        ));
+        );
 
-        return $codigoActivacion;
+        if (! $esperarRespuesta) {
+            $usuario->notify($notificacion);
+
+            return ResultadoEnvioCodigo::exitoso($usuario->Email, $minutosVigencia);
+        }
+
+        try {
+            // notifyNow saltea la cola aunque la notificación sea
+            // ShouldQueue: es lo que permite enterarse del rechazo.
+            $usuario->notifyNow($notificacion);
+
+            return ResultadoEnvioCodigo::exitoso($usuario->Email, $minutosVigencia);
+        } catch (\Throwable $e) {
+            // NO se relanza: el código ya quedó creado y el usuario sigue
+            // existiendo. Lo que corresponde es contarlo, no deshacer un
+            // alta por un correo que no salió.
+            return ResultadoEnvioCodigo::fallido($usuario->Email, $e);
+        }
     }
 
     /**
@@ -937,7 +1019,7 @@ if ((int) $data['id_rol'] === (int) $idRolProveedor) {
      * Los mismos permisos que crear ese tipo de usuario: internos ->
      * solo Sistemas; externos -> Sistemas o Admin.
      */
-    public function reenviarCodigoActivacion(Usuario $usuario, Usuario $solicitante, int $idEmpresa): void
+    public function reenviarCodigoActivacion(Usuario $usuario, Usuario $solicitante, int $idEmpresa): ResultadoEnvioCodigo
     {
         if (! $usuario->Requiere_Cambio_Password) {
             throw ValidationException::withMessages([
@@ -953,11 +1035,134 @@ if ((int) $data['id_rol'] === (int) $idRolProveedor) {
             throw new AccessDeniedHttpException('No tiene permisos para reenviar el código a este usuario.');
         }
 
-        $this->generarYEnviarCodigo(
-            $usuario,
-            tipo: 'Bienvenida',
-            creadoPor: $solicitante->Id_Usuario,
-        );
+        $codigo = $this->crearCodigo($usuario, 'Bienvenida', $solicitante->Id_Usuario);
+
+        return $this->enviarCodigo($usuario, $codigo, 'Bienvenida', esperarRespuesta: true);
+    }
+
+    /**
+     * Tablas que son PURO ANDAMIAJE de la cuenta: existen solo porque el
+     * usuario fue dado de alta y no representan nada que haya hecho. Se
+     * borran junto con él.
+     *
+     * @var array<string, string>  tabla => columna que apunta a Usuario
+     */
+    protected const DEPENDENCIAS_DE_LA_CUENTA = [
+        'Usuario_Empresa' => 'Id_Usuario',
+        'Usuario_Bodega' => 'Id_Usuario',
+        'Usuario_Proveedor' => 'Id_Usuario',
+        'Sesion' => 'Id_Usuario',
+        'Bitacora_Acceso' => 'Id_Usuario',
+    ];
+
+    /**
+     * BORRA DEFINITIVAMENTE una cuenta que nunca se activó.
+     *
+     * POR QUÉ SOLO LAS NO ACTIVADAS. Un correo mal escrito al dar de alta
+     * deja una cuenta fantasma: nunca va a entrar nadie y ensucia el
+     * listado para siempre. Inactivarla no alcanza, porque el correo sigue
+     * ocupado y no se puede volver a usar el verdadero. Pero en cuanto
+     * alguien entró una sola vez, esa cuenta tiene historia -bitácora,
+     * ficha, documentos- y borrarla deja huecos en registros que otras
+     * áreas sí consultan. Por eso la condición es estricta y se comprueba
+     * en el servidor, no solo escondiendo el botón.
+     *
+     * ES IRREVERSIBLE: no hay baja lógica acá, la fila deja de existir.
+     * Es lo que se pidió explícitamente (02-oct-2026) y la única forma de
+     * liberar el correo.
+     */
+    public function eliminarDefinitivamente(Usuario $usuario, Usuario $ejecutor): void
+    {
+        if (! $ejecutor->esSistemasGlobal()) {
+            throw new AccessDeniedHttpException('Solo usuarios con rol Sistemas pueden eliminar cuentas.');
+        }
+
+        if ($ejecutor->Id_Usuario === $usuario->Id_Usuario) {
+            throw ValidationException::withMessages([
+                'usuario' => ['No puedes eliminar tu propia cuenta.'],
+            ]);
+        }
+
+        if (! $usuario->Requiere_Cambio_Password) {
+            throw ValidationException::withMessages([
+                'usuario' => ['Esta cuenta ya fue activada, así que no se puede eliminar. Si no debe seguir teniendo acceso, inactívala.'],
+            ]);
+        }
+
+        /*
+         * Requiere_Cambio_Password puede quedar en true aunque la persona
+         * SÍ haya entrado (por ejemplo, si se le reinició la contraseña),
+         * así que no alcanza como única prueba. Ultimo_Acceso es el rastro
+         * de que alguien usó la cuenta de verdad.
+         */
+        if ($usuario->Ultimo_Acceso !== null) {
+            throw ValidationException::withMessages([
+                'usuario' => ['Esta cuenta ya se usó para ingresar al portal, así que no se puede eliminar. Inactívala en su lugar.'],
+            ]);
+        }
+
+        $referencias = $this->referenciasQueImpidenBorrar($usuario);
+
+        if ($referencias !== []) {
+            throw ValidationException::withMessages([
+                'usuario' => [
+                    'No se puede eliminar: la cuenta tiene información asociada ('
+                    .implode(', ', $referencias).'). Inactívala en su lugar.',
+                ],
+            ]);
+        }
+
+        DB::transaction(function () use ($usuario) {
+            foreach (self::DEPENDENCIAS_DE_LA_CUENTA as $tabla => $columna) {
+                DB::table($tabla)->where($columna, $usuario->Id_Usuario)->delete();
+            }
+
+            // Los códigos se guardan por correo, no por Id_Usuario: si no
+            // se borran, queda un código vivo apuntando a una dirección
+            // que podría volver a darse de alta.
+            CodigoActivacion::where('Email', $usuario->Email)->delete();
+
+            $usuario->tokens()->delete();
+            $usuario->delete();
+        });
+    }
+
+    /**
+     * Qué tablas siguen apuntando a este usuario además del andamiaje de
+     * la cuenta.
+     *
+     * SE PREGUNTA A LA BASE, NO A UNA LISTA ESCRITA A MANO. Hay 27 claves
+     * foráneas apuntando a Usuario y todas son NO ACTION, así que
+     * cualquiera que quede con filas hace fallar el DELETE con un error de
+     * motor que no le dice nada a nadie. Recorriéndolas de verdad, el día
+     * que alguien agregue una tabla nueva esto la detecta solo y el portal
+     * contesta "tiene información asociada" en vez de reventar.
+     *
+     * @return array<int, string>  nombres de tabla con referencias
+     */
+    protected function referenciasQueImpidenBorrar(Usuario $usuario): array
+    {
+        $clavesForaneas = DB::select("
+            SELECT OBJECT_NAME(fk.parent_object_id) AS tabla,
+                   COL_NAME(fkc.parent_object_id, fkc.parent_column_id) AS columna
+            FROM sys.foreign_keys fk
+            JOIN sys.foreign_key_columns fkc ON fkc.constraint_object_id = fk.object_id
+            WHERE OBJECT_NAME(fk.referenced_object_id) = 'Usuario'
+        ");
+
+        $conflictos = [];
+
+        foreach ($clavesForaneas as $clave) {
+            if (array_key_exists($clave->tabla, self::DEPENDENCIAS_DE_LA_CUENTA)) {
+                continue;
+            }
+
+            if (DB::table($clave->tabla)->where($clave->columna, $usuario->Id_Usuario)->exists()) {
+                $conflictos[$clave->tabla] = true;
+            }
+        }
+
+        return array_keys($conflictos);
     }
 
     /**
@@ -1030,7 +1235,7 @@ if ((int) $data['id_rol'] === (int) $idRolProveedor) {
      * reactivar la cuenta y dejarla igual de expuesta que antes. Decisión
      * del negocio, 28-ago-2026.
      */
-    public function reactivar(Usuario $usuario, Usuario $ejecutor, int $idEmpresa): void
+    public function reactivar(Usuario $usuario, Usuario $ejecutor, int $idEmpresa): ResultadoEnvioCodigo
     {
         if (! $ejecutor->esSistemas($idEmpresa)) {
             throw new AccessDeniedHttpException('Solo usuarios con rol Sistemas pueden reactivar usuarios.');
@@ -1044,12 +1249,18 @@ if ((int) $data['id_rol'] === (int) $idRolProveedor) {
             'Fecha_Modificacion' => now(),
         ])->save();
 
+        // Por si el atacante alcanzó a entrar antes del bloqueo. Va ANTES
+        // del correo: cerrar sesiones es lo urgente y no puede quedar sin
+        // hacerse porque el servidor de correo tarde o falle.
+        $this->cerrarSesionesYTokens($usuario);
+
         // Tipo 'Reset' y no 'Bienvenida': la cuenta ya existe y ya tiene
         // perfil cargado, solo hace falta que fije una contraseña nueva.
-        $this->generarYEnviarCodigo($usuario, tipo: 'Reset', creadoPor: $ejecutor->Id_Usuario);
+        // Se espera la respuesta: desbloquear sin que le llegue el código
+        // deja a la persona igual de afuera que antes.
+        $codigo = $this->crearCodigo($usuario, 'Reset', $ejecutor->Id_Usuario);
 
-        // Por si el atacante alcanzó a entrar antes del bloqueo.
-        $this->cerrarSesionesYTokens($usuario);
+        return $this->enviarCodigo($usuario, $codigo, 'Reset', esperarRespuesta: true);
     }
 
 public function actualizarEmail(Usuario $usuario, string $nuevoEmail, Usuario $ejecutor, int $idEmpresa): void
@@ -1117,8 +1328,11 @@ public function actualizarBodegasAsignadas(Usuario $usuario, int $idEmpresa, arr
         ]);
     }
 
-    $codigosValidos = ['CD-0001', 'CD-0002', 'CD-0003'];
-    $codigosInvalidos = array_diff($codigosBodega, $codigosValidos);
+    // La lista de bodegas vive en PedidoInternoService y no se copia acá:
+    // tener dos listas significa que al habilitar una bodega nueva se
+    // actualiza una y no la otra, y entonces Sistemas no puede asignarla
+    // aunque la pantalla de pedidos ya la muestre (o al revés).
+    $codigosInvalidos = array_diff($codigosBodega, PedidoInternoService::BODEGAS);
 
     if (! empty($codigosInvalidos)) {
         throw ValidationException::withMessages([

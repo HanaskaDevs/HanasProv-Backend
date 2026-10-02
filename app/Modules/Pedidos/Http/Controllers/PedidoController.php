@@ -43,7 +43,7 @@ class PedidoController extends Controller
 
     /**
      * Vista interna (Admin): todos los pedidos agrupados por bodega
-     * (CD-0001 / CD-0002 / CD-0003), leídos directo de BC_*.
+     * (ver PedidoInternoService::BODEGAS), leídos directo de BC_*.
      * Sin distinción Vigentes/Históricos -> eso es exclusivo del proveedor.
      */
     public function internos(Request $request): JsonResponse

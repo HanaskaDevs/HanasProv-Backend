@@ -1,6 +1,7 @@
 <?php
 
 use App\Modules\Auth\Http\Middleware\EmpresaActiva;
+use App\Modules\Configuraciones\Http\Controllers\BannerInformativoController;
 use App\Modules\Configuraciones\Http\Controllers\BotReglaController;
 use App\Modules\Configuraciones\Http\Controllers\GuiaPasoController;
 use App\Modules\Configuraciones\Http\Controllers\HomeSlideController;
@@ -59,6 +60,11 @@ Route::middleware(['auth:sanctum', EmpresaActiva::class])
 Route::middleware(['auth:sanctum', EmpresaActiva::class])
     ->get('/video-tutorial', [VideoTutorialController::class, 'show']);
 
+// El banner informativo lo pide TODO usuario al iniciar sesión. Con el
+// banner apagado la respuesta es mínima y no toca la tabla de piezas.
+Route::middleware(['auth:sanctum', EmpresaActiva::class])
+    ->get('/banner-informativo', [BannerInformativoController::class, 'mostrar']);
+
 // Administración: solo Sistemas (la verificación real ocurre en el service).
 Route::prefix('configuraciones')
     ->middleware(['auth:sanctum', EmpresaActiva::class])
@@ -73,6 +79,12 @@ Route::prefix('configuraciones')
 
         Route::get('/video-tutorial', [VideoTutorialController::class, 'show']);
         Route::post('/video-tutorial', [VideoTutorialController::class, 'update']);
+
+        Route::get('/banner-informativo', [BannerInformativoController::class, 'index']);
+        Route::put('/banner-informativo', [BannerInformativoController::class, 'guardar']);
+        Route::post('/banner-informativo/piezas', [BannerInformativoController::class, 'crearPieza']);
+        Route::post('/banner-informativo/piezas/{pieza}', [BannerInformativoController::class, 'actualizarPieza']);
+        Route::delete('/banner-informativo/piezas/{pieza}', [BannerInformativoController::class, 'eliminarPieza']);
 
         Route::get('/bot-reglas', [BotReglaController::class, 'index']);
         Route::post('/bot-reglas', [BotReglaController::class, 'store']);
