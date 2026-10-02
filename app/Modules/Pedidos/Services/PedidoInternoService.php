@@ -47,8 +47,15 @@ use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
  */
 class PedidoInternoService
 {
-    /** Únicas 3 bodegas válidas para esta vista. */
-    protected const BODEGAS = ['CD-0001', 'CD-0002', 'CD-0003'];
+    /**
+     * Bodegas válidas para esta vista. CD-0006 se sumó el 02-oct-2026.
+     *
+     * UN Cod_Almacen QUE NO ESTÉ ACÁ HACE DESAPARECER EL PEDIDO ENTERO, no
+     * solo esa línea (ver la regla de validez de arriba). Por eso, cuando
+     * BC habilita una bodega nueva, hay que agregarla acá o sus pedidos no
+     * se ven en ningún lado y nadie recibe un aviso.
+     */
+    public const BODEGAS = ['CD-0001', 'CD-0002', 'CD-0003', 'CD-0006'];
 
     public function listarPorBodega(Usuario $usuario, int $idEmpresaActiva, array $filtros): array
     {
@@ -250,7 +257,7 @@ class PedidoInternoService
     }
 
     /**
-     * Admin/Sistemas ven las 3 bodegas siempre. Compras ve solo las que
+     * Admin/Sistemas ven todas las bodegas siempre. Compras ve solo las que
      * tenga asignadas en Usuario_Bodega para esta empresa (puede ser 1, 2,
      * las 3, o ninguna todavía). Cualquier otro rol no tiene acceso.
      */

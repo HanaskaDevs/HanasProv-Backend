@@ -6,6 +6,8 @@ use App\Models\Empresa;
 use App\Modules\Pedidos\Models\DetallePedidoCompra;
 use App\Modules\Pedidos\Models\PedidoCompra;
 use App\Modules\Proveedores\Models\Proveedor;
+use Illuminate\Database\QueryException;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -22,10 +24,36 @@ use Illuminate\Support\Facades\Log;
  *  - BC_Cab_Pedido_Compra.Nro_Proveedor -> BC_Ficha_Proveedor.Nro_Proveedor
  *  - BC_Ficha_Proveedor.Nro_Identificacion -> Proveedor.Ruc (local, misma empresa)
  *
- * Ventana móvil de 3 días sobre Fecha_Registro_BC. Los pedidos que ya
- * existen localmente (Abiertos o Cerrados) se excluyen por completo,
- * nunca se vuelven a tocar. Cada pedido se guarda dentro de una
- * transacción (cabecera + líneas juntas) para que nunca quede a medias.
+ * Ventana móvil configurable sobre Fecha_Registro_BC (PEDIDOS_DIAS_VENTANA,
+ * 7 días por defecto). Los pedidos que ya existen localmente (Abiertos o
+ * Cerrados) se excluyen por completo, nunca se vuelven a tocar. Cada
+ * pedido se guarda dentro de una transacción (cabecera + líneas juntas)
+ * para que nunca quede a medias.
+ *
+ * LA VENTANA ES LA RED DE SEGURIDAD, no una optimización: es lo único que
+ * permite recuperar un pedido si la sincronización no corrió. Con 4
+ * corridas por día y 7 días de ventana, el portal se recupera solo de una
+ * semana entera caída. Un pedido cuyo Fecha_Registro_BC quede fuera de la
+ * ventana NO lo trae nadie, ni el cron ni el botón del proveedor.
+ *
+ * CÓMO SE EVITA QUE ESTO ESCALE MAL. Con la frecuencia alta, una corrida
+ * puede encontrar cientos de pedidos, así que todo lo que antes se hacía
+ * de a uno ahora se hace en bloque:
+ *
+ *  - Los pedidos ya importados se descartan con un NOT EXISTS contra
+ *    Pedido_Compra, no mandando la lista de los que ya hay. Esa lista
+ *    tenía 824 entradas y crecía ~20 por día: al pasar las 2100, SQL
+ *    Server rechaza la consulta entera ("maximum of 2100 parameters") y
+ *    la sincronización se cae en silencio para toda la empresa. Con el
+ *    NOT EXISTS son cero parámetros y resuelve por el índice
+ *    UQ_PedidoCompra_Empresa_Nro, que ya existe.
+ *  - Los proveedores se cargan una vez y se buscan en memoria por RUC,
+ *    en vez de una consulta por pedido.
+ *  - Las líneas de todos los pedidos encontrados se traen en una sola
+ *    consulta, en vez de una por pedido.
+ *
+ * Antes, una corrida de 400 pedidos hacía más de 800 consultas; ahora son
+ * cuatro más las inserciones.
  *
  * IMPORTANTE: sincronizar() SIEMPRE requiere $rucFiltro cuando se llama
  * desde una petición HTTP (el botón "Actualizar pedidos" de un proveedor) —
@@ -44,12 +72,10 @@ class SincronizacionPedidosService
 
         $empresaBc = trim($empresa->Empresa_BC);
 
-        $fechaDesde = now()->subDays(3)->startOfDay()->format('Y-m-d\TH:i:s');
-        $fechaHasta = now()->endOfDay()->format('Y-m-d\TH:i:s');
+        $diasVentana = max(1, (int) config('portal.pedidos.dias_ventana', 7));
 
-        $nroPedidosExistentes = PedidoCompra::where('Id_Empresa', $idEmpresa)
-            ->pluck('Nro_Pedido')
-            ->all();
+        $fechaDesde = now()->subDays($diasVentana)->startOfDay()->format('Y-m-d\TH:i:s');
+        $fechaHasta = now()->endOfDay()->format('Y-m-d\TH:i:s');
 
         $query = DB::table('BC_Cab_Pedido_Compra as c')
             ->join('BC_Ficha_Proveedor as p', 'p.Nro_Proveedor', '=', 'c.Nro_Proveedor')
@@ -64,9 +90,15 @@ class SincronizacionPedidosService
                 'p.Nro_Identificacion'
             );
 
-        if (! empty($nroPedidosExistentes)) {
-            $query->whereNotIn('c.Nro_Pedido', $nroPedidosExistentes);
-        }
+        // Los que ya están importados se descartan en la propia consulta.
+        // Ver el comentario de la clase: mandar la lista como parámetros
+        // revienta al pasar los 2100 pedidos locales.
+        $query->whereNotExists(function ($sub) use ($idEmpresa) {
+            $sub->selectRaw('1')
+                ->from('Pedido_Compra as existente')
+                ->where('existente.Id_Empresa', $idEmpresa)
+                ->whereColumn('existente.Nro_Pedido', 'c.Nro_Pedido');
+        });
 
         if ($rucFiltro) {
             $query->where('p.Nro_Identificacion', $rucFiltro);
@@ -85,50 +117,125 @@ class SincronizacionPedidosService
             'encontrados_en_bc' => $pedidosBC->count(),
         ]);
 
+        if ($pedidosBC->isEmpty()) {
+            return 0;
+        }
+
+        // Una consulta por los proveedores de la empresa, indexados por RUC.
+        // Antes era una consulta por cada pedido encontrado.
+        $proveedoresPorRuc = Proveedor::where('Id_Empresa', $idEmpresa)
+            ->get(['Id_Proveedor', 'Ruc'])
+            ->keyBy(fn (Proveedor $proveedor) => trim((string) $proveedor->Ruc));
+
+        // Solo los pedidos cuyo proveedor existe en el portal. Los demás no
+        // tienen a quién mostrárselos, así que ni se les buscan las líneas.
+        $pedidosBC = $pedidosBC->filter(
+            fn ($pedidoBC) => $proveedoresPorRuc->has(trim((string) $pedidoBC->Nro_Identificacion))
+        )->values();
+
+        if ($pedidosBC->isEmpty()) {
+            return 0;
+        }
+
+        $lineasPorPedido = $this->lineasDe($empresaBc, $pedidosBC->pluck('Nro_Pedido')->all());
+
         $totalSincronizados = 0;
 
         foreach ($pedidosBC as $pedidoBC) {
-            $proveedor = Proveedor::where('Id_Empresa', $idEmpresa)
-                ->where('Ruc', $pedidoBC->Nro_Identificacion)
-                ->first();
+            $proveedor = $proveedoresPorRuc->get(trim((string) $pedidoBC->Nro_Identificacion));
 
-            if (! $proveedor) {
-                continue;
-            }
-
-            DB::transaction(function () use ($pedidoBC, $idEmpresa, $empresaBc, $proveedor) {
-                $pedidoLocal = PedidoCompra::create([
-                    'Id_Empresa' => $idEmpresa,
-                    'Id_Proveedor' => $proveedor->Id_Proveedor,
-                    'Nro_Pedido' => $pedidoBC->Nro_Pedido,
-                    'Fecha_Registro_BC' => $pedidoBC->Fecha_Registro_BC,
-                    'Fecha_Recepcion_Esperada' => $pedidoBC->Fecha_Recepcion_Esperada,
-                    'Estado_Pedido_BC' => $pedidoBC->Estado_Pedido,
-                    'Estado' => 'Abierto',
-                    'Fecha_Sincronizacion' => now(),
-                    'Activo' => 1,
-                ]);
-
-                $lineasBC = DB::table('BC_Det_Pedido_Compra')
-                    ->where('Nro_Pedido', $pedidoBC->Nro_Pedido)
-                    ->where('Empresa', $empresaBc)
-                    ->select('Nro_Linea', 'Nro_Producto', 'Descripcion', 'Cantidad')
-                    ->get();
-
-                foreach ($lineasBC as $linea) {
-                    DetallePedidoCompra::create([
-                        'Id_Pedido_Compra' => $pedidoLocal->Id_Pedido_Compra,
-                        'Nro_Linea' => $linea->Nro_Linea,
-                        'Codigo_Producto' => $linea->Nro_Producto,
-                        'Descripcion' => $linea->Descripcion,
-                        'Cantidad' => $linea->Cantidad,
+            try {
+                DB::transaction(function () use ($pedidoBC, $idEmpresa, $proveedor, $lineasPorPedido) {
+                    $pedidoLocal = PedidoCompra::create([
+                        'Id_Empresa' => $idEmpresa,
+                        'Id_Proveedor' => $proveedor->Id_Proveedor,
+                        'Nro_Pedido' => $pedidoBC->Nro_Pedido,
+                        'Fecha_Registro_BC' => $pedidoBC->Fecha_Registro_BC,
+                        'Fecha_Recepcion_Esperada' => $pedidoBC->Fecha_Recepcion_Esperada,
+                        'Estado_Pedido_BC' => $pedidoBC->Estado_Pedido,
+                        'Estado' => 'Abierto',
+                        'Fecha_Sincronizacion' => now(),
+                        'Activo' => 1,
                     ]);
-                }
-            });
 
-            $totalSincronizados++;
+                    $lineas = $lineasPorPedido->get($pedidoBC->Nro_Pedido, collect());
+
+                    if ($lineas->isEmpty()) {
+                        return;
+                    }
+
+                    /*
+                     * Las líneas entran en bloque, de a 300. Una inserción
+                     * múltiple manda 5 parámetros por fila y SQL Server
+                     * admite 2100 por consulta: el pedido más grande de BC
+                     * hoy tiene 185 líneas (925 parámetros), así que entra
+                     * de una, pero el tope está puesto para que uno más
+                     * grande no rompa la sincronización entera.
+                     */
+                    $lineas
+                        ->map(fn ($linea) => [
+                            'Id_Pedido_Compra' => $pedidoLocal->Id_Pedido_Compra,
+                            'Nro_Linea' => $linea->Nro_Linea,
+                            'Codigo_Producto' => $linea->Nro_Producto,
+                            'Descripcion' => $linea->Descripcion,
+                            'Cantidad' => $linea->Cantidad,
+                        ])
+                        ->chunk(300)
+                        ->each(fn (Collection $tanda) => DetallePedidoCompra::insert($tanda->all()));
+                });
+
+                $totalSincronizados++;
+            } catch (QueryException $e) {
+                /*
+                 * EL PEDIDO YA ESTABA. Pasa cuando el proveedor aprieta
+                 * "Actualizar pedidos" justo mientras corre el cron: los dos
+                 * leyeron la misma foto y los dos intentan insertarlo. El
+                 * índice único UQ_PedidoCompra_Empresa_Nro lo rechaza, que
+                 * es exactamente lo que queremos.
+                 *
+                 * Se saltea en vez de propagar: sin esto, la carrera
+                 * abortaba la corrida entera y los pedidos que venían
+                 * después quedaban sin traer.
+                 */
+                if (! $this->esPedidoDuplicado($e)) {
+                    throw $e;
+                }
+
+                Log::info('Sincronización: el pedido ya había sido importado por otra corrida.', [
+                    'nro_pedido' => $pedidoBC->Nro_Pedido,
+                ]);
+            }
         }
 
         return $totalSincronizados;
+    }
+
+    /**
+     * Las líneas de TODOS los pedidos de la tanda, agrupadas por
+     * Nro_Pedido. Una consulta en vez de una por pedido.
+     *
+     * Se trae de a 1000 números porque un whereIn viaja como parámetros y
+     * SQL Server admite 2100 por consulta: una tanda grande después de
+     * varios días sin sincronizar superaría el tope.
+     *
+     * @param  array<int, string>  $nroPedidos
+     */
+    protected function lineasDe(string $empresaBc, array $nroPedidos): Collection
+    {
+        return collect($nroPedidos)
+            ->chunk(1000)
+            ->flatMap(fn (Collection $tanda) => DB::table('BC_Det_Pedido_Compra')
+                ->where('Empresa', $empresaBc)
+                ->whereIn('Nro_Pedido', $tanda->all())
+                ->select('Nro_Pedido', 'Nro_Linea', 'Nro_Producto', 'Descripcion', 'Cantidad')
+                ->get()
+            )
+            ->groupBy('Nro_Pedido');
+    }
+
+    /** ¿El error es el índice único de Pedido_Compra y no otra cosa? */
+    protected function esPedidoDuplicado(QueryException $e): bool
+    {
+        return str_contains($e->getMessage(), 'UQ_PedidoCompra_Empresa_Nro');
     }
 }

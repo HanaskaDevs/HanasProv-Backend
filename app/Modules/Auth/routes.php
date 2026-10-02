@@ -89,6 +89,10 @@ Route::prefix('usuarios')
 
         // Común a ambos
         Route::patch('/{usuario}/inactivar', [UsuarioController::class, 'inactivar']);
+        // Borrado definitivo: solo Sistemas y solo cuentas sin activar.
+        // La ruta es DELETE sobre el usuario porque eso es exactamente lo
+        // que hace: la fila deja de existir (ver eliminarDefinitivamente).
+        Route::delete('/{usuario}', [UsuarioController::class, 'eliminarDefinitivamente']);
         Route::post('/{usuario}/reenviar-codigo', [UsuarioController::class, 'reenviarCodigo']);
         Route::patch('/{usuario}/reactivar', [UsuarioController::class, 'reactivar']);
         Route::post('/{usuario}/reenviar-activacion', [UsuarioController::class, 'reenviarActivacion']);

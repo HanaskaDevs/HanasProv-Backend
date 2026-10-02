@@ -17,6 +17,24 @@
 return [
 
     /*
+    | PEDIDOS DE COMPRA
+    |
+    | dias_ventana: cuántos días hacia atrás mira la sincronización sobre
+    | Fecha_Registro_BC. Es la RED DE SEGURIDAD del proceso, no un ajuste
+    | de rendimiento: un pedido que queda fuera de esta ventana no lo trae
+    | nadie, ni el cron ni el botón del proveedor. Con 4 corridas diarias y
+    | 7 días, el portal se recupera solo de una semana entera caída.
+    |
+    | Se puede subir sin miedo: los pedidos ya importados se descartan con
+    | un NOT EXISTS contra el índice de Pedido_Compra, así que ampliar la
+    | ventana no multiplica el trabajo, solo el barrido sobre las tablas
+    | de BC.
+    */
+    'pedidos' => [
+        'dias_ventana' => (int) env('PEDIDOS_DIAS_VENTANA', 7),
+    ],
+
+    /*
     | A quién derivar según el tipo de problema. Hana usa esto cuando el
     | usuario pide hablar con alguien; sin esta lista el modelo inventaría
     | una dirección de correo, que es exactamente lo que no queremos.

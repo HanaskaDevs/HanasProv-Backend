@@ -13,6 +13,8 @@ use App\Modules\Pedidos\Models\PedidoCompra;
 use App\Modules\Pedidos\Services\PedidoInternoService;
 use App\Modules\Pedidos\Services\PedidoService;
 use App\Modules\Proveedores\Models\Proveedor;
+use App\Modules\Responsables\Services\ResponsableProveedorService;
+use Illuminate\Support\Facades\Log;
 use App\Modules\Proveedores\Services\CalificacionGlobalService;
 use App\Modules\Reclamos\Models\Reclamo;
 use App\Modules\Reclamos\Services\ReclamoService;
@@ -168,6 +170,7 @@ class AsistenteContextoService
 
         $bloques = [
             $this->proveedorEncabezado($proveedor),
+            $this->proveedorResponsable($proveedor),
             $this->proveedorDocumentos($proveedor),
             $this->proveedorProductos($usuario, $idEmpresaActiva),
             $this->proveedorPedidos($usuario, $idEmpresaActiva),
@@ -199,6 +202,61 @@ class AsistenteContextoService
         }
 
         return implode("\n", $lineas);
+    }
+
+    /**
+     * La persona de Hanaska asignada a este proveedor.
+     *
+     * Es un bloque corto pero de los más usados: "¿con quién hablo?" es de
+     * las primeras preguntas de cualquier proveedor, y hasta ahora Hana no
+     * tenía el dato y contestaba con una generalidad.
+     *
+     * Si no tiene responsable asignado, el bloque NO SE EMITE y además se
+     * le dice explícitamente que no invente un contacto: sin esa
+     * instrucción el modelo tiende a ofrecer un correo verosímil pero
+     * inventado, que es peor que no contestar.
+     */
+    protected function proveedorResponsable(Proveedor $proveedor): string
+    {
+        /*
+         * FALLA EN SILENCIO A PROPÓSITO. Este bloque es un agregado al
+         * contexto, no el corazón de Hana. Si la consulta revienta -el
+         * caso real: un despliegue que sube el código pero todavía no
+         * corrió la migración, así que las tablas no existen- la
+         * excepción subiría hasta el try/catch de AsistenteService y
+         * Hana contestaría el mensaje de respaldo A TODOS los
+         * proveedores. Un dato de contacto que falta no puede dejar
+         * mudo al asistente entero.
+         */
+        try {
+            $responsable = app(ResponsableProveedorService::class)->paraProveedor($proveedor);
+        } catch (\Throwable $e) {
+            Log::error('Asistente: no se pudo resolver el responsable del proveedor.', [
+                'id_proveedor' => $proveedor->Id_Proveedor,
+                'error' => $e->getMessage(),
+            ]);
+
+            return '';
+        }
+
+        if ($responsable === null) {
+            return 'CONTACTO EN HANASKA'."\n"
+                .'Este proveedor NO tiene una persona asignada. Si pregunta con quién contactarse, decile que '
+                .'todavía no tiene un responsable asignado y que lo consulte con el equipo de Compras. '
+                .'NO inventes ningún correo ni teléfono.';
+        }
+
+        $linea = "Nombre: {$responsable['nombre']} — Correo: {$responsable['correo']}";
+
+        if (! empty($responsable['telefono'])) {
+            $linea .= " — Teléfono: {$responsable['telefono']}";
+        }
+
+        return 'CONTACTO EN HANASKA (la persona asignada a ESTE proveedor)'."\n"
+            .$linea."\n"
+            .'Si pregunta con quién contactarse, a quién escribirle, quién lo atiende, o si tiene una duda que no '
+            .'podés resolver, pasale estos datos tal cual: "Para dudas o inquietudes contáctese con ...". '
+            .'Usá SOLO estos datos, no los de ninguna otra persona.';
     }
 
     /**
