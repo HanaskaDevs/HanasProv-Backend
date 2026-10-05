@@ -4,6 +4,7 @@ namespace App\Modules\Auth\Services;
 
 use App\Models\Empresa;
 use App\Models\Rol;
+use App\Modules\Auth\Models\BitacoraAcceso;
 use App\Modules\Auth\Models\CodigoActivacion;
 use App\Modules\Auth\Models\Usuario;
 use App\Modules\Auth\Models\UsuarioBodega;
@@ -230,6 +231,12 @@ if ((int) $data['id_rol'] === (int) $idRolProveedor) {
 
         $resultados = [];
 
+        // Cuántos correos lleva encolados esta carga: el siguiente sale
+        // ese número de veces el espaciado más tarde. Ver
+        // portal.correos.segundos_entre_envios.
+        $enviosEncolados = 0;
+        $segundosEntreEnvios = max(0, (int) config('portal.correos.segundos_entre_envios', 5));
+
         // Correos ya vistos EN ESTE ARCHIVO: email normalizado => nº de fila.
         // Sin esto, un correo repetido dentro del mismo Excel entra dos
         // veces al proceso y la segunda choca contra la fila que acaba de
@@ -304,7 +311,21 @@ if ((int) $data['id_rol'] === (int) $idRolProveedor) {
             }
 
             try {
-                $resultado = $this->procesarFilaProveedor($email, $idEmpresas, $creador, $idRolProveedor, $empresasPermitidas);
+                $resultado = $this->procesarFilaProveedor(
+                    $email,
+                    $idEmpresas,
+                    $creador,
+                    $idRolProveedor,
+                    $empresasPermitidas,
+                    retrasoSegundos: $enviosEncolados * $segundosEntreEnvios,
+                );
+
+                if ($resultado['encolo_correo'] ?? false) {
+                    $enviosEncolados++;
+                }
+
+                unset($resultado['encolo_correo']);
+
                 $resultados[] = [...$base, ...$resultado];
             } catch (ValidationException $e) {
                 // Mensaje de negocio (el correo se tomó entre medio, etc.):
@@ -328,27 +349,43 @@ if ((int) $data['id_rol'] === (int) $idRolProveedor) {
             'resumen' => [
                 'total' => count($resultados),
                 'creados' => $contar('creado'),
+                'reenviados' => $contar('reenviado'),
                 'acceso_agregado' => $contar('acceso_agregado'),
                 'omitidos' => $contar('omitido'),
                 'con_error' => $contar('error'),
             ],
+            // Cuánto tardan en salir TODOS los correos de esta carga, con el
+            // espaciado. Sin este dato, quien cargó 60 proveedores ve "listo"
+            // y le avisa a Compras que ya les llegó, cuando el último sale
+            // recién cinco minutos después.
+            'minutos_estimados_envio' => (int) ceil(($enviosEncolados * $segundosEntreEnvios) / 60),
             'filas' => $resultados,
         ];
     }
 
     /**
-     * Procesa UNA fila: crea el usuario, o le completa los accesos si el
+     * Procesa UNA fila: crea el usuario, o completa lo que le falte si el
      * correo ya estaba registrado.
      *
-     * Qué hace con un correo que ya existe (decisión explícita): le agrega
-     * las empresas del Excel que le falten y NO le reenvía el código de
-     * activación. Reenviarlo le mandaría un correo de activación que no
-     * pidió a alguien que ya usa el portal, y encima invalidaría su código
-     * vigente: generarYEnviarCodigo marca como usados los códigos
-     * anteriores de ese correo.
+     * QUÉ PASA CON UN CORREO QUE YA EXISTE (regla del 05-oct-2026):
+     *
+     *  - Se le agregan las empresas del Excel que le falten, como antes.
+     *  - Si NUNCA ACTIVÓ su cuenta, además se le reenvía el código. Es el
+     *    caso más común en la práctica: se le cargó, el correo no le llegó
+     *    o lo perdió, y Compras vuelve a subir el mismo archivo esperando
+     *    que eso lo destrabe.
+     *  - Si ya la activó, NO se le reenvía nada.
+     *
+     * Antes no se le reenviaba a nadie, y el motivo sigue valiendo para el
+     * tercer caso: mandarle un código a alguien que ya usa el portal le
+     * llega como un correo de activación que no pidió, y además le anula
+     * el código vigente (crearCodigo marca como usados los anteriores).
+     * Ese riesgo no existe con quien nunca entró, que es exactamente el
+     * que necesita el código. Quién cuenta como "nunca entró" lo decide
+     * motivoParaNoReenviar(), la misma regla que usa el reenvío masivo.
      *
      * @param  array<int, \App\Models\Empresa>  $empresasPermitidas
-     * @return array{estado: string, mensaje: string}
+     * @return array{estado: string, mensaje: string, encolo_correo: bool}
      */
     protected function procesarFilaProveedor(
         string $email,
@@ -356,11 +393,12 @@ if ((int) $data['id_rol'] === (int) $idRolProveedor) {
         Usuario $creador,
         int $idRolProveedor,
         array $empresasPermitidas,
+        int $retrasoSegundos = 0,
     ): array {
         $existente = Usuario::where('Email', $email)->first();
 
         if (! $existente) {
-            DB::transaction(function () use ($email, $idEmpresas, $creador, $idRolProveedor) {
+            DB::transaction(function () use ($email, $idEmpresas, $creador, $idRolProveedor, $retrasoSegundos) {
                 $usuario = $this->crearUsuarioBase([
                     'Email' => $email,
                     // Igual que en el alta individual: hasta que la persona
@@ -381,11 +419,16 @@ if ((int) $data['id_rol'] === (int) $idRolProveedor) {
                     ]);
                 }
 
-                // Encolado (CodigoActivacionNotification es ShouldQueue), así
-                // que el SMTP no ocurre dentro de esta petición. Es lo que
-                // hace viable mandar decenas de correos en una sola carga
-                // sin que el portal quede sin atender a nadie.
-                $this->generarYEnviarCodigo($usuario, tipo: 'Bienvenida', creadoPor: $creador->Id_Usuario);
+                // Encolado y ESCALONADO: el SMTP no ocurre dentro de esta
+                // petición, y cada correo sale unos segundos después del
+                // anterior para no disparar el límite de volumen del
+                // servidor (ver portal.correos.segundos_entre_envios).
+                $this->generarYEnviarCodigo(
+                    $usuario,
+                    tipo: 'Bienvenida',
+                    creadoPor: $creador->Id_Usuario,
+                    retrasoSegundos: $retrasoSegundos,
+                );
             });
 
             return [
@@ -393,10 +436,10 @@ if ((int) $data['id_rol'] === (int) $idRolProveedor) {
                 // "Quedó encolado" y no "se envió": lo único que este código
                 // garantiza es que el correo entró en la cola. El envío real
                 // lo hace el worker contra el servidor de correo, que puede
-                // rechazarlo (por ejemplo con "450 too much mail", que ya pasa
-                // en este servidor cuando salen muchos de golpe). Decir
-                // "se envió" hacía creer que el proveedor ya lo tenía.
+                // rechazarlo. Decir "se envió" hacía creer que el proveedor
+                // ya lo tenía.
                 'mensaje' => 'Usuario creado. El correo de activación quedó encolado.',
+                'encolo_correo' => true,
             ];
         }
 
@@ -404,6 +447,7 @@ if ((int) $data['id_rol'] === (int) $idRolProveedor) {
             return [
                 'estado' => 'error',
                 'mensaje' => 'Ese correo ya pertenece a un usuario interno del portal. No se le puede dar acceso como proveedor.',
+                'encolo_correo' => false,
             ];
         }
 
@@ -415,13 +459,6 @@ if ((int) $data['id_rol'] === (int) $idRolProveedor) {
 
         $faltantes = array_values(array_diff($idEmpresas, $yaTiene));
 
-        if ($faltantes === []) {
-            return [
-                'estado' => 'omitido',
-                'mensaje' => 'El correo ya estaba registrado y ya tenía acceso a esas empresas. No se hizo ningún cambio.',
-            ];
-        }
-
         foreach ($faltantes as $idEmpresa) {
             // Se reutiliza el método del alta manual a propósito: ya sabe
             // reactivar un vínculo que quedó inactivo (quitarAccesoEmpresa
@@ -429,14 +466,245 @@ if ((int) $data['id_rol'] === (int) $idRolProveedor) {
             $this->otorgarAccesoEmpresa($existente, $idEmpresa, $creador);
         }
 
-        $nombres = array_map(fn (int $id) => $this->nombreEmpresa($empresasPermitidas[$id]), $faltantes);
+        $accesos = $faltantes === []
+            ? ''
+            : ' Se le agregó acceso a: '.implode(', ', array_map(
+                fn (int $id) => $this->nombreEmpresa($empresasPermitidas[$id]),
+                $faltantes
+            )).'.';
+
+        $motivo = $this->motivoParaNoReenviar($existente);
+
+        if ($motivo === null) {
+            $this->generarYEnviarCodigo(
+                $existente,
+                tipo: 'Bienvenida',
+                creadoPor: $creador->Id_Usuario,
+                retrasoSegundos: $retrasoSegundos,
+            );
+
+            return [
+                'estado' => 'reenviado',
+                'mensaje' => 'Ya estaba registrado pero nunca activó su cuenta: se le reenvió el código de activación (quedó encolado).'.$accesos,
+                'encolo_correo' => true,
+            ];
+        }
+
+        if ($faltantes === []) {
+            return [
+                'estado' => 'omitido',
+                'mensaje' => 'El correo ya estaba registrado y ya tenía acceso a esas empresas. '.$motivo,
+                'encolo_correo' => false,
+            ];
+        }
 
         return [
             'estado' => 'acceso_agregado',
-            'mensaje' => sprintf(
-                'El correo ya estaba registrado. Se le agregó acceso a: %s. No se reenvió el correo de activación.',
-                implode(', ', $nombres)
-            ),
+            'mensaje' => 'El correo ya estaba registrado.'.$accesos.' '.$motivo,
+            'encolo_correo' => false,
+        ];
+    }
+
+    /**
+     * Por qué NO corresponde reenviarle el código de activación a este
+     * usuario, o null si sí corresponde.
+     *
+     * Es LA regla de "pendiente de activación", y vive en un solo lugar a
+     * propósito: la usan la carga por Excel y el reenvío masivo desde
+     * Cuentas de proveedores. Si cada uno tuviera la suya, el día que se
+     * ajuste una el Excel reenviaría a quien la pantalla no deja, o al
+     * revés.
+     *
+     * Devuelve el MOTIVO y no un booleano porque el motivo es lo que va al
+     * reporte: "no se reenvió" sin decir por qué obliga a ir a buscarlo.
+     *
+     * No alcanza con Requiere_Cambio_Password: vuelve a true cuando se le
+     * reinicia la contraseña a alguien que lleva meses usando el portal.
+     * Ultimo_Acceso es el rastro de que la cuenta se usó de verdad.
+     */
+    protected function motivoParaNoReenviar(Usuario $usuario): ?string
+    {
+        if ($usuario->Tipo_Usuario !== 'Proveedor') {
+            return 'No es una cuenta de proveedor.';
+        }
+
+        if (! $usuario->Activo) {
+            return 'La cuenta está inactiva: no se reenvió el código. Reactívala primero.';
+        }
+
+        if ($usuario->Bloqueado_Por_Intentos) {
+            return 'La cuenta está bloqueada por intentos fallidos: desbloquéala, que eso ya le manda un código nuevo.';
+        }
+
+        if (! $usuario->Requiere_Cambio_Password || $usuario->Ultimo_Acceso !== null) {
+            return 'Ya activó su cuenta, así que no se le reenvió el código.';
+        }
+
+        return null;
+    }
+
+    /** Evento de bitácora del enlace copiado. Tipo_Evento es varchar(30). */
+    public const EVENTO_ENLACE_ACTIVACION = 'Enlace_Activacion';
+
+    /**
+     * Genera un enlace de activación para mandárselo al proveedor POR OTRO
+     * CANAL -WhatsApp, o el Outlook propio de quien lo atiende- cuando el
+     * correo automático no le llega (05-oct-2026).
+     *
+     * POR QUÉ ESTO ADEMÁS DEL REENVÍO: reenviar manda el mismo correo por
+     * el mismo camino, y si el servidor del proveedor lo filtra, lo vuelve
+     * a filtrar. Un mensaje de persona a persona, desde un buzón
+     * corporativo o por WhatsApp, pasa por donde el correo masivo no.
+     *
+     * EL ENLACE ES UNA CREDENCIAL: con él se activa la cuenta y se define
+     * la contraseña. Por eso:
+     *  - solo Sistemas o Admin de la empresa activa;
+     *  - solo para proveedores DE ESA empresa;
+     *  - solo para cuentas que nunca se activaron (la misma regla que el
+     *    reenvío, motivoParaNoReenviar);
+     *  - queda en la bitácora QUIÉN lo generó y PARA QUIÉN. Se anota con el
+     *    Id de quien lo generó (no del proveedor) para que el rastro no se
+     *    pierda si después se elimina la cuenta del proveedor.
+     *
+     * Genera un código NUEVO: el que se le había mandado por correo deja de
+     * servir. Es intencional -nunca hay dos credenciales vivas para la
+     * misma cuenta- y la pantalla lo avisa antes de generarlo.
+     *
+     * No manda ningún correo.
+     *
+     * @return array{url: string, correo: string, vence: string, vigencia: string}
+     */
+    public function generarEnlaceActivacion(Usuario $usuario, Usuario $solicitante, int $idEmpresa): array
+    {
+        if (! $solicitante->esSistemas($idEmpresa) && ! $solicitante->esAdmin($idEmpresa)) {
+            throw new AccessDeniedHttpException('Solo usuarios con rol Sistemas o Admin pueden generar enlaces de activación.');
+        }
+
+        $esDeLaEmpresa = $usuario->usuarioEmpresas()->where('Id_Empresa', $idEmpresa)->exists();
+
+        if (! $esDeLaEmpresa) {
+            throw new AccessDeniedHttpException('Ese proveedor no pertenece a la empresa activa.');
+        }
+
+        $motivo = $this->motivoParaNoReenviar($usuario);
+
+        if ($motivo !== null) {
+            throw ValidationException::withMessages(['usuario' => [$motivo]]);
+        }
+
+        $codigo = $this->crearCodigo($usuario, 'Bienvenida', $solicitante->Id_Usuario);
+
+        BitacoraAcceso::create([
+            'Id_Usuario' => $solicitante->Id_Usuario,
+            'Email_Intento' => $usuario->Email,
+            'Tipo_Evento' => self::EVENTO_ENLACE_ACTIVACION,
+            'Ip_Origen' => request()?->ip(),
+            'User_Agent' => mb_substr((string) request()?->userAgent(), 0, 300),
+            'Fecha_Evento' => now(),
+        ]);
+
+        $minutos = $this->minutosVigenciaCodigo('Bienvenida');
+
+        return [
+            'url' => CodigoActivacionNotification::url($usuario->Email, $codigo->Codigo),
+            'correo' => $usuario->Email,
+            'vence' => $codigo->Fecha_Expiracion->toIso8601String(),
+            'vigencia' => $minutos >= 1440
+                ? intdiv($minutos, 1440).' día'.(intdiv($minutos, 1440) === 1 ? '' : 's')
+                : intdiv($minutos, 60).' horas',
+        ];
+    }
+
+    /**
+     * REENVÍO MASIVO del código de activación, desde Cuentas de
+     * proveedores (05-oct-2026).
+     *
+     * SOLO A QUIEN NUNCA ACTIVÓ, con la misma regla que la carga por
+     * Excel (motivoParaNoReenviar). Los que no califican no se procesan y
+     * vuelven en el reporte con el motivo, en vez de hacer fallar todo.
+     *
+     * SOLO SISTEMAS, igual que la carga masiva: una selección equivocada
+     * dispara decenas de correos de una sola vez.
+     *
+     * SOLO PROVEEDORES DE LA EMPRESA ACTIVA. Los ids los elige el
+     * navegador; sin este filtro, alguien podría mandarle códigos a
+     * cuentas de otra empresa poniendo números a mano.
+     *
+     * ENCOLADO Y ESCALONADO, no esperando respuesta como el reenvío
+     * individual. Esperar al servidor por cada uno haría que 50
+     * proveedores tarden más de un minuto en una sola petición, y además
+     * saldrían todos juntos, que es justo lo que dispara "450 too much
+     * mail". Por eso el reporte dice "encolado" y no "enviado": es lo único
+     * que se puede garantizar en este momento.
+     *
+     * @param  array<int, int>  $ids
+     * @return array{resumen: array<string, int>, minutos_estimados_envio: int, filas: array<int, array<string, mixed>>}
+     */
+    public function reenviarActivacionMasivo(array $ids, Usuario $solicitante, int $idEmpresa): array
+    {
+        if (! $solicitante->esSistemas($idEmpresa)) {
+            throw new AccessDeniedHttpException('Solo usuarios con rol Sistemas pueden reenviar códigos de forma masiva.');
+        }
+
+        $ids = array_values(array_unique(array_map('intval', $ids)));
+
+        $usuarios = Usuario::whereIn('Id_Usuario', $ids)
+            ->where('Tipo_Usuario', 'Proveedor')
+            ->whereHas('usuarioEmpresas', fn ($q) => $q->where('Id_Empresa', $idEmpresa))
+            ->get()
+            ->keyBy('Id_Usuario');
+
+        $segundosEntreEnvios = max(0, (int) config('portal.correos.segundos_entre_envios', 5));
+        $enviosEncolados = 0;
+        $filas = [];
+
+        foreach ($ids as $id) {
+            $usuario = $usuarios->get($id);
+
+            if (! $usuario) {
+                $filas[] = [
+                    'id' => $id,
+                    'email' => null,
+                    'estado' => 'omitido',
+                    'mensaje' => 'No es un proveedor de esta empresa.',
+                ];
+
+                continue;
+            }
+
+            $motivo = $this->motivoParaNoReenviar($usuario);
+
+            if ($motivo !== null) {
+                $filas[] = ['id' => $id, 'email' => $usuario->Email, 'estado' => 'omitido', 'mensaje' => $motivo];
+
+                continue;
+            }
+
+            $this->generarYEnviarCodigo(
+                $usuario,
+                tipo: 'Bienvenida',
+                creadoPor: $solicitante->Id_Usuario,
+                retrasoSegundos: $enviosEncolados * $segundosEntreEnvios,
+            );
+
+            $enviosEncolados++;
+
+            $filas[] = [
+                'id' => $id,
+                'email' => $usuario->Email,
+                'estado' => 'encolado',
+                'mensaje' => 'Código reenviado. Quedó encolado para salir.',
+            ];
+        }
+
+        return [
+            'resumen' => [
+                'total' => count($filas),
+                'encolados' => $enviosEncolados,
+                'omitidos' => count($filas) - $enviosEncolados,
+            ],
+            'minutos_estimados_envio' => (int) ceil(($enviosEncolados * $segundosEntreEnvios) / 60),
+            'filas' => $filas,
         ];
     }
 
@@ -684,10 +952,17 @@ if ((int) $data['id_rol'] === (int) $idRolProveedor) {
         Usuario $usuario,
         string $tipo,
         ?int $creadoPor = null,
+        int $retrasoSegundos = 0,
     ): CodigoActivacion {
         $codigoActivacion = $this->crearCodigo($usuario, $tipo, $creadoPor);
 
-        $this->enviarCodigo($usuario, $codigoActivacion, $tipo, esperarRespuesta: false);
+        $this->enviarCodigo(
+            $usuario,
+            $codigoActivacion,
+            $tipo,
+            esperarRespuesta: false,
+            retrasoSegundos: $retrasoSegundos,
+        );
 
         return $codigoActivacion;
     }
@@ -742,6 +1017,7 @@ if ((int) $data['id_rol'] === (int) $idRolProveedor) {
         CodigoActivacion $codigoActivacion,
         string $tipo,
         bool $esperarRespuesta,
+        int $retrasoSegundos = 0,
     ): ResultadoEnvioCodigo {
         $minutosVigencia = $this->minutosVigenciaCodigo($tipo);
 
@@ -752,6 +1028,13 @@ if ((int) $data['id_rol'] === (int) $idRolProveedor) {
         );
 
         if (! $esperarRespuesta) {
+            // Solo en los envíos masivos: escalona los correos para no
+            // disparar el límite de volumen del servidor de correo (ver
+            // portal.correos.segundos_entre_envios).
+            if ($retrasoSegundos > 0) {
+                $notificacion->delay(now()->addSeconds($retrasoSegundos));
+            }
+
             $usuario->notify($notificacion);
 
             return ResultadoEnvioCodigo::exitoso($usuario->Email, $minutosVigencia);

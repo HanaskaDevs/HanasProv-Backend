@@ -50,14 +50,29 @@ class CodigoActivacionNotification extends Notification implements ShouldQueue
 
     public function toMail(object $notifiable): CodigoActivacionMail
     {
-        $ruta = $this->esReset ? '/restablecer-password' : '/activar-cuenta';
-
-        $urlActivacion = rtrim(config('app.frontend_url'), '/') . $ruta . '?' . http_build_query([
-            'email' => $notifiable->Email,
-            'codigo' => $this->codigo,
-        ]);
+        $urlActivacion = self::url($notifiable->Email, $this->codigo, $this->esReset);
 
         return (new CodigoActivacionMail($this->codigo, $urlActivacion, $this->esReset, $this->minutosVigencia))
             ->to($notifiable->Email);
+    }
+
+    /**
+     * El enlace que lleva a la pantalla de activación con el correo y el
+     * código ya cargados.
+     *
+     * Es PÚBLICO Y ESTÁTICO porque lo usan dos caminos: este correo y el
+     * "Copiar enlace de activación" de Cuentas de proveedores (ver
+     * UsuarioService::generarEnlaceActivacion). Con una sola definición, el
+     * enlace que se manda por WhatsApp es exactamente el mismo que el del
+     * correo, y no pueden desalinearse el día que cambie la ruta.
+     */
+    public static function url(string $email, string $codigo, bool $esReset = false): string
+    {
+        $ruta = $esReset ? '/restablecer-password' : '/activar-cuenta';
+
+        return rtrim(config('app.frontend_url'), '/').$ruta.'?'.http_build_query([
+            'email' => $email,
+            'codigo' => $codigo,
+        ]);
     }
 }

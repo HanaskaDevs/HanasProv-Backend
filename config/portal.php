@@ -17,6 +17,28 @@
 return [
 
     /*
+    | CORREOS MASIVOS
+    |
+    | segundos_entre_envios: cuánto se espacia cada correo cuando salen
+    | muchos de una vez (carga masiva por Excel y reenvío masivo de
+    | códigos de activación).
+    |
+    | POR QUÉ: el servidor de correo de Hanaska limita el volumen. Cuando
+    | salen decenas de golpe responde "450 4.7.1 too much mail from ..." y
+    | esos avisos terminan en failed_jobs: el proveedor nunca recibe su
+    | código aunque la pantalla haya dicho que todo salió bien. Ya pasó (14
+    | rechazos registrados en septiembre). Espaciándolos, el servidor los
+    | acepta.
+    |
+    | Con 5 segundos, 60 proveedores tardan 5 minutos en salir. Si el
+    | servidor sigue rechazando, se sube; si un día se cambia de servidor
+    | de correo y deja de frenar, se baja a 0.
+    */
+    'correos' => [
+        'segundos_entre_envios' => (int) env('CORREO_SEGUNDOS_ENTRE_ENVIOS', 5),
+    ],
+
+    /*
     | PEDIDOS DE COMPRA
     |
     | dias_ventana: cuántos días hacia atrás mira la sincronización sobre
