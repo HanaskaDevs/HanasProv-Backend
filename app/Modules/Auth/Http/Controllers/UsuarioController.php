@@ -130,6 +130,41 @@ class UsuarioController extends Controller
     }
 
     /**
+     * Enlace de activación para mandarle al proveedor por otro canal. Las
+     * reglas (quién puede, a quién) las valida el Service.
+     */
+    public function enlaceActivacion(Request $request, Usuario $usuario): JsonResponse
+    {
+        $idEmpresaActiva = (int) $request->attributes->get('id_empresa_activa');
+
+        return response()->json(
+            $this->usuarioService->generarEnlaceActivacion($usuario, $request->user(), $idEmpresaActiva)
+        );
+    }
+
+    /**
+     * Reenvío masivo del código de activación a los proveedores
+     * seleccionados. Quién califica y quién puede hacerlo lo decide el
+     * Service (ver UsuarioService::reenviarActivacionMasivo).
+     *
+     * El tope de 200 ids no es de negocio: los ids viajan como parámetros
+     * de un whereIn, y SQL Server admite 2100 por consulta.
+     */
+    public function reenviarActivacionMasivo(Request $request): JsonResponse
+    {
+        $ids = $request->validate([
+            'ids' => ['required', 'array', 'min:1', 'max:200'],
+            'ids.*' => ['integer'],
+        ])['ids'];
+
+        $idEmpresaActiva = (int) $request->attributes->get('id_empresa_activa');
+
+        return response()->json(
+            $this->usuarioService->reenviarActivacionMasivo($ids, $request->user(), $idEmpresaActiva)
+        );
+    }
+
+    /**
      * Estado de la cola de correo, para avisar antes de una carga masiva.
      * Solo Sistemas (lo valida el Service).
      */

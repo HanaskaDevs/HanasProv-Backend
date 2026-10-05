@@ -80,6 +80,13 @@ Route::prefix('usuarios')
         Route::post('/externos/lote', [UsuarioController::class, 'storeProveedoresLote'])
             ->middleware('throttle:6,1');
 
+        // Reenvío masivo del código de activación: SOLO Sistemas y solo a
+        // quien nunca activó (lo valida el Service). Mismo techo que la
+        // carga masiva, por el mismo motivo: un doble clic no puede
+        // duplicar decenas de correos.
+        Route::post('/externos/reenviar-activacion-masivo', [UsuarioController::class, 'reenviarActivacionMasivo'])
+            ->middleware('throttle:6,1');
+
         // Estado de la cola de correo. Lo consulta el modal de carga masiva
         // al abrirse, para avisar si el servidor de correo viene rechazando
         // envíos antes de que alguien suba un archivo de 80 filas.
@@ -96,6 +103,12 @@ Route::prefix('usuarios')
         Route::post('/{usuario}/reenviar-codigo', [UsuarioController::class, 'reenviarCodigo']);
         Route::patch('/{usuario}/reactivar', [UsuarioController::class, 'reactivar']);
         Route::post('/{usuario}/reenviar-activacion', [UsuarioController::class, 'reenviarActivacion']);
+        // Enlace para mandar por WhatsApp u Outlook propio. Es POST y no
+        // GET porque no consulta: genera un código nuevo y deja rastro en
+        // la bitácora. Con techo, porque cada llamada anula el código
+        // anterior del proveedor.
+        Route::post('/{usuario}/enlace-activacion', [UsuarioController::class, 'enlaceActivacion'])
+            ->middleware('throttle:30,1');
         Route::post('/{usuario}/empresas', [UsuarioController::class, 'agregarEmpresa']);
         Route::put('/{usuario}/email', [UsuarioController::class, 'actualizarEmail']);
         Route::put('/{usuario}/empresas/{empresa}', [UsuarioController::class, 'actualizarRolEnEmpresa']);
