@@ -145,6 +145,29 @@ return [
     'limite_peticiones_anonimo' => (int) env('LIMITE_PETICIONES_ANONIMO', 300),
 
     /*
+    | Bloqueo de IP por barrido de correos inexistentes (ver
+    | AuthService::evaluarBloqueoDeIp).
+    |
+    | 'excluidas': IPs que NUNCA se bloquean. Por defecto el proxy TLS de
+    | redes (10.100.60.6): hoy TODO el tráfico del portal llega con esa IP,
+    | porque el proxy no le pasa a Laravel la IP real del cliente. Bloquearla
+    | dejaba afuera a todos los usuarios de todas las redes (pasó el
+    | 10-oct-2026: un proveedor escribió mal su correo 5 veces y el portal
+    | quedó cerrado dos días). Mientras el proxy no mande X-Forwarded-For,
+    | contra el barrido protegen el captcha, el límite de peticiones y el
+    | bloqueo por cuenta.
+    |
+    | 'minutos': el bloqueo caduca solo. Antes era permanente y solo
+    | Sistemas podía levantarlo, pero si la IP bloqueada es la de Sistemas
+    | nadie puede entrar a levantarlo.
+    */
+    'bloqueo_ip' => [
+        'intentos' => (int) env('BLOQUEO_IP_INTENTOS', 10),
+        'minutos' => (int) env('BLOQUEO_IP_MINUTOS', 30),
+        'excluidas' => array_values(array_filter(array_map('trim', explode(',', (string) env('BLOQUEO_IP_EXCLUIDAS', '10.100.60.6'))))),
+    ],
+
+    /*
     | Cuánto vale un código de un solo uso, en minutos.
     |
     | SON DOS PLAZOS DISTINTOS A PROPÓSITO, aunque el correo y la pantalla

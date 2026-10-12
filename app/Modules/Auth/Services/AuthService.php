@@ -32,10 +32,15 @@ class AuthService
     /**
      * Intentos seguidos con correos que NO existen, desde una misma IP,
      * antes de bloquear esa IP. Es el patrón de quien está probando
-     * usuarios al azar: un humano que se equivoca de correo no encadena
-     * cinco correos inexistentes distintos sin acertar nunca.
+     * usuarios al azar. Vive en config (portal.bloqueo_ip.intentos, 10 por
+     * defecto) y ya no es 5 fijo: con 5 bastó que UN proveedor escribiera
+     * mal su correo (yaoo.com) cinco veces para bloquear la IP del proxy, y
+     * con ella al portal entero (10-oct-2026).
      */
-    public const MAX_INTENTOS_IP_INEXISTENTES = 5;
+    public static function maxIntentosIpInexistentes(): int
+    {
+        return max(1, (int) config('portal.bloqueo_ip.intentos'));
+    }
 
     /** Eventos de la bitácora. Ojo: Tipo_Evento es varchar(30). */
     public const EVENTO_EXITOSO = 'Login_Exitoso';
@@ -341,36 +346,44 @@ class AuthService
      */
     protected function evaluarBloqueoDeIp(?string $ip): void
     {
-        if (! $ip) {
+        // La IP del proxy de redes nunca se bloquea: detrás de ella están
+        // todos los usuarios (ver config/portal.php, bloqueo_ip.excluidas).
+        if (! $ip || IpBloqueada::esExcluida($ip)) {
             return;
         }
+
+        $maximo = self::maxIntentosIpInexistentes();
 
         $ultimos = BitacoraAcceso::where('Ip_Origen', $ip)
             ->orderByDesc('Fecha_Evento')
             ->orderByDesc('Id_Bitacora')
-            ->limit(self::MAX_INTENTOS_IP_INEXISTENTES)
+            ->limit($maximo)
             ->pluck('Tipo_Evento');
 
-        if ($ultimos->count() < self::MAX_INTENTOS_IP_INEXISTENTES) {
+        if ($ultimos->count() < $maximo) {
             return;
         }
 
         $todosInexistentes = $ultimos->every(fn ($evento) => $evento === self::EVENTO_USUARIO_INEXISTENTE);
 
-        if (! $todosInexistentes) {
+        if (! $todosInexistentes || IpBloqueada::estaBloqueada($ip)) {
             return;
         }
 
-        // firstOrCreate y no create: si la IP ya tiene un bloqueo vigente no
-        // se duplica la fila (pasaría si dos peticiones entran a la vez).
-        IpBloqueada::firstOrCreate(
-            ['Ip' => $ip, 'Activa' => true],
-            [
-                'Motivo' => self::MAX_INTENTOS_IP_INEXISTENTES.' intentos seguidos con usuarios inexistentes',
-                'Intentos' => self::MAX_INTENTOS_IP_INEXISTENTES,
-                'Fecha_Bloqueo' => now(),
-            ]
-        );
+        // Los bloqueos ya vencidos de esta IP se cierran antes de abrir uno
+        // nuevo, para que la bandeja de Sistemas no los muestre como vigentes.
+        IpBloqueada::where('Ip', $ip)->where('Activa', true)->update([
+            'Activa' => false,
+            'Fecha_Desbloqueo' => now(),
+        ]);
+
+        IpBloqueada::create([
+            'Ip' => $ip,
+            'Motivo' => $maximo.' intentos seguidos con usuarios inexistentes',
+            'Intentos' => $maximo,
+            'Fecha_Bloqueo' => now(),
+            'Activa' => true,
+        ]);
 
         BitacoraAcceso::create([
             'Email_Intento' => 'ip:'.$ip,

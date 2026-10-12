@@ -121,9 +121,9 @@ class FuerzaBrutaLoginTest extends TestCase
     // Bloqueo de la IP
     // ---------------------------------------------------------------
 
-    public function test_cinco_correos_inexistentes_seguidos_bloquean_la_ip(): void
+    public function test_n_correos_inexistentes_seguidos_bloquean_la_ip(): void
     {
-        for ($i = 1; $i <= AuthService::MAX_INTENTOS_IP_INEXISTENTES; $i++) {
+        for ($i = 1; $i <= AuthService::maxIntentosIpInexistentes(); $i++) {
             $this->intentarLogin("fantasma_{$i}@nadie.local")->assertStatus(422);
         }
 
@@ -135,13 +135,14 @@ class FuerzaBrutaLoginTest extends TestCase
         $empresa = $this->crearEmpresa();
         $usuario = $this->crearUsuarioInterno($empresa);
 
-        // 4 inexistentes, uno real en el medio, y otro inexistente: nunca
-        // hay 5 seguidos, así que la IP no se bloquea.
-        for ($i = 1; $i <= 4; $i++) {
+        // N-1 inexistentes, uno real en el medio, y otro inexistente: nunca
+        // hay N seguidos, así que la IP no se bloquea.
+        $maximo = AuthService::maxIntentosIpInexistentes();
+        for ($i = 1; $i < $maximo; $i++) {
             $this->intentarLogin("fantasma_{$i}@nadie.local");
         }
         $this->intentarLogin($usuario->Email);
-        $this->intentarLogin('fantasma_5@nadie.local');
+        $this->intentarLogin("fantasma_{$maximo}@nadie.local");
 
         $this->assertFalse(IpBloqueada::estaBloqueada('127.0.0.1'));
     }
@@ -151,7 +152,7 @@ class FuerzaBrutaLoginTest extends TestCase
         $empresa = $this->crearEmpresa();
         $usuario = $this->crearUsuarioInterno($empresa);
 
-        for ($i = 1; $i <= AuthService::MAX_INTENTOS_IP_INEXISTENTES; $i++) {
+        for ($i = 1; $i <= AuthService::maxIntentosIpInexistentes(); $i++) {
             $this->intentarLogin("fantasma_{$i}@nadie.local");
         }
 
@@ -163,7 +164,7 @@ class FuerzaBrutaLoginTest extends TestCase
 
     public function test_el_bloqueo_de_ip_queda_registrado_en_la_bitacora(): void
     {
-        for ($i = 1; $i <= AuthService::MAX_INTENTOS_IP_INEXISTENTES; $i++) {
+        for ($i = 1; $i <= AuthService::maxIntentosIpInexistentes(); $i++) {
             $this->intentarLogin("fantasma_{$i}@nadie.local");
         }
 
@@ -172,6 +173,46 @@ class FuerzaBrutaLoginTest extends TestCase
                 ->where('Ip_Origen', '127.0.0.1')
                 ->exists()
         );
+    }
+
+    /**
+     * El caso real del 10-oct-2026: todo el tráfico llega con la IP del
+     * proxy de redes, así que bloquearla cerraba el portal para todos.
+     */
+    public function test_la_ip_excluida_nunca_se_bloquea(): void
+    {
+        config(['portal.bloqueo_ip.excluidas' => ['127.0.0.1']]);
+        $empresa = $this->crearEmpresa();
+        $usuario = $this->crearUsuarioInterno($empresa);
+
+        for ($i = 1; $i <= AuthService::maxIntentosIpInexistentes() + 2; $i++) {
+            $this->intentarLogin("fantasma_{$i}@nadie.local");
+        }
+
+        $this->assertFalse(IpBloqueada::estaBloqueada('127.0.0.1'));
+        $this->intentarLogin($usuario->Email, 'secreto123')->assertOk();
+    }
+
+    public function test_el_bloqueo_de_ip_vence_solo(): void
+    {
+        IpBloqueada::create([
+            'Ip' => '203.0.113.10',
+            'Motivo' => 'prueba',
+            'Intentos' => 10,
+            'Fecha_Bloqueo' => now()->subMinutes((int) config('portal.bloqueo_ip.minutos') + 1),
+            'Activa' => true,
+        ]);
+
+        $this->assertFalse(IpBloqueada::estaBloqueada('203.0.113.10'));
+    }
+
+    public function test_un_proveedor_que_se_equivoca_de_correo_cinco_veces_no_bloquea_la_ip(): void
+    {
+        for ($i = 1; $i <= 5; $i++) {
+            $this->intentarLogin('manuel@yaoo.com')->assertStatus(422);
+        }
+
+        $this->assertFalse(IpBloqueada::estaBloqueada('127.0.0.1'));
     }
 
     // ---------------------------------------------------------------

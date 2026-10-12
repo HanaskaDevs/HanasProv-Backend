@@ -11,9 +11,9 @@ use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 /**
  * Bandeja de IPs bloqueadas por fuerza bruta. Solo Sistemas.
  *
- * Existe porque el bloqueo de IP NO caduca solo (decisión del negocio):
- * sin una pantalla para verlas y liberarlas, una IP mal bloqueada dejaría
- * afuera a quien la use hasta que alguien entre a la base de datos a mano.
+ * El bloqueo de IP caduca solo (portal.bloqueo_ip.minutos, desde el
+ * 12-oct-2026; antes era permanente). Esta pantalla sirve para liberarla
+ * antes de que venza, sin entrar a la base de datos a mano.
  */
 class IpBloqueadaController extends Controller
 {
