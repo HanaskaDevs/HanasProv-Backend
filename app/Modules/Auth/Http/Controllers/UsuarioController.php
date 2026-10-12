@@ -130,6 +130,19 @@ class UsuarioController extends Controller
     }
 
     /**
+     * Cómo va el envío de un código. La pantalla lo consulta mientras
+     * muestra "enviando", hasta que llega a 'enviado' o 'fallido'.
+     */
+    public function estadoEnvioCodigo(Request $request, int $codigo): JsonResponse
+    {
+        $idEmpresaActiva = (int) $request->attributes->get('id_empresa_activa');
+
+        return response()->json(
+            $this->usuarioService->estadoEnvioCodigo($codigo, $request->user(), $idEmpresaActiva)->toArray()
+        );
+    }
+
+    /**
      * Enlace de activación para mandarle al proveedor por otro canal. Las
      * reglas (quién puede, a quién) las valida el Service.
      */

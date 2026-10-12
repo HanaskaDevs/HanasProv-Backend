@@ -45,7 +45,14 @@ return [
             'port' => env('MAIL_PORT', 2525),
             'username' => env('MAIL_USERNAME'),
             'password' => env('MAIL_PASSWORD'),
-            'timeout' => null,
+            /*
+             * SIN TOPE, PHP esperaba hasta default_socket_timeout (60 s) a
+             * que el servidor de correo contestara cada paso. Un servidor
+             * lento o colgado dejaba a quien apretó "Desbloquear" mirando la
+             * pantalla un minuto. 15 s alcanzan de sobra para un servidor
+             * sano y cortan el caso malo con un error claro.
+             */
+            'timeout' => (int) env('MAIL_TIMEOUT', 15),
             'local_domain' => env('MAIL_EHLO_DOMAIN', parse_url((string) env('APP_URL', 'http://localhost'), PHP_URL_HOST)),
         ],
 

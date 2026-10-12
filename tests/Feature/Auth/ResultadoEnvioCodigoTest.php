@@ -30,6 +30,22 @@ class ResultadoEnvioCodigoTest extends TestCase
         ]);
     }
 
+    /**
+     * Desde el 12-oct-2026 la petición contesta 'enviando' al instante y el
+     * correo sale justo después de responder. El resultado real se lee
+     * con esta consulta, que es lo mismo que hace la pantalla.
+     */
+    private function estadoDelEnvio(array $respuesta, $usuario, $empresa)
+    {
+        $this->assertSame('enviando', $respuesta['estado'], 'La petición tiene que contestar sin esperar al correo.');
+        $this->assertNotNull($respuesta['id_codigo']);
+
+        return $this->getJson(
+            "/api/usuarios/codigos-activacion/{$respuesta['id_codigo']}/envio",
+            $this->cabecerasComo($usuario, $empresa)
+        )->assertOk();
+    }
+
     public function test_el_reenvio_responde_con_el_correo_al_que_fue(): void
     {
         Notification::fake();
@@ -45,11 +61,14 @@ class ResultadoEnvioCodigoTest extends TestCase
         );
 
         $respuesta->assertOk();
-        $this->assertTrue($respuesta->json('enviado'));
-        $this->assertSame($destinatario->Email, $respuesta->json('correo'));
+        $estado = $this->estadoDelEnvio($respuesta->json(), $sistemas, $empresa);
+
+        $this->assertSame('enviado', $estado->json('estado'));
+        $this->assertTrue($estado->json('enviado'));
+        $this->assertSame($destinatario->Email, $estado->json('correo'));
         // El mensaje nombra la casilla: es lo que la persona necesita leer
         // para saber a dónde fue.
-        $this->assertStringContainsString($destinatario->Email, (string) $respuesta->json('mensaje'));
+        $this->assertStringContainsString($destinatario->Email, (string) $estado->json('mensaje'));
 
         Notification::assertSentTo($destinatario, CodigoActivacionNotification::class);
     }
@@ -78,9 +97,12 @@ class ResultadoEnvioCodigoTest extends TestCase
         // 200 y no 500: no es un error del portal, es información para el
         // usuario. La pantalla la muestra en el modal.
         $respuesta->assertOk();
-        $this->assertFalse($respuesta->json('enviado'));
-        $this->assertStringContainsString('no existe', (string) $respuesta->json('mensaje'));
-        $this->assertNotNull($respuesta->json('sugerencia'));
+        $estado = $this->estadoDelEnvio($respuesta->json(), $sistemas, $empresa);
+
+        $this->assertSame('fallido', $estado->json('estado'));
+        $this->assertFalse($estado->json('enviado'));
+        $this->assertStringContainsString('no existe', (string) $estado->json('mensaje'));
+        $this->assertNotNull($estado->json('sugerencia'));
     }
 
     /**
@@ -122,8 +144,9 @@ class ResultadoEnvioCodigoTest extends TestCase
         ], $this->cabecerasComo($sistemas, $empresa));
 
         $respuesta->assertCreated();
-        $respuesta->assertJsonPath('envio.enviado', true);
         $respuesta->assertJsonPath('envio.correo', $correo);
+        $estado = $this->estadoDelEnvio($respuesta->json('envio'), $sistemas, $empresa);
+        $this->assertSame('enviado', $estado->json('estado'));
         // El usuario sigue viniendo, ahora anidado.
         $this->assertSame($correo, $respuesta->json('usuario.email'));
     }
@@ -135,7 +158,7 @@ class ResultadoEnvioCodigoTest extends TestCase
     {
         $resultado = ResultadoEnvioCodigo::fallido('alguien@ejemplo.com', new TransportException($respuestaSmtp));
 
-        $this->assertFalse($resultado->enviado);
+        $this->assertFalse($resultado->enviado());
         $this->assertStringContainsString($esperado, $resultado->mensaje);
 
         // Nunca se le muestra jerga al usuario en el mensaje principal: el
@@ -188,8 +211,51 @@ class ResultadoEnvioCodigoTest extends TestCase
     {
         $resultado = ResultadoEnvioCodigo::exitoso('alguien@ejemplo.com', 4320);
 
-        $this->assertTrue($resultado->enviado);
+        $this->assertTrue($resultado->enviado());
         $this->assertStringContainsString('alguien@ejemplo.com', $resultado->mensaje);
         $this->assertStringContainsString('3 días', (string) $resultado->sugerencia);
+    }
+
+    /**
+     * UN CÓDIGO SE ENVÍA UNA SOLA VEZ. Las tareas "después de responder" no
+     * se borran al ejecutarse: si hay otra petición en el mismo proceso
+     * (pasa en los tests, y pasaría con Octane), la tarea vuelve a correr.
+     * El proveedor no puede recibir el mismo correo dos veces.
+     */
+    public function test_el_mismo_codigo_no_se_envia_dos_veces(): void
+    {
+        Notification::fake();
+
+        $empresa = $this->crearEmpresa();
+        $sistemas = $this->crearUsuarioInterno($empresa, 'Sistemas');
+        $destinatario = $this->usuarioSinActivar($empresa);
+        $cabeceras = $this->cabecerasComo($sistemas, $empresa);
+
+        $this->postJson("/api/usuarios/{$destinatario->Id_Usuario}/reenviar-activacion", [], $cabeceras)->assertOk();
+
+        // Otra petición cualquiera en el mismo proceso.
+        $this->getJson('/api/usuarios/externos', $cabeceras)->assertOk();
+
+        Notification::assertSentToTimes($destinatario, CodigoActivacionNotification::class, 1);
+    }
+
+    /** El estado de un envío no se le muestra a cualquiera. */
+    public function test_el_estado_del_envio_no_lo_ve_compras(): void
+    {
+        Notification::fake();
+
+        $empresa = $this->crearEmpresa();
+        $sistemas = $this->crearUsuarioInterno($empresa, 'Sistemas');
+        $compras = $this->crearUsuarioInterno($empresa, 'Compras');
+        $destinatario = $this->usuarioSinActivar($empresa);
+
+        $idCodigo = $this->postJson(
+            "/api/usuarios/{$destinatario->Id_Usuario}/reenviar-activacion",
+            [],
+            $this->cabecerasComo($sistemas, $empresa)
+        )->json('id_codigo');
+
+        $this->getJson("/api/usuarios/codigos-activacion/{$idCodigo}/envio", $this->cabecerasComo($compras, $empresa))
+            ->assertForbidden();
     }
 }

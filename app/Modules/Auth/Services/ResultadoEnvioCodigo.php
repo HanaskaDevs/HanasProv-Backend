@@ -2,6 +2,7 @@
 
 namespace App\Modules\Auth\Services;
 
+use App\Modules\Auth\Models\CodigoActivacion;
 use Illuminate\Support\Facades\Log;
 use Symfony\Component\Mailer\Exception\TransportExceptionInterface;
 use Throwable;
@@ -17,26 +18,79 @@ use Throwable;
  * enteraba: el aviso quedaba en failed_jobs y el usuario seguía sin su
  * código, convencido de que se lo habían mandado.
  *
- * Acá el envío se hace esperando la respuesta y el error se traduce a algo
- * que una persona de Compras pueda leer y, sobre todo, ACCIONAR: cuál es
- * el problema y qué hacer al respecto. El texto técnico se conserva
- * aparte, para el log y para que Sistemas lo pida si hace falta.
+ * Acá el error se traduce a algo que una persona de Compras pueda leer y,
+ * sobre todo, ACCIONAR: cuál es el problema y qué hacer al respecto. El
+ * texto técnico se conserva aparte, para el log y para Sistemas.
+ *
+ * TRES ESTADOS desde el 12-oct-2026: 'enviando' existe porque la petición
+ * ya no espera al servidor de correo (ver UsuarioService::enviarCodigo).
+ * La pantalla recibe 'enviando' al instante y consulta hasta que el envío
+ * termina en 'enviado' o 'fallido'.
  */
 class ResultadoEnvioCodigo
 {
+    public const ENVIANDO = 'enviando';
+
+    public const ENVIADO = 'enviado';
+
+    public const FALLIDO = 'fallido';
+
     private function __construct(
-        public readonly bool $enviado,
+        public readonly string $estado,
         public readonly string $correo,
         public readonly string $titulo,
         public readonly string $mensaje,
         public readonly ?string $sugerencia,
         public readonly ?string $detalleTecnico,
+        public readonly ?int $idCodigo = null,
     ) {}
 
-    public static function exitoso(string $correo, int $minutosVigencia): self
+    /** Compatibilidad: "se envió" es exactamente el estado 'enviado'. */
+    public function enviado(): bool
+    {
+        return $this->estado === self::ENVIADO;
+    }
+
+    /**
+     * El correo salió de la petición pero el servidor todavía no contestó.
+     * La pantalla lo muestra como "enviando" y consulta el resultado con
+     * el id del código.
+     */
+    public static function enviando(string $correo, int $idCodigo): self
     {
         return new self(
-            enviado: true,
+            estado: self::ENVIANDO,
+            correo: $correo,
+            titulo: 'Enviando el código de activación',
+            mensaje: "Se está enviando el código a {$correo}.",
+            sugerencia: null,
+            detalleTecnico: null,
+            idCodigo: $idCodigo,
+        );
+    }
+
+    /**
+     * Reconstruye el resultado desde lo que el envío dejó guardado en la
+     * fila del código. Es lo que contesta la consulta de la pantalla.
+     */
+    public static function desdeCodigo(CodigoActivacion $codigo, int $minutosVigencia): self
+    {
+        return match ($codigo->Estado_Envio) {
+            CodigoActivacion::ENVIO_ENVIADO => self::exitoso($codigo->Email, $minutosVigencia, $codigo->Id_Codigo_Activacion),
+            CodigoActivacion::ENVIO_FALLIDO => self::armarFallido(
+                $codigo->Email,
+                (string) $codigo->Detalle_Envio,
+                $codigo->Id_Codigo_Activacion
+            ),
+            default => self::enviando($codigo->Email, (int) $codigo->Id_Codigo_Activacion),
+        };
+    }
+
+    public static function exitoso(string $correo, int $minutosVigencia, ?int $idCodigo = null): self
+    {
+        return new self(
+            estado: self::ENVIADO,
+            idCodigo: $idCodigo,
             correo: $correo,
             titulo: 'Código de activación enviado',
             mensaje: "El código de activación se envió correctamente a {$correo}.",
@@ -46,7 +100,7 @@ class ResultadoEnvioCodigo
         );
     }
 
-    public static function fallido(string $correo, Throwable $error): self
+    public static function fallido(string $correo, Throwable $error, ?int $idCodigo = null): self
     {
         // Queda en el log con el texto completo: el modal muestra la
         // versión corta y alguien tiene que poder ver la larga después.
@@ -55,15 +109,22 @@ class ResultadoEnvioCodigo
             'error' => $error->getMessage(),
         ]);
 
+        return self::armarFallido($correo, $error->getMessage(), $idCodigo);
+    }
+
+    /** Lo mismo que fallido(), a partir del texto del error ya guardado. */
+    protected static function armarFallido(string $correo, string $error, ?int $idCodigo): self
+    {
         [$mensaje, $sugerencia] = self::traducir($correo, $error);
 
         return new self(
-            enviado: false,
+            estado: self::FALLIDO,
             correo: $correo,
             titulo: 'El código no se envió',
             mensaje: $mensaje,
             sugerencia: $sugerencia,
-            detalleTecnico: self::recortar($error->getMessage()),
+            detalleTecnico: self::recortar($error),
+            idCodigo: $idCodigo,
         );
     }
 
@@ -71,7 +132,10 @@ class ResultadoEnvioCodigo
     public function toArray(): array
     {
         return [
-            'enviado' => $this->enviado,
+            'estado' => $this->estado,
+            // Se mantiene para la pantalla vieja: true solo con 'enviado'.
+            'enviado' => $this->enviado(),
+            'id_codigo' => $this->idCodigo,
             'correo' => $this->correo,
             'titulo' => $this->titulo,
             'mensaje' => $this->mensaje,
@@ -95,9 +159,9 @@ class ResultadoEnvioCodigo
      *
      * @return array{0: string, 1: string}
      */
-    private static function traducir(string $correo, Throwable $error): array
+    private static function traducir(string $correo, string $error): array
     {
-        $texto = mb_strtolower($error->getMessage());
+        $texto = mb_strtolower($error);
 
         // array_any es de PHP 8.4 y el proyecto corre sobre 8.2.
         $contiene = function (array $senales) use ($texto): bool {
