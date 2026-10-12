@@ -1040,18 +1040,100 @@ if ((int) $data['id_rol'] === (int) $idRolProveedor) {
             return ResultadoEnvioCodigo::exitoso($usuario->Email, $minutosVigencia);
         }
 
-        try {
-            // notifyNow saltea la cola aunque la notificación sea
-            // ShouldQueue: es lo que permite enterarse del rechazo.
-            $usuario->notifyNow($notificacion);
+        /*
+         * SE RESPONDE ANTES DE MANDAR (12-oct-2026).
+         *
+         * Antes la petición esperaba acá a que el servidor de correo
+         * aceptara el mensaje: segundos que quien apretó "Desbloquear"
+         * pasaba mirando la pantalla, aunque la cuenta ya estuviera
+         * desbloqueada desde el primer milisegundo. Ese tiempo es del
+         * servidor de correo y no se puede achicar desde acá; lo que sí se
+         * puede es no hacer esperar a nadie por él.
+         *
+         * Ahora el código queda marcado 'Enviando', la petición contesta
+         * enseguida, y el envío corre JUSTO DESPUÉS de mandar la respuesta,
+         * en el mismo proceso (afterResponse). No pasa por la cola: no
+         * depende de que haya un worker corriendo, ni espera a que el
+         * scheduler lo levante en el minuto siguiente. El resultado queda
+         * en la fila del código y la pantalla lo consulta en vivo (ver
+         * estadoEnvioCodigo), así que se sigue sabiendo con certeza si el
+         * correo salió o por qué no.
+         *
+         * Con PHP-FPM la respuesta se libera de verdad antes del envío. Si
+         * el servidor no lo permite, el comportamiento es el de antes:
+         * espera y contesta, sin perder nada.
+         */
+        $codigoActivacion->forceFill([
+            'Estado_Envio' => CodigoActivacion::ENVIO_ENVIANDO,
+            'Detalle_Envio' => null,
+            'Fecha_Envio' => null,
+        ])->save();
 
-            return ResultadoEnvioCodigo::exitoso($usuario->Email, $minutosVigencia);
-        } catch (\Throwable $e) {
-            // NO se relanza: el código ya quedó creado y el usuario sigue
-            // existiendo. Lo que corresponde es contarlo, no deshacer un
-            // alta por un correo que no salió.
-            return ResultadoEnvioCodigo::fallido($usuario->Email, $e);
+        dispatch(function () use ($usuario, $notificacion, $codigoActivacion) {
+            /*
+             * UN CÓDIGO SE ENVÍA UNA SOLA VEZ. Laravel no borra estas tareas
+             * después de correrlas: si en el mismo proceso hubiera otra
+             * petición (pasa en los tests, y pasaría con Octane), la tarea
+             * volvería a ejecutarse y el proveedor recibiría el correo dos
+             * veces. Si el código ya no está 'Enviando', otro ya lo resolvió.
+             */
+            $vigente = CodigoActivacion::find($codigoActivacion->Id_Codigo_Activacion);
+
+            if ($vigente === null || $vigente->Estado_Envio !== CodigoActivacion::ENVIO_ENVIANDO) {
+                return;
+            }
+
+            try {
+                // notifyNow saltea la cola aunque la notificación sea
+                // ShouldQueue: es lo que permite enterarse del rechazo.
+                $usuario->notifyNow($notificacion);
+
+                $codigoActivacion->forceFill([
+                    'Estado_Envio' => CodigoActivacion::ENVIO_ENVIADO,
+                    'Fecha_Envio' => now(),
+                ])->save();
+            } catch (\Throwable $e) {
+                // NO se relanza: el código ya quedó creado y la cuenta ya
+                // quedó como se pidió. Lo que corresponde es dejar
+                // registrado por qué no salió, para que la pantalla lo diga.
+                ResultadoEnvioCodigo::fallido($usuario->Email, $e);
+
+                $codigoActivacion->forceFill([
+                    'Estado_Envio' => CodigoActivacion::ENVIO_FALLIDO,
+                    'Detalle_Envio' => mb_substr($e->getMessage(), 0, 500),
+                    'Fecha_Envio' => now(),
+                ])->save();
+            }
+        })->afterResponse();
+
+        return ResultadoEnvioCodigo::enviando($usuario->Email, (int) $codigoActivacion->Id_Codigo_Activacion);
+    }
+
+    /**
+     * Cómo va el envío de un código: lo consulta la pantalla mientras
+     * muestra "enviando", hasta que llega a 'enviado' o 'fallido'.
+     *
+     * Lo puede consultar quien puede mandar códigos (Sistemas o Admin de
+     * la empresa activa), y solo sobre códigos de usuarios de esa empresa.
+     * Nunca devuelve el código en sí, solo el estado del correo.
+     */
+    public function estadoEnvioCodigo(int $idCodigo, Usuario $solicitante, int $idEmpresa): ResultadoEnvioCodigo
+    {
+        if (! $solicitante->esSistemas($idEmpresa) && ! $solicitante->esAdmin($idEmpresa)) {
+            throw new AccessDeniedHttpException('No tiene permisos para ver el estado de este envío.');
         }
+
+        $codigo = CodigoActivacion::findOrFail($idCodigo);
+
+        $esDeLaEmpresa = Usuario::where('Email', $codigo->Email)
+            ->whereHas('usuarioEmpresas', fn ($q) => $q->where('Id_Empresa', $idEmpresa))
+            ->exists();
+
+        if (! $esDeLaEmpresa) {
+            throw new AccessDeniedHttpException('Ese envío no corresponde a la empresa activa.');
+        }
+
+        return ResultadoEnvioCodigo::desdeCodigo($codigo, $this->minutosVigenciaCodigo($codigo->Tipo));
     }
 
     /**
@@ -1508,6 +1590,50 @@ if ((int) $data['id_rol'] === (int) $idRolProveedor) {
     }
 
     /**
+     * Quién puede devolverle el acceso a una cuenta (12-oct-2026).
+     *
+     * SON DOS SITUACIONES DISTINTAS, y por eso dos permisos:
+     *
+     *  - DESBLOQUEAR: la cuenta se trabó SOLA por 3 contraseñas mal
+     *    puestas. Es el día a día: un proveedor se olvidó la clave y llama.
+     *    Lo puede resolver Sistemas o Admin; antes solo Sistemas, y Admin
+     *    veía la opción en el menú pero el servidor lo rechazaba.
+     *
+     *  - REACTIVAR: alguien inactivó la cuenta A PROPÓSITO. Deshacer esa
+     *    decisión sigue siendo solo de Sistemas.
+     *
+     * Admin, además, solo sobre proveedores DE SU EMPRESA: los ids los
+     * manda el navegador, y sin esto un Admin de una empresa podría
+     * desbloquear cuentas de otra escribiendo el número a mano.
+     */
+    protected function verificarPuedeReactivar(Usuario $usuario, Usuario $ejecutor, int $idEmpresa): void
+    {
+        if ($ejecutor->esSistemas($idEmpresa)) {
+            return;
+        }
+
+        if (! $ejecutor->esAdmin($idEmpresa)) {
+            throw new AccessDeniedHttpException('Solo usuarios con rol Sistemas o Admin pueden desbloquear cuentas.');
+        }
+
+        $soloBloqueadaPorIntentos = $usuario->Bloqueado_Por_Intentos && $usuario->Activo;
+
+        if (! $soloBloqueadaPorIntentos) {
+            throw new AccessDeniedHttpException('Admin solo puede desbloquear cuentas trabadas por contraseñas incorrectas. Reactivar una cuenta inactivada es de Sistemas.');
+        }
+
+        if ($usuario->Tipo_Usuario !== 'Proveedor') {
+            throw new AccessDeniedHttpException('Admin solo puede desbloquear cuentas de proveedores.');
+        }
+
+        $esDeLaEmpresa = $usuario->usuarioEmpresas()->where('Id_Empresa', $idEmpresa)->exists();
+
+        if (! $esDeLaEmpresa) {
+            throw new AccessDeniedHttpException('Ese proveedor no pertenece a la empresa activa.');
+        }
+    }
+
+    /**
      * Reactiva una cuenta, venga de una inactivación manual o de un bloqueo
      * automático por intentos fallidos (ver AuthService::login).
      *
@@ -1520,9 +1646,7 @@ if ((int) $data['id_rol'] === (int) $idRolProveedor) {
      */
     public function reactivar(Usuario $usuario, Usuario $ejecutor, int $idEmpresa): ResultadoEnvioCodigo
     {
-        if (! $ejecutor->esSistemas($idEmpresa)) {
-            throw new AccessDeniedHttpException('Solo usuarios con rol Sistemas pueden reactivar usuarios.');
-        }
+        $this->verificarPuedeReactivar($usuario, $ejecutor, $idEmpresa);
 
         $usuario->forceFill([
             'Activo' => true,

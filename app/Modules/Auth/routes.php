@@ -87,6 +87,13 @@ Route::prefix('usuarios')
         Route::post('/externos/reenviar-activacion-masivo', [UsuarioController::class, 'reenviarActivacionMasivo'])
             ->middleware('throttle:6,1');
 
+        // Cómo va el envío de un código de activación. Lo consulta la
+        // pantalla cada segundo mientras dice "enviando": de ahí el techo
+        // alto. Va antes de las rutas '/{usuario}/...' para que el comodín
+        // no se coma 'codigos-activacion'.
+        Route::get('/codigos-activacion/{codigo}/envio', [UsuarioController::class, 'estadoEnvioCodigo'])
+            ->middleware('throttle:120,1');
+
         // Estado de la cola de correo. Lo consulta el modal de carga masiva
         // al abrirse, para avisar si el servidor de correo viene rechazando
         // envíos antes de que alguien suba un archivo de 80 filas.
