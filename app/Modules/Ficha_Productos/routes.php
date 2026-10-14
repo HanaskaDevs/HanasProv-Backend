@@ -92,6 +92,7 @@ Route::prefix('productos-revision')
     ->middleware(['auth:sanctum', EmpresaActiva::class])
     ->group(function () {
         Route::get('/', [RevisionComprasController::class, 'pendientes']);
+        Route::post('/aprobar-varios', [RevisionComprasController::class, 'aprobarVarios']);
         Route::post('/{producto}/aprobar', [RevisionComprasController::class, 'aprobar']);
         Route::post('/{producto}/rechazar', [RevisionComprasController::class, 'rechazar']);
         Route::post('/{producto}/eliminar', [RevisionComprasController::class, 'eliminar']);

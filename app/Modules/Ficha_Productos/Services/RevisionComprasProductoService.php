@@ -88,9 +88,72 @@ class RevisionComprasProductoService
             'Fecha_Modificacion' => now(),
         ])->save();
 
-        $this->avisos->avisarACalidad($producto->fresh('proveedor'), $usuario);
+        $actualizado = $producto->fresh('proveedor');
+        $this->avisos->avisarACalidad($actualizado->proveedor, collect([$actualizado]), $usuario);
 
         return $producto->fresh(['proveedor', 'unidadPresentacion', 'grupos']);
+    }
+
+    /**
+     * Compras aprueba VARIOS de una vez (selección múltiple, 14-oct-2026).
+     *
+     * Todo o nada: si alguno ya no está esperando a Compras -otra persona
+     * lo resolvió mientras tanto- no se aprueba ninguno y se dice cuál.
+     * Aprobar "los que se pudieron" dejaría a quien seleccionó sin saber
+     * qué pasó con el resto.
+     *
+     * Sale UN correo a Calidad por proveedor, no uno por producto: si la
+     * selección mezcla proveedores, cada uno recibe su aviso con todo lo
+     * suyo.
+     *
+     * @param  array<int, int>  $idsProductos
+     * @return \Illuminate\Support\Collection<int, Producto>
+     */
+    public function aprobarVarios(Usuario $usuario, int $idEmpresaActiva, array $idsProductos)
+    {
+        $this->verificarAcceso($usuario, $idEmpresaActiva);
+
+        $ids = array_values(array_unique(array_map('intval', $idsProductos)));
+
+        $productos = Producto::whereHas('proveedor', fn ($q) => $q->where('Id_Empresa', $idEmpresaActiva))
+            ->where('Activo', 1)
+            ->whereIn('Id_Producto', $ids)
+            ->with('proveedor')
+            ->get();
+
+        $noDisponibles = $productos->filter(
+            fn (Producto $p) => $p->Etapa_Aprobacion !== Producto::ETAPA_COMPRAS || $p->Estado_Calificacion !== 'Pendiente'
+        );
+
+        if ($productos->count() !== count($ids) || $noDisponibles->isNotEmpty()) {
+            $nombres = $noDisponibles->pluck('Nombre_Producto')->take(3)->implode(', ');
+
+            throw ValidationException::withMessages([
+                'productos' => [
+                    $nombres !== ''
+                        ? "No se aprobó ninguno: {$nombres} ya no está esperando la revisión de Compras. Actualiza la lista y vuelve a intentarlo."
+                        : 'No se aprobó ninguno: algún producto seleccionado ya no está disponible. Actualiza la lista y vuelve a intentarlo.',
+                ],
+            ]);
+        }
+
+        DB::transaction(function () use ($productos, $usuario) {
+            foreach ($productos as $producto) {
+                $producto->forceFill([
+                    'Etapa_Aprobacion' => Producto::ETAPA_CALIDAD,
+                    'Modificado_Por' => $usuario->Id_Usuario,
+                    'Fecha_Modificacion' => now(),
+                ])->save();
+            }
+        });
+
+        // Los avisos después de la transacción: si un correo falla, las
+        // aprobaciones ya quedaron guardadas (ver AvisoProductosService).
+        foreach ($productos->groupBy('Id_Proveedor') as $delProveedor) {
+            $this->avisos->avisarACalidad($delProveedor->first()->proveedor, $delProveedor->values(), $usuario);
+        }
+
+        return $productos;
     }
 
     /**

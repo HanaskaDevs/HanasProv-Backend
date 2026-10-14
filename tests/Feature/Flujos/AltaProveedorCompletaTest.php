@@ -578,17 +578,33 @@ class AltaProveedorCompletaTest extends TestCase
     }
 
     /**
-     * El otro lado de lo mismo: abrirle los productos a Calidad no le
-     * abre la ficha ni los documentos del proveedor. Sin este test,
-     * ampliar el permiso de productos mañana podría llevarse puesta esa
-     * separación sin que nadie se entere.
+     * El proceso de calificación es de Calidad (14-oct-2026): además de
+     * los productos, ve y califica la ficha y los documentos.
      */
-    public function test_calidad_sigue_sin_poder_calificar_la_ficha_ni_los_documentos(): void
+    public function test_calidad_puede_ver_la_ficha_y_los_documentos_para_calificarlos(): void
     {
         $empresa = $this->crearEmpresa();
         [, $proveedor] = $this->crearProveedorConUsuario($empresa);
         $calidad = $this->crearUsuarioInterno($empresa, 'Calidad');
         $cabeceras = $this->cabecerasComo($calidad, $empresa);
+
+        $this->getJson("/api/proveedores/{$proveedor->Id_Proveedor}/ficha-calificacion", $cabeceras)
+            ->assertOk();
+
+        $this->getJson("/api/proveedores/{$proveedor->Id_Proveedor}/documentos-calificacion", $cabeceras)
+            ->assertOk();
+    }
+
+    /**
+     * Abrirle la calificación a Calidad no la abre para cualquier interno:
+     * Compras sigue sin poder calificar la ficha ni los documentos.
+     */
+    public function test_compras_no_califica_la_ficha_ni_los_documentos(): void
+    {
+        $empresa = $this->crearEmpresa();
+        [, $proveedor] = $this->crearProveedorConUsuario($empresa);
+        $compras = $this->crearUsuarioInterno($empresa, 'Compras');
+        $cabeceras = $this->cabecerasComo($compras, $empresa);
 
         $this->postJson(
             "/api/proveedores/{$proveedor->Id_Proveedor}/ficha-calificacion",
