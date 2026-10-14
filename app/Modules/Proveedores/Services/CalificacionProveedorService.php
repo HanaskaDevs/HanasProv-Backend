@@ -17,14 +17,14 @@ use App\Modules\Proveedores\Models\ProveedorCuentaBancaria;
 use App\Modules\Proveedores\Notifications\ProveedorAprobadoNotification;
 use App\Modules\Proveedores\Notifications\ProveedorRechazadoNotification;
 use Illuminate\Notifications\AnonymousNotifiable;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 /**
- * Calificación de proveedores por un usuario interno (Admin/Sistemas):
+ * Calificación de proveedores por un usuario interno (Calidad, con
+ * Admin/Sistemas de apoyo, ver verificarPuedeCalificar):
  * la Ficha se califica CAMPO POR CAMPO (cada dato tiene su propio
  * Aprobado/Rechazado + observación si se rechaza -> ver
  * calificarCampoFicha), y cada documento cargado se califica de forma
@@ -102,7 +102,7 @@ class CalificacionProveedorService
 
     public function obtenerFicha(Usuario $admin, int $idEmpresaActiva, int $idProveedor): Proveedor
     {
-        $this->verificarEsAdmin($admin, $idEmpresaActiva);
+        $this->verificarPuedeCalificar($admin, $idEmpresaActiva);
 
         return $this->proveedorDeLaEmpresa($idEmpresaActiva, $idProveedor)
             ->load(['clases', 'categoriasProducto', 'estado', 'calificacionesCampos']);
@@ -130,7 +130,7 @@ class CalificacionProveedorService
         bool $aprobado,
         array $camposRechazados = []
     ): Proveedor {
-        $this->verificarEsAdmin($admin, $idEmpresaActiva);
+        $this->verificarPuedeCalificar($admin, $idEmpresaActiva);
 
         $proveedor = $this->proveedorDeLaEmpresa($idEmpresaActiva, $idProveedor);
 
@@ -180,7 +180,7 @@ class CalificacionProveedorService
      */
     public function obtenerChecklistDocumentos(Usuario $admin, int $idEmpresaActiva, int $idProveedor): array
     {
-        $this->verificarEsAdmin($admin, $idEmpresaActiva);
+        $this->verificarPuedeCalificar($admin, $idEmpresaActiva);
 
         $proveedor = $this->proveedorDeLaEmpresa($idEmpresaActiva, $idProveedor);
         $esQuito = strcasecmp((string) $proveedor->Ciudad, 'Quito') === 0;
@@ -277,7 +277,7 @@ class CalificacionProveedorService
         bool $aprobado,
         ?string $observacion
     ): DocumentoProveedor {
-        $this->verificarEsAdmin($admin, $idEmpresaActiva);
+        $this->verificarPuedeCalificar($admin, $idEmpresaActiva);
 
         $documento = DocumentoProveedor::whereHas(
             'proveedor',
@@ -322,7 +322,7 @@ class CalificacionProveedorService
      */
     public function registrarCalificacionDocumentos(Usuario $admin, int $idEmpresaActiva, int $idProveedor): void
     {
-        $this->verificarEsAdmin($admin, $idEmpresaActiva);
+        $this->verificarPuedeCalificar($admin, $idEmpresaActiva);
 
         $proveedor = $this->proveedorDeLaEmpresa($idEmpresaActiva, $idProveedor);
 
@@ -364,7 +364,7 @@ class CalificacionProveedorService
      */
     public function verDocumentoInline(Usuario $admin, int $idEmpresaActiva, int $idDocumentoProveedor)
     {
-        $this->verificarEsAdmin($admin, $idEmpresaActiva);
+        $this->verificarPuedeCalificar($admin, $idEmpresaActiva);
 
         $documento = DocumentoProveedor::whereHas(
             'proveedor',
@@ -391,7 +391,7 @@ class CalificacionProveedorService
      */
     public function obtenerProductosCalificacion(Usuario $admin, int $idEmpresaActiva, int $idProveedor): array
     {
-        $this->verificarPuedeCalificarProductos($admin, $idEmpresaActiva);
+        $this->verificarPuedeCalificar($admin, $idEmpresaActiva);
 
         $proveedor = $this->proveedorDeLaEmpresa($idEmpresaActiva, $idProveedor);
 
@@ -445,7 +445,7 @@ class CalificacionProveedorService
          * usuario: "admin pueden aprobar tanto en el proceso de compras
          * como en el de calidad"-.
          */
-        $this->verificarPuedeCalificarProductos($admin, $idEmpresaActiva);
+        $this->verificarPuedeCalificar($admin, $idEmpresaActiva);
 
         $producto = Producto::whereHas(
             'proveedor',
@@ -507,7 +507,7 @@ class CalificacionProveedorService
      */
     public function registrarCalificacionProductos(Usuario $admin, int $idEmpresaActiva, int $idProveedor): void
     {
-        $this->verificarPuedeCalificarProductos($admin, $idEmpresaActiva);
+        $this->verificarPuedeCalificar($admin, $idEmpresaActiva);
 
         $proveedor = $this->proveedorDeLaEmpresa($idEmpresaActiva, $idProveedor);
 
@@ -558,7 +558,7 @@ class CalificacionProveedorService
     {
         // Mismo permiso que calificar el producto: no se puede juzgar una
         // ficha técnica sin poder abrirla.
-        $this->verificarPuedeCalificarProductos($admin, $idEmpresaActiva);
+        $this->verificarPuedeCalificar($admin, $idEmpresaActiva);
 
         $documento = \App\Modules\Ficha_Productos\Models\DocumentoProducto::whereHas(
             'producto.proveedor',
@@ -918,24 +918,27 @@ class CalificacionProveedorService
     }
 
     /**
-     * Permiso de la ETAPA DE CALIDAD del circuito de productos
-     * (proveedor -> Compras -> Calidad), separado de verificarEsAdmin.
+     * Quién califica a un proveedor: ficha, documentos y productos.
      *
-     * POR QUÉ NO ALCANZA CON Admin/Sistemas: el aviso de "Compras aprobó,
-     * falta Calidad" le llega a los usuarios con rol Calidad. Mientras
-     * estas tres operaciones -ver la lista, abrir los documentos y cerrar
-     * la calificación- pidieron Admin/Sistemas, esos usuarios recibían el
-     * correo y se topaban con un 403: el paso de Calidad existía en el
-     * flujo pero no se podía ejecutar desde el rol que lo nombra.
+     * EL PROCESO ES DE CALIDAD (14-oct-2026, pedido explícito del usuario:
+     * "ellos en realidad son los que deben calificar ficha y documentos,
+     * admin y sistemas son apoyo, pero el proceso pertenece a Calidad
+     * completamente"). Hasta ese día Calidad solo resolvía los productos
+     * que le pasaba Compras, y la ficha y los documentos eran de
+     * Admin/Sistemas; ahora los tres roles pueden con las tres partes.
      *
-     * La ficha general y los documentos del proveedor NO se tocan: esos
-     * siguen siendo Admin/Sistemas (ver verificarEsAdmin). Calidad resuelve
-     * productos, nada más.
+     * Se resuelve el rol desde el pivote Usuario_Empresa de la empresa
+     * activa (no desde un campo fijo del usuario), porque el mismo usuario
+     * puede tener roles distintos en distintas empresas.
+     *
+     * Lo que NO cambia: el paso de Compras en productos. Calidad sigue sin
+     * poder aprobar un producto que Compras todavía no miró (ver
+     * calificarProducto); eso lo cuida la etapa del producto, no el rol.
      */
-    protected function verificarPuedeCalificarProductos(Usuario $usuario, int $idEmpresaActiva): void
+    protected function verificarPuedeCalificar(Usuario $usuario, int $idEmpresaActiva): void
     {
         if ($usuario->Tipo_Usuario !== 'Interno') {
-            throw new AccessDeniedHttpException('Solo usuarios internos pueden calificar productos.');
+            throw new AccessDeniedHttpException('Solo usuarios internos pueden calificar proveedores.');
         }
 
         $puede = $usuario->esCalidad($idEmpresaActiva)
@@ -943,33 +946,7 @@ class CalificacionProveedorService
             || $usuario->esSistemas($idEmpresaActiva);
 
         if (! $puede) {
-            throw new AccessDeniedHttpException('Solo los roles Calidad, Admin y Sistemas pueden calificar productos.');
-        }
-    }
-
-    /**
-     * Solo Admin/Sistemas pueden calificar. Se resuelve el rol desde el
-     * pivote Usuario_Empresa de la empresa activa (no desde un campo
-     * fijo del usuario), porque el mismo usuario puede tener roles
-     * distintos en distintas empresas. Un solo query con join a Rol
-     * (antes eran 2 consultas separadas: pivote + Rol::find) -> esto se
-     * ejecuta en CADA calificación, así que vale la pena que sea liviano.
-     */
-    protected function verificarEsAdmin(Usuario $usuario, int $idEmpresaActiva): void
-    {
-        if ($usuario->Tipo_Usuario !== 'Interno') {
-            throw new AccessDeniedHttpException('Solo usuarios internos pueden calificar proveedores.');
-        }
-
-        $nombreRol = DB::table('Usuario_Empresa')
-            ->join('Rol', 'Rol.Id_Rol', '=', 'Usuario_Empresa.Id_Rol')
-            ->where('Usuario_Empresa.Id_Usuario', $usuario->Id_Usuario)
-            ->where('Usuario_Empresa.Id_Empresa', $idEmpresaActiva)
-            ->where('Usuario_Empresa.Activo', true)
-            ->value('Rol.Nombre_Rol');
-
-        if (! in_array($nombreRol, ['Admin', 'Sistemas'], true)) {
-            throw new AccessDeniedHttpException('No tienes permisos para calificar proveedores.');
+            throw new AccessDeniedHttpException('Solo los roles Calidad, Admin y Sistemas pueden calificar proveedores.');
         }
     }
 }

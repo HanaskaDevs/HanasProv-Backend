@@ -3,8 +3,11 @@
 namespace App\Modules\Ficha_Productos\Services;
 
 use App\Modules\Auth\Models\Usuario;
+use App\Modules\Documentos_Proveedor\Models\DocumentoProveedor;
 use App\Modules\Ficha_Productos\Mail\AvisoProductoMail;
+use App\Modules\Ficha_Productos\Mail\PendientesCalidadMail;
 use App\Modules\Ficha_Productos\Models\Producto;
+use App\Modules\Proveedores\Models\Proveedor;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 
@@ -13,7 +16,8 @@ use Illuminate\Support\Facades\Mail;
  * lugar (23-sep-2026):
  *
  *   1. el proveedor envía un producto -> avisa a COMPRAS
- *   2. Compras lo aprueba             -> avisa a CALIDAD
+ *   2. Compras lo aprueba             -> avisa a CALIDAD, con todo lo que
+ *                                        ese proveedor tiene pendiente
  *   3. Compras lo rechaza o elimina   -> avisa al PROVEEDOR, con el motivo
  *
  * NINGÚN AVISO PUEDE FRENAR LA ACCIÓN. Todos van dentro de un try/catch:
@@ -76,34 +80,147 @@ class AvisoProductosService
         );
     }
 
-    /** Paso 2: Compras lo aprobó, ahora le toca a Calidad. */
-    public function avisarACalidad(Producto $producto, Usuario $quienAprobo): void
+    /**
+     * Paso 2: Compras dejó pasar uno o varios productos de UN proveedor ->
+     * le toca a Calidad.
+     *
+     * UN SOLO CORREO CON TODO (14-oct-2026). No avisa solo "este producto":
+     * le cuenta a Calidad todo lo que ese proveedor tiene esperándola, en
+     * el orden en que se trabaja -ficha, documentos, productos-, para que
+     * lo resuelva de una sola pasada. La ficha y los documentos no tienen
+     * aviso propio a propósito: este es el único correo que le llega.
+     *
+     * Si Compras aprueba varios productos de una vez (selección múltiple),
+     * se llama una vez con todos y sale un único correo.
+     *
+     * @param  \Illuminate\Support\Collection<int, Producto>  $aprobados
+     */
+    public function avisarACalidad(Proveedor $proveedor, $aprobados, Usuario $quienAprobo): void
     {
-        $proveedor = $producto->proveedor;
+        if ($aprobados->isEmpty()) {
+            return;
+        }
+
         $destinatarios = $this->correosDelRol($proveedor->Id_Empresa, 'Calidad');
 
         if (empty($destinatarios)) {
             Log::warning('Aviso a Calidad: no hay a quién avisar.', [
                 'id_empresa' => $proveedor->Id_Empresa,
-                'id_producto' => $producto->Id_Producto,
+                'id_proveedor' => $proveedor->Id_Proveedor,
+                'productos' => $aprobados->pluck('Id_Producto')->all(),
             ]);
 
             return;
         }
 
+        $nombre = $this->nombreDe($proveedor);
+        $cuantos = $aprobados->count();
+
         $this->enviar(
             $destinatarios,
-            new AvisoProductoMail(
-                asunto: "Producto aprobado por Compras, pendiente de Calidad: {$producto->Nombre_Producto}",
-                mensaje: 'Compras revisó y aprobó un producto de <strong>'.e($this->nombreDe($proveedor))
-                    .'</strong>. Queda pendiente la aprobación de Calidad para que el proveedor lo vea aprobado.',
-                nombreProveedor: $this->nombreDe($proveedor),
-                nombreProducto: $producto->Nombre_Producto,
-                urlAccion: $this->url('/proveedores'),
-                textoAccion: 'Calificar el producto',
+            new PendientesCalidadMail(
+                asunto: $cuantos === 1
+                    ? "Pendiente de Calidad: {$nombre} ({$aprobados->first()->Nombre_Producto})"
+                    : "Pendiente de Calidad: {$nombre} ({$cuantos} productos)",
+                nombreProveedor: $nombre,
+                rucProveedor: $proveedor->Ruc ?: null,
+                quienAprobo: $quienAprobo->Nombre_Completo ?: $quienAprobo->Email,
+                panorama: $this->panoramaDelProveedor($proveedor, $aprobados),
+                // Abre la calificación de ESE proveedor directamente.
+                urlAccion: $this->url('/proveedores?calificar='.$proveedor->Id_Proveedor),
             ),
-            contexto: ['paso' => 'calidad', 'id_producto' => $producto->Id_Producto, 'aprobo' => $quienAprobo->Id_Usuario]
+            contexto: [
+                'paso' => 'calidad',
+                'id_proveedor' => $proveedor->Id_Proveedor,
+                'productos' => $aprobados->pluck('Id_Producto')->all(),
+                'aprobo' => $quienAprobo->Id_Usuario,
+            ]
         );
+    }
+
+    /**
+     * En qué está el proveedor, parte por parte, con los mismos cuatro
+     * estados que muestra la pantalla de Detalle de Proveedores
+     * (estadoRegistro.ts en el front): incompleta, pendiente, rechazada,
+     * aprobada. Si el correo dijera una cosa y la pantalla otra, Calidad
+     * dejaría de confiar en las dos.
+     *
+     * @param  \Illuminate\Support\Collection<int, Producto>  $aprobados
+     */
+    public function panoramaDelProveedor(Proveedor $proveedor, $aprobados): array
+    {
+        $proveedor->loadMissing('calificacionesCampos');
+
+        // --- Ficha ---
+        $porcentaje = (int) $proveedor->Porcentaje_Completado_Ficha;
+        $estadoFicha = $proveedor->estadoGeneralCalificacionFicha();
+
+        $ficha = match (true) {
+            $porcentaje < 100 => ['estado' => 'incompleta', 'etiqueta' => 'Incompleta',
+                'detalle' => "El proveedor la tiene cargada al {$porcentaje}%. Todavía no se puede calificar."],
+            $estadoFicha === 'Aprobado' => ['estado' => 'aprobada', 'etiqueta' => 'Aprobada', 'detalle' => null],
+            $estadoFicha === 'Rechazado' => ['estado' => 'rechazada', 'etiqueta' => 'Rechazada',
+                'detalle' => 'Se calificó con observaciones; se espera que el proveedor corrija.'],
+            default => ['estado' => 'pendiente', 'etiqueta' => 'Por calificar',
+                'detalle' => 'Está completa y nadie la calificó todavía.'],
+        };
+
+        // --- Documentos ---
+        $documentos = DocumentoProveedor::where('Id_Proveedor', $proveedor->Id_Proveedor)
+            ->where('Activo', 1)
+            ->with('tipoDocumento')
+            ->get();
+
+        $sinCalificar = $documentos->whereNull('Estado_Calificacion');
+        $nombresSinCalificar = $sinCalificar
+            ->map(fn ($d) => $d->tipoDocumento?->Nombre_Documento ?? 'Documento')
+            ->values()
+            ->all();
+
+        $docs = match (true) {
+            $proveedor->Fecha_Registro_Documentacion === null => [
+                'estado' => 'incompleta', 'etiqueta' => 'Incompleta', 'pendientes' => [],
+                'detalle' => $documentos->isEmpty()
+                    ? 'El proveedor todavía no subió documentos.'
+                    : 'El proveedor no registró su documentación; todavía puede cambiarla.',
+            ],
+            $documentos->contains('Estado_Calificacion', 'Rechazado') => [
+                'estado' => 'rechazada', 'etiqueta' => 'Rechazada', 'pendientes' => $nombresSinCalificar,
+                'detalle' => 'Tiene documentos rechazados; se espera que el proveedor los corrija.',
+            ],
+            $sinCalificar->isEmpty() => [
+                'estado' => 'aprobada', 'etiqueta' => 'Aprobada', 'pendientes' => [], 'detalle' => null,
+            ],
+            default => [
+                'estado' => 'pendiente', 'etiqueta' => 'Por calificar', 'pendientes' => $nombresSinCalificar,
+                'detalle' => count($nombresSinCalificar) === 1
+                    ? '1 documento sin revisar.'
+                    : count($nombresSinCalificar).' documentos sin revisar.',
+            ],
+        };
+
+        // --- Productos ---
+        // Los recién aprobados por Compras, y aparte los que ya estaban
+        // esperando a Calidad de antes: también son trabajo pendiente.
+        $idsRecien = $aprobados->pluck('Id_Producto')->map(fn ($id) => (int) $id)->all();
+
+        $otros = Producto::where('Id_Proveedor', $proveedor->Id_Proveedor)
+            ->where('Activo', 1)
+            ->where('Etapa_Aprobacion', Producto::ETAPA_CALIDAD)
+            ->where('Estado_Calificacion', 'Pendiente')
+            ->whereNotIn('Id_Producto', $idsRecien)
+            ->orderBy('Nombre_Producto')
+            ->pluck('Nombre_Producto')
+            ->all();
+
+        return [
+            'ficha' => $ficha,
+            'documentos' => $docs,
+            'productos' => [
+                'recien_aprobados' => $aprobados->pluck('Nombre_Producto')->values()->all(),
+                'otros_pendientes' => $otros,
+            ],
+        ];
     }
 
     /**
@@ -173,7 +290,7 @@ class AvisoProductosService
     }
 
     /** @param array<int, string> $destinatarios */
-    private function enviar(array $destinatarios, AvisoProductoMail $correo, array $contexto = []): void
+    private function enviar(array $destinatarios, AvisoProductoMail|PendientesCalidadMail $correo, array $contexto = []): void
     {
         try {
             Mail::to($destinatarios)->queue($correo);

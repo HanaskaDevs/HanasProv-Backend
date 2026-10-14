@@ -604,6 +604,7 @@ class AsistenteContextoService
                 '/usuarios/internos' => 'Usuarios Internos',
                 '/usuarios/proveedores' => 'Cuentas de Proveedores',
                 '/proveedores' => 'Proveedores',
+                '/proveedores/detalle' => 'Detalle de Proveedores (estado de ficha y documentación)',
                 '/catalogo-productos' => 'Catálogo de Productos',
                 '/pedidos' => 'Pedidos (vista interna por bodega)',
                 '/reclamos/abiertos' => 'Reclamos Abiertos',
@@ -616,6 +617,7 @@ class AsistenteContextoService
             'Admin' => [
                 '/usuarios/proveedores' => 'Cuentas de Proveedores',
                 '/proveedores' => 'Calificación de Proveedores',
+                '/proveedores/detalle' => 'Detalle de Proveedores (estado de ficha y documentación)',
                 '/catalogo-productos' => 'Catálogo de Productos',
                 '/pedidos' => 'Pedidos (vista interna por bodega)',
                 '/reclamos/abiertos' => 'Reclamos Abiertos',
@@ -624,7 +626,8 @@ class AsistenteContextoService
                 '/calendario' => 'Calendario de horarios de entrega',
             ],
             'Calidad' => [
-                '/proveedores' => 'Calificación de Proveedores',
+                '/proveedores' => 'Calificación de Proveedores (ficha, documentos y productos)',
+                '/proveedores/detalle' => 'Detalle de Proveedores (estado de ficha y documentación)',
                 '/auditorias' => 'Auditorías',
                 '/pedidos' => 'Pedidos (vista interna por bodega)',
                 '/reclamos/abiertos' => 'Reclamos Abiertos',

@@ -3,6 +3,7 @@
 namespace Tests\Feature\Productos;
 
 use App\Modules\Ficha_Productos\Mail\AvisoProductoMail;
+use App\Modules\Ficha_Productos\Mail\PendientesCalidadMail;
 use App\Modules\Ficha_Productos\Models\Producto;
 use App\Modules\Ficha_Productos\Models\UnidadPresentacion;
 use App\Modules\Proveedores\Services\CalificacionProveedorService;
@@ -20,12 +21,12 @@ use Tests\TestCase;
  */
 class RevisionComprasProductoTest extends TestCase
 {
-    private function productoEsperandoCompras($proveedor): Producto
+    private function productoEsperandoCompras($proveedor, string $nombre = 'PRODUCTO EN REVISION'): Producto
     {
         return Producto::create([
             'Id_Proveedor' => $proveedor->Id_Proveedor,
             'Id_Unidad_Presentacion' => UnidadPresentacion::firstOrFail()->Id_Unidad_Presentacion,
-            'Nombre_Producto' => 'PRODUCTO EN REVISION',
+            'Nombre_Producto' => $nombre,
             'Activo' => 1,
             'Bloqueado' => 1,
             'Estado_Calificacion' => 'Pendiente',
@@ -87,8 +88,12 @@ class RevisionComprasProductoTest extends TestCase
         // Sigue Pendiente: Compras no aprueba el producto, lo deja pasar.
         $this->assertSame('Pendiente', $producto->fresh()->Estado_Calificacion);
 
-        // Y a Calidad le llegó el aviso.
-        Mail::assertQueued(AvisoProductoMail::class);
+        // Y a Calidad le llegó el aviso, con el panorama del proveedor.
+        Mail::assertQueued(PendientesCalidadMail::class, function (PendientesCalidadMail $correo) use ($proveedor, $calidad) {
+            return $correo->hasTo($calidad->Email)
+                && str_contains($correo->urlAccion, 'calificar='.$proveedor->Id_Proveedor)
+                && $correo->panorama['productos']['recien_aprobados'] === ['PRODUCTO EN REVISION'];
+        });
 
         // Ahora Calidad sí puede resolver.
         app(CalificacionProveedorService::class)->calificarProducto(
@@ -207,5 +212,108 @@ class RevisionComprasProductoTest extends TestCase
             [],
             $this->cabecerasComo($compras, $empresa)
         )->assertStatus(422);
+    }
+
+    /**
+     * Selección múltiple: Compras aprueba varios de una vez y a Calidad le
+     * llega UN correo por proveedor, no uno por producto.
+     */
+    public function test_aprobar_varios_manda_un_solo_correo_por_proveedor(): void
+    {
+        Mail::fake();
+
+        $empresa = $this->crearEmpresa();
+        [, $proveedorA] = $this->crearProveedorConUsuario($empresa);
+        [, $proveedorB] = $this->crearProveedorConUsuario($empresa);
+        $compras = $this->crearUsuarioInterno($empresa, 'Compras');
+        $this->crearUsuarioInterno($empresa, 'Calidad');
+
+        $a1 = $this->productoEsperandoCompras($proveedorA, 'ACEITE');
+        $a2 = $this->productoEsperandoCompras($proveedorA, 'ARROZ');
+        $a3 = $this->productoEsperandoCompras($proveedorA, 'AZUCAR');
+        $b1 = $this->productoEsperandoCompras($proveedorB, 'BANANO');
+
+        $this->postJson(
+            '/api/productos-revision/aprobar-varios',
+            ['productos' => [$a1->Id_Producto, $a2->Id_Producto, $a3->Id_Producto, $b1->Id_Producto]],
+            $this->cabecerasComo($compras, $empresa)
+        )->assertOk()->assertJsonPath('aprobados', 4);
+
+        foreach ([$a1, $a2, $a3, $b1] as $producto) {
+            $this->assertSame(Producto::ETAPA_CALIDAD, $producto->fresh()->Etapa_Aprobacion);
+        }
+
+        // 4 productos de 2 proveedores -> 2 correos, no 4.
+        Mail::assertQueuedCount(2);
+        Mail::assertQueued(PendientesCalidadMail::class, fn (PendientesCalidadMail $c) => count($c->panorama['productos']['recien_aprobados']) === 3
+            && str_contains($c->urlAccion, 'calificar='.$proveedorA->Id_Proveedor));
+    }
+
+    /**
+     * Todo o nada: si uno de los seleccionados ya lo resolvió otra persona,
+     * no se aprueba ninguno y no sale ningún correo.
+     */
+    public function test_aprobar_varios_no_aprueba_ninguno_si_uno_ya_no_esta_en_compras(): void
+    {
+        Mail::fake();
+
+        $empresa = $this->crearEmpresa();
+        [, $proveedor] = $this->crearProveedorConUsuario($empresa);
+        $compras = $this->crearUsuarioInterno($empresa, 'Compras');
+
+        $libre = $this->productoEsperandoCompras($proveedor, 'LIBRE');
+        $yaResuelto = $this->productoEsperandoCompras($proveedor, 'YA RESUELTO');
+        $yaResuelto->forceFill(['Etapa_Aprobacion' => Producto::ETAPA_CALIDAD])->save();
+
+        $this->postJson(
+            '/api/productos-revision/aprobar-varios',
+            ['productos' => [$libre->Id_Producto, $yaResuelto->Id_Producto]],
+            $this->cabecerasComo($compras, $empresa)
+        )->assertStatus(422)->assertJsonValidationErrors('productos');
+
+        $this->assertSame(Producto::ETAPA_COMPRAS, $libre->fresh()->Etapa_Aprobacion);
+        Mail::assertNothingQueued();
+    }
+
+    public function test_calidad_no_puede_aprobar_varios_en_la_etapa_de_compras(): void
+    {
+        $empresa = $this->crearEmpresa();
+        [, $proveedor] = $this->crearProveedorConUsuario($empresa);
+        $calidad = $this->crearUsuarioInterno($empresa, 'Calidad');
+        $producto = $this->productoEsperandoCompras($proveedor);
+
+        $this->postJson(
+            '/api/productos-revision/aprobar-varios',
+            ['productos' => [$producto->Id_Producto]],
+            $this->cabecerasComo($calidad, $empresa)
+        )->assertForbidden();
+    }
+
+    /**
+     * El correo cuenta la ficha y los documentos con los mismos estados que
+     * la pantalla de Detalle de Proveedores, y suma los productos que ya
+     * estaban esperando a Calidad de antes.
+     */
+    public function test_el_correo_a_calidad_trae_ficha_documentos_y_productos_pendientes(): void
+    {
+        $empresa = $this->crearEmpresa();
+        [, $proveedor] = $this->crearProveedorConUsuario($empresa);
+
+        $proveedor->forceFill([
+            'Porcentaje_Completado_Ficha' => 100,
+            'Fecha_Registro_Documentacion' => null,
+        ])->save();
+
+        $deAntes = $this->productoEsperandoCompras($proveedor, 'YA ESTABA EN CALIDAD');
+        $deAntes->forceFill(['Etapa_Aprobacion' => Producto::ETAPA_CALIDAD])->save();
+        $recien = $this->productoEsperandoCompras($proveedor, 'RECIEN APROBADO');
+
+        $panorama = app(\App\Modules\Ficha_Productos\Services\AvisoProductosService::class)
+            ->panoramaDelProveedor($proveedor->fresh(), collect([$recien]));
+
+        $this->assertSame('pendiente', $panorama['ficha']['estado']);
+        $this->assertSame('incompleta', $panorama['documentos']['estado']);
+        $this->assertSame(['RECIEN APROBADO'], $panorama['productos']['recien_aprobados']);
+        $this->assertSame(['YA ESTABA EN CALIDAD'], $panorama['productos']['otros_pendientes']);
     }
 }

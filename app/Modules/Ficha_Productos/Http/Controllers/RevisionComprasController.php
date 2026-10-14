@@ -38,6 +38,28 @@ class RevisionComprasController extends Controller
         ]);
     }
 
+    public function aprobarVarios(Request $request): JsonResponse
+    {
+        $datos = $request->validate([
+            'productos' => ['required', 'array', 'min:1', 'max:100'],
+            'productos.*' => ['integer', 'distinct'],
+        ], [
+            'productos.required' => 'Selecciona al menos un producto.',
+            'productos.min' => 'Selecciona al menos un producto.',
+            'productos.max' => 'Se pueden aprobar hasta 100 productos por vez.',
+        ]);
+
+        $aprobados = $this->revision->aprobarVarios($request->user(), $this->empresa($request), $datos['productos']);
+        $cuantos = $aprobados->count();
+
+        return response()->json([
+            'message' => $cuantos === 1
+                ? 'Producto aprobado. Pasó a la revisión de Calidad.'
+                : "{$cuantos} productos aprobados. Pasaron a la revisión de Calidad.",
+            'aprobados' => $cuantos,
+        ]);
+    }
+
     public function rechazar(Request $request, int $producto): JsonResponse
     {
         $datos = $this->validarObservacion($request);
