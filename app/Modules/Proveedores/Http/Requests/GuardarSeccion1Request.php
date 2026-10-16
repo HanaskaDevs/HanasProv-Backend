@@ -30,7 +30,9 @@ class GuardarSeccion1Request extends FormRequest
                 Rule::exists('Grupo_Impuesto_BC', 'Codigo')->where('Activo', 1),
             ],
             'razon_social' => ['required', 'string', 'max:200'],
-            'nombre_comercial' => ['required', 'string', 'max:200'],
+            // Opcional: si el proveedor no tiene nombre comercial se guarda
+            // la razón social (ver Proveedor::booted).
+            'nombre_comercial' => ['nullable', 'string', 'max:200'],
             'email' => ['required', 'email', 'max:150'],
             'telefono' => ['required', 'string', 'max:20'],
             'direccion' => ['required', 'string', 'max:300'],
