@@ -58,6 +58,47 @@ class Proveedor extends BaseModel
         'Fecha_Modificacion' => 'datetime',
     ];
 
+    /**
+     * Razón social y nombre comercial SIEMPRE en mayúsculas, y sin nombre
+     * comercial vacío ni "N/A": si el proveedor no tiene, se usa la razón
+     * social (pedido explícito del usuario, 16-oct-2026).
+     *
+     * Va en el evento `saving` del modelo y no en cada formulario: así vale
+     * para todos los caminos que guardan un proveedor (la ficha, la edición
+     * de Compras, el alta manual, la carga masiva de cuentas) y ninguno
+     * puede olvidarse. Los proveedores que ya existían se corrigen con la
+     * migración 2026_10_16_120000_nombres_de_proveedor_en_mayusculas.
+     */
+    protected static function booted(): void
+    {
+        static::saving(function (Proveedor $proveedor) {
+            $proveedor->Razon_Social = self::enMayusculas($proveedor->Razon_Social);
+
+            $nombreComercial = self::enMayusculas($proveedor->Nombre_Comercial);
+            $proveedor->Nombre_Comercial = self::esNombreComercialVacio($nombreComercial)
+                ? $proveedor->Razon_Social
+                : $nombreComercial;
+        });
+    }
+
+    /** mb_ y no strtoupper: con strtoupper la "ñ" y las tildes quedaban en minúscula. */
+    public static function enMayusculas(?string $texto): ?string
+    {
+        if ($texto === null) {
+            return null;
+        }
+
+        $limpio = trim(preg_replace('/\s+/u', ' ', $texto));
+
+        return $limpio === '' ? null : mb_strtoupper($limpio, 'UTF-8');
+    }
+
+    /** Vacío o "N/A" = no tiene nombre comercial. */
+    public static function esNombreComercialVacio(?string $nombre): bool
+    {
+        return $nombre === null || $nombre === '' || $nombre === 'N/A';
+    }
+
     public function empresa(): BelongsTo
     {
         return $this->belongsTo(Empresa::class, 'Id_Empresa');
