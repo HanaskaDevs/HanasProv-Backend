@@ -74,6 +74,19 @@ class BannerInformativoController extends Controller
         );
     }
 
+    /** Nuevo orden del carrusel: los ids de TODAS las piezas, de la primera a la última. */
+    public function reordenarPiezas(Request $request): JsonResponse
+    {
+        $datos = $request->validate([
+            'ids' => ['required', 'array', 'min:1'],
+            'ids.*' => ['integer'],
+        ]);
+
+        return response()->json(
+            $this->configuracionService->reordenarPiezasBanner($request->user(), $datos['ids'])
+        );
+    }
+
     public function eliminarPieza(Request $request, int $pieza): JsonResponse
     {
         $this->configuracionService->eliminarPiezaBanner($request->user(), $pieza);

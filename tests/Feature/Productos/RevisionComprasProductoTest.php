@@ -166,13 +166,17 @@ class RevisionComprasProductoTest extends TestCase
         Mail::assertQueued(AvisoProductoMail::class);
     }
 
-    public function test_calidad_no_entra_a_la_bandeja_de_compras(): void
+    /** Calidad tiene acceso total a la bandeja de Compras desde el 16-oct-2026. */
+    public function test_calidad_entra_a_la_bandeja_de_compras(): void
     {
         $empresa = $this->crearEmpresa();
+        [, $proveedor] = $this->crearProveedorConUsuario($empresa);
         $calidad = $this->crearUsuarioInterno($empresa, 'Calidad');
+        $producto = $this->productoEsperandoCompras($proveedor);
 
         $this->getJson('/api/productos-revision', $this->cabecerasComo($calidad, $empresa))
-            ->assertForbidden();
+            ->assertOk()
+            ->assertJsonFragment(['id_producto' => $producto->Id_Producto]);
     }
 
     public function test_admin_puede_resolver_las_dos_etapas(): void
@@ -275,8 +279,15 @@ class RevisionComprasProductoTest extends TestCase
         Mail::assertNothingQueued();
     }
 
-    public function test_calidad_no_puede_aprobar_varios_en_la_etapa_de_compras(): void
+    /**
+     * Si Calidad aprueba en la etapa de Compras, siguen siendo dos pasos (el
+     * producto pasa a la etapa de Calidad), pero no se le manda a Calidad el
+     * aviso de pendientes: lo acaba de mover ella misma.
+     */
+    public function test_calidad_aprueba_en_la_etapa_de_compras_sin_avisarse_a_si_misma(): void
     {
+        Mail::fake();
+
         $empresa = $this->crearEmpresa();
         [, $proveedor] = $this->crearProveedorConUsuario($empresa);
         $calidad = $this->crearUsuarioInterno($empresa, 'Calidad');
@@ -286,7 +297,10 @@ class RevisionComprasProductoTest extends TestCase
             '/api/productos-revision/aprobar-varios',
             ['productos' => [$producto->Id_Producto]],
             $this->cabecerasComo($calidad, $empresa)
-        )->assertForbidden();
+        )->assertOk();
+
+        $this->assertSame(Producto::ETAPA_CALIDAD, $producto->fresh()->Etapa_Aprobacion);
+        Mail::assertNotQueued(PendientesCalidadMail::class);
     }
 
     /**

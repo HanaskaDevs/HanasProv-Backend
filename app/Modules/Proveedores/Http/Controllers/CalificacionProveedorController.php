@@ -5,15 +5,21 @@ namespace App\Modules\Proveedores\Http\Controllers;
 use App\Http\Controllers\Controller;
 use App\Modules\Proveedores\Http\Requests\CalificarFichaGeneralRequest;
 use App\Modules\Proveedores\Http\Requests\CalificarRequest;
+use App\Modules\Proveedores\Http\Requests\GuardarSeccion1Request;
+use App\Modules\Proveedores\Http\Requests\GuardarSeccion2Request;
+use App\Modules\Proveedores\Http\Requests\GuardarSeccion3Request;
 use App\Modules\Proveedores\Http\Resources\FichaProveedorResource;
 use App\Modules\Proveedores\Services\CalificacionProveedorService;
+use App\Modules\Proveedores\Services\FichaProveedorService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class CalificacionProveedorController extends Controller
 {
-    public function __construct(protected CalificacionProveedorService $calificacionService)
-    {
+    public function __construct(
+        protected CalificacionProveedorService $calificacionService,
+        protected FichaProveedorService $fichaService
+    ) {
     }
 
     public function mostrarFicha(Request $request, int $proveedor): JsonResponse
@@ -38,6 +44,42 @@ class CalificacionProveedorController extends Controller
         );
 
         return response()->json(new FichaProveedorResource($ficha));
+    }
+
+    /*
+     * Edición interna de la ficha (Compras y quienes califican la ficha),
+     * mientras el proveedor no esté aprobado. Mismas validaciones que
+     * cuando la llena el proveedor; 'acepta_politicas' se ignora (ver
+     * FichaProveedorService::editarSeccion1ComoInterno). Devuelven la
+     * ficha igual que mostrarFicha, para que la pantalla la reemplace.
+     */
+
+    public function editarFichaSeccion1(GuardarSeccion1Request $request, int $proveedor): JsonResponse
+    {
+        $idEmpresa = (int) $request->attributes->get('id_empresa_activa');
+        $datos = collect($request->validated())->except('acepta_politicas')->all();
+
+        $this->fichaService->editarSeccion1ComoInterno($request->user(), $idEmpresa, $proveedor, $datos);
+
+        return $this->mostrarFicha($request, $proveedor);
+    }
+
+    public function editarFichaSeccion2(GuardarSeccion2Request $request, int $proveedor): JsonResponse
+    {
+        $idEmpresa = (int) $request->attributes->get('id_empresa_activa');
+
+        $this->fichaService->editarSeccion2ComoInterno($request->user(), $idEmpresa, $proveedor, $request->validated('id_clases'));
+
+        return $this->mostrarFicha($request, $proveedor);
+    }
+
+    public function editarFichaSeccion3(GuardarSeccion3Request $request, int $proveedor): JsonResponse
+    {
+        $idEmpresa = (int) $request->attributes->get('id_empresa_activa');
+
+        $this->fichaService->editarSeccion3ComoInterno($request->user(), $idEmpresa, $proveedor, $request->validated('id_categorias'));
+
+        return $this->mostrarFicha($request, $proveedor);
     }
 
     public function mostrarDocumentos(Request $request, int $proveedor): JsonResponse

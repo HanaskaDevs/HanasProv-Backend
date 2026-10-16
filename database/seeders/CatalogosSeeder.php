@@ -111,6 +111,9 @@ class CatalogosSeeder extends Seeder
             // DocumentoProveedorService::descargarPlantilla().
             ['Categoria' => 'General', 'Nombre_Documento' => 'Check list autoevaluación de proveedores', 'Carpeta_Slug' => 'autoevaluacion-proveedores', 'Codigo_Archivo' => 'AP', 'Ruta_Plantilla' => 'autoevaluacion-proveedores.docx', 'Obligatorio' => true, 'Permite_Multiples' => false, 'Requiere_Fecha_Caducidad' => false, 'Requiere_Solo_Quito' => false, 'Requiere_Excepto_Quito' => false],
             ['Categoria' => 'General', 'Nombre_Documento' => 'Certificado bancario', 'Carpeta_Slug' => 'certificado-bancario', 'Codigo_Archivo' => 'CBANCARIO', 'Obligatorio' => false, 'Permite_Multiples' => false, 'Requiere_Fecha_Caducidad' => false, 'Requiere_Solo_Quito' => false, 'Requiere_Excepto_Quito' => false],
+            // Opcional e informativo (16-oct-2026) -> ver
+            // 2026_10_16_090000_plan_contingencia_fenomeno_del_nino.
+            ['Categoria' => 'General', 'Nombre_Documento' => 'Plan de contingencia contra el fenómeno del Niño', 'Carpeta_Slug' => 'plan-contingencia-nino', 'Codigo_Archivo' => 'PCNINO', 'Obligatorio' => false, 'Permite_Multiples' => false, 'Requiere_Fecha_Caducidad' => false, 'Requiere_Solo_Quito' => false, 'Requiere_Excepto_Quito' => false],
         ];
 
         foreach ($tipos as $tipo) {

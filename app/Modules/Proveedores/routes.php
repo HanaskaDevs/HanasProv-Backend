@@ -25,10 +25,16 @@ Route::prefix('proveedores')
 
         Route::get('/{proveedor}', [ProveedorController::class, 'show']);
 
-        // Calificación (Calidad, con Admin/Sistemas de apoyo) -> validado dentro del Service,
-        // no solo por estar en este grupo de rutas.
+        // Calificación (Calidad, con Admin/Sistemas de apoyo; la FICHA también
+        // Compras) -> validado dentro del Service, no solo por estar en este
+        // grupo de rutas.
         Route::get('/{proveedor}/ficha-calificacion', [CalificacionProveedorController::class, 'mostrarFicha']);
         Route::post('/{proveedor}/ficha-calificacion', [CalificacionProveedorController::class, 'calificarFichaGeneral']);
+        // Edición interna de la ficha mientras se revisa (Compras y quienes
+        // califican la ficha; solo si el proveedor no está aprobado).
+        Route::put('/{proveedor}/ficha/seccion-1', [CalificacionProveedorController::class, 'editarFichaSeccion1']);
+        Route::put('/{proveedor}/ficha/seccion-2', [CalificacionProveedorController::class, 'editarFichaSeccion2']);
+        Route::put('/{proveedor}/ficha/seccion-3', [CalificacionProveedorController::class, 'editarFichaSeccion3']);
         Route::get('/{proveedor}/documentos-calificacion', [CalificacionProveedorController::class, 'mostrarDocumentos']);
         Route::post('/{proveedor}/documentos-calificacion/registrar', [CalificacionProveedorController::class, 'registrarCalificacionDocumentos']);
         Route::post('/documentos-calificacion/{documentoProveedor}', [CalificacionProveedorController::class, 'calificarDocumento']);

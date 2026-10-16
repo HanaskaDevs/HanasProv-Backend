@@ -102,7 +102,7 @@ class CalificacionProveedorService
 
     public function obtenerFicha(Usuario $admin, int $idEmpresaActiva, int $idProveedor): Proveedor
     {
-        $this->verificarPuedeCalificar($admin, $idEmpresaActiva);
+        $this->verificarPuedeCalificarFicha($admin, $idEmpresaActiva);
 
         return $this->proveedorDeLaEmpresa($idEmpresaActiva, $idProveedor)
             ->load(['clases', 'categoriasProducto', 'estado', 'calificacionesCampos']);
@@ -130,7 +130,7 @@ class CalificacionProveedorService
         bool $aprobado,
         array $camposRechazados = []
     ): Proveedor {
-        $this->verificarPuedeCalificar($admin, $idEmpresaActiva);
+        $this->verificarPuedeCalificarFicha($admin, $idEmpresaActiva);
 
         $proveedor = $this->proveedorDeLaEmpresa($idEmpresaActiva, $idProveedor);
 
@@ -221,6 +221,9 @@ class CalificacionProveedorService
                 'categoria' => $tipo->Categoria,
                 'nombre_documento' => $tipo->Nombre_Documento,
                 'obligatorio' => (bool) $tipo->Obligatorio,
+                // Plan de contingencia Niño: se ve y se descarga, pero no
+                // se califica (ver TipoDocumento::esInformativo).
+                'informativo' => $tipo->esInformativo(),
                 // Solo en el Certificado bancario: los datos que el
                 // proveedor declaró junto al PDF. Sin esto, el admin
                 // aprobaba el PDF a ciegas y no tenía forma de verificar
@@ -286,6 +289,12 @@ class CalificacionProveedorService
             ->where('Activo', 1)
             ->with('archivo', 'tipoDocumento', 'proveedor')
             ->findOrFail($idDocumentoProveedor);
+
+        if ($documento->tipoDocumento?->esInformativo()) {
+            throw ValidationException::withMessages([
+                'documento' => ['Este documento es informativo: no se califica.'],
+            ]);
+        }
 
         if ($documento->proveedor->Fecha_Registro_Calificacion_Documentos !== null) {
             throw ValidationException::withMessages([
@@ -652,8 +661,15 @@ class CalificacionProveedorService
     {
         $fichaAprobada = $proveedor->fresh('calificacionesCampos')->estadoGeneralCalificacionFicha() === 'Aprobado';
 
+        // El informativo (Plan de contingencia Niño) nace resuelto: si
+        // contara, un proveedor que subió SOLO eso tendría la
+        // documentación "aprobada" sin haber presentado nada calificable.
         $totalDocumentos = DocumentoProveedor::where('Id_Proveedor', $proveedor->Id_Proveedor)
             ->where('Activo', 1)
+            ->whereHas('tipoDocumento', fn ($query) => $query->where(function ($q) {
+                $q->whereNull('Codigo_Archivo')
+                    ->orWhere('Codigo_Archivo', '<>', TipoDocumento::CODIGO_PLAN_CONTINGENCIA_NINO);
+            }))
             ->count();
         $documentosNoAprobados = DocumentoProveedor::where('Id_Proveedor', $proveedor->Id_Proveedor)
             ->where('Activo', 1)
@@ -948,5 +964,24 @@ class CalificacionProveedorService
         if (! $puede) {
             throw new AccessDeniedHttpException('Solo los roles Calidad, Admin y Sistemas pueden calificar proveedores.');
         }
+    }
+
+    /**
+     * La FICHA (no los documentos ni los productos) la califica también
+     * Compras, desde el 16-oct-2026 (pedido explícito del usuario): ve y
+     * aprueba o rechaza la ficha de cualquier proveedor de la empresa. La
+     * califica el primero que llegue, Compras o Calidad.
+     *
+     * Por eso es un permiso aparte de verificarPuedeCalificar: los
+     * documentos y los productos siguen siendo de Calidad (con Admin y
+     * Sistemas de apoyo).
+     */
+    public function verificarPuedeCalificarFicha(Usuario $usuario, int $idEmpresaActiva): void
+    {
+        if ($usuario->Tipo_Usuario === 'Interno' && $usuario->esCompras($idEmpresaActiva)) {
+            return;
+        }
+
+        $this->verificarPuedeCalificar($usuario, $idEmpresaActiva);
     }
 }

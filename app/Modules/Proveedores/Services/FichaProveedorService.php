@@ -36,6 +36,15 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
  */
 class FichaProveedorService
 {
+    /**
+     * true cuando el guardado en curso creó la Confirmacion_Ficha, es
+     * decir, cuando el proveedor registró su ficha por PRIMERA vez. El
+     * aviso a Compras sale recién después de la transacción (ver
+     * avisarSiSeRegistroLaFicha), así nunca avisa de un guardado que
+     * terminó revirtiéndose.
+     */
+    private bool $fichaRecienRegistrada = false;
+
     /** Relaciones que el front necesita en cada respuesta de la ficha. */
     private const RELACIONES_FICHA = ['clases', 'categoriasProducto', 'calificacionesCampos', 'confirmacionFicha'];
 
@@ -55,38 +64,11 @@ class FichaProveedorService
         $this->exigirAceptacionSiCorresponde($proveedor, $completaraLaFicha, $aceptaPoliticas);
 
         DB::transaction(function () use ($proveedor, $data, $usuario, $completaraLaFicha) {
-            $proveedor->forceFill([
-                'Ruc' => $data['ruc'],
-                'Clase_Contribuyente' => $data['clase_contribuyente'] ?? null,
-                'Razon_Social' => $data['razon_social'],
-                'Nombre_Comercial' => $data['nombre_comercial'] ?? null,
-                'Email' => $data['email'],
-                'Telefono' => $data['telefono'] ?? null,
-                'Direccion' => $data['direccion'] ?? null,
-                'Ciudad' => $data['ciudad'] ?? null,
-                'Pagina_Web' => $data['pagina_web'] ?? null,
-                'Latitud' => $data['latitud'] ?? null,
-                'Longitud' => $data['longitud'] ?? null,
-                'Representante_Legal' => $data['representante_legal'] ?? null,
-                'Correo_Representante' => $data['correo_representante'] ?? null,
-                'Telefono_Representante' => $data['telefono_representante'] ?? null,
-                'Contacto_Venta' => $data['contacto_venta'] ?? null,
-                'Correo_Venta' => $data['correo_venta'] ?? null,
-                'Telefono_Contacto_Venta' => $data['telefono_contacto_venta'] ?? null,
-                'Contacto_Calidad' => $data['contacto_calidad'] ?? null,
-                'Correo_Calidad' => $data['correo_calidad'] ?? null,
-                'Telefono_Contacto_Calidad' => $data['telefono_contacto_calidad'] ?? null,
-                'Contacto_Contabilidad' => $data['contacto_contabilidad'] ?? null,
-                'Correo_Contabilidad' => $data['correo_contabilidad'] ?? null,
-                'Telefono_Contabilidad' => $data['telefono_contabilidad'] ?? null,
-                'Modificado_Por' => $usuario->Id_Usuario,
-                'Fecha_Modificacion' => now(),
-            ])->save();
-
-            $this->recalcularProgreso($proveedor);
-            $this->reabrirRevisionSiEstabaRechazada($proveedor, CalificacionProveedorService::CAMPOS_SECCION1);
+            $this->escribirSeccion1($proveedor, $data, $usuario);
             $this->registrarConfirmacionSiCorresponde($proveedor, $completaraLaFicha);
         });
+
+        $this->avisarSiSeRegistroLaFicha($proveedor);
 
         return $proveedor->fresh(self::RELACIONES_FICHA);
     }
@@ -137,17 +119,11 @@ class FichaProveedorService
         $this->exigirAceptacionSiCorresponde($proveedor, $completaraLaFicha, $aceptaPoliticas);
 
         DB::transaction(function () use ($proveedor, $idClases, $usuario, $completaraLaFicha) {
-            $proveedor->clases()->sync($idClases);
-
-            $proveedor->forceFill([
-                'Modificado_Por' => $usuario->Id_Usuario,
-                'Fecha_Modificacion' => now(),
-            ])->save();
-
-            $this->recalcularProgreso($proveedor);
-            $this->reabrirRevisionSiEstabaRechazada($proveedor, [CalificacionProveedorService::CAMPO_CLASE]);
+            $this->escribirSeccion2($proveedor, $idClases, $usuario);
             $this->registrarConfirmacionSiCorresponde($proveedor, $completaraLaFicha);
         });
+
+        $this->avisarSiSeRegistroLaFicha($proveedor);
 
         return $proveedor->fresh(self::RELACIONES_FICHA);
     }
@@ -163,19 +139,163 @@ class FichaProveedorService
         $this->exigirAceptacionSiCorresponde($proveedor, $completaraLaFicha, $aceptaPoliticas);
 
         DB::transaction(function () use ($proveedor, $idCategorias, $usuario, $completaraLaFicha) {
-            $proveedor->categoriasProducto()->sync($idCategorias);
-
-            $proveedor->forceFill([
-                'Modificado_Por' => $usuario->Id_Usuario,
-                'Fecha_Modificacion' => now(),
-            ])->save();
-
-            $this->recalcularProgreso($proveedor);
-            $this->reabrirRevisionSiEstabaRechazada($proveedor, [CalificacionProveedorService::CAMPO_CATEGORIA]);
+            $this->escribirSeccion3($proveedor, $idCategorias, $usuario);
             $this->registrarConfirmacionSiCorresponde($proveedor, $completaraLaFicha);
         });
 
+        $this->avisarSiSeRegistroLaFicha($proveedor);
+
         return $proveedor->fresh(self::RELACIONES_FICHA);
+    }
+
+    // ---------- Escritura común (proveedor y personal interno) ----------
+
+    /**
+     * Lo que guarda la sección 1, quien sea que la guarde. Va aparte para
+     * que la edición interna (Compras y quienes califican la ficha) escriba
+     * exactamente igual que el proveedor, sin pasar por la aceptación de
+     * políticas ni la confirmación, que son actos del proveedor.
+     */
+    protected function escribirSeccion1(Proveedor $proveedor, array $data, Usuario $usuario): void
+    {
+        $proveedor->forceFill([
+            'Ruc' => $data['ruc'],
+            'Clase_Contribuyente' => $data['clase_contribuyente'] ?? null,
+            'Razon_Social' => $data['razon_social'],
+            'Nombre_Comercial' => $data['nombre_comercial'] ?? null,
+            'Email' => $data['email'],
+            'Telefono' => $data['telefono'] ?? null,
+            'Direccion' => $data['direccion'] ?? null,
+            'Ciudad' => $data['ciudad'] ?? null,
+            'Pagina_Web' => $data['pagina_web'] ?? null,
+            'Latitud' => $data['latitud'] ?? null,
+            'Longitud' => $data['longitud'] ?? null,
+            'Representante_Legal' => $data['representante_legal'] ?? null,
+            'Correo_Representante' => $data['correo_representante'] ?? null,
+            'Telefono_Representante' => $data['telefono_representante'] ?? null,
+            'Contacto_Venta' => $data['contacto_venta'] ?? null,
+            'Correo_Venta' => $data['correo_venta'] ?? null,
+            'Telefono_Contacto_Venta' => $data['telefono_contacto_venta'] ?? null,
+            'Contacto_Calidad' => $data['contacto_calidad'] ?? null,
+            'Correo_Calidad' => $data['correo_calidad'] ?? null,
+            'Telefono_Contacto_Calidad' => $data['telefono_contacto_calidad'] ?? null,
+            'Contacto_Contabilidad' => $data['contacto_contabilidad'] ?? null,
+            'Correo_Contabilidad' => $data['correo_contabilidad'] ?? null,
+            'Telefono_Contabilidad' => $data['telefono_contabilidad'] ?? null,
+            'Modificado_Por' => $usuario->Id_Usuario,
+            'Fecha_Modificacion' => now(),
+        ])->save();
+
+        $this->recalcularProgreso($proveedor);
+        $this->reabrirRevisionSiEstabaRechazada($proveedor, CalificacionProveedorService::CAMPOS_SECCION1);
+    }
+
+    protected function escribirSeccion2(Proveedor $proveedor, array $idClases, Usuario $usuario): void
+    {
+        $proveedor->clases()->sync($idClases);
+
+        $proveedor->forceFill([
+            'Modificado_Por' => $usuario->Id_Usuario,
+            'Fecha_Modificacion' => now(),
+        ])->save();
+
+        $this->recalcularProgreso($proveedor);
+        $this->reabrirRevisionSiEstabaRechazada($proveedor, [CalificacionProveedorService::CAMPO_CLASE]);
+    }
+
+    protected function escribirSeccion3(Proveedor $proveedor, array $idCategorias, Usuario $usuario): void
+    {
+        $proveedor->categoriasProducto()->sync($idCategorias);
+
+        $proveedor->forceFill([
+            'Modificado_Por' => $usuario->Id_Usuario,
+            'Fecha_Modificacion' => now(),
+        ])->save();
+
+        $this->recalcularProgreso($proveedor);
+        $this->reabrirRevisionSiEstabaRechazada($proveedor, [CalificacionProveedorService::CAMPO_CATEGORIA]);
+    }
+
+    // ---------- Edición interna (16-oct-2026) ----------
+
+    /**
+     * Compras (y quienes califican la ficha: Calidad, Admin, Sistemas)
+     * corrigen la ficha de un proveedor mientras la revisan, para después
+     * aprobarla o rechazarla (pedido explícito del usuario, 16-oct-2026).
+     *
+     * Lo que NO hace, a propósito:
+     *  - no acepta políticas ni crea Confirmacion_Ficha: es la evidencia de
+     *    que el PROVEEDOR aceptó, nadie puede aceptarlo por él;
+     *  - no manda el aviso de "ficha registrada".
+     *
+     * Lo que SÍ hace, igual que cuando guarda el proveedor: si un campo de
+     * la sección estaba Rechazado, vuelve a "Sin calificar". Quien lo
+     * corrigió es quien lo va a calificar, y así puede aprobarlo.
+     *
+     * Solo mientras el proveedor no esté aprobado (ver
+     * fichaEditablePorInterno).
+     */
+    public function editarSeccion1ComoInterno(Usuario $editor, int $idEmpresaActiva, int $idProveedor, array $data): Proveedor
+    {
+        $proveedor = $this->proveedorEditablePorInterno($editor, $idEmpresaActiva, $idProveedor);
+
+        DB::transaction(fn () => $this->escribirSeccion1($proveedor, $data, $editor));
+
+        return $proveedor;
+    }
+
+    public function editarSeccion2ComoInterno(Usuario $editor, int $idEmpresaActiva, int $idProveedor, array $idClases): Proveedor
+    {
+        $proveedor = $this->proveedorEditablePorInterno($editor, $idEmpresaActiva, $idProveedor);
+
+        DB::transaction(fn () => $this->escribirSeccion2($proveedor, $idClases, $editor));
+
+        return $proveedor;
+    }
+
+    public function editarSeccion3ComoInterno(Usuario $editor, int $idEmpresaActiva, int $idProveedor, array $idCategorias): Proveedor
+    {
+        $proveedor = $this->proveedorEditablePorInterno($editor, $idEmpresaActiva, $idProveedor);
+
+        DB::transaction(fn () => $this->escribirSeccion3($proveedor, $idCategorias, $editor));
+
+        return $proveedor;
+    }
+
+    /**
+     * Aprobado o Suspendido = ya se posteó a Business Central, y una
+     * edición posterior en el portal NO se re-sincroniza (el posteo solo
+     * corre al aprobar). Editarla ahí dejaría el portal y el ERP diciendo
+     * cosas distintas, así que queda de solo lectura.
+     */
+    public static function fichaEditablePorInterno(Proveedor $proveedor): bool
+    {
+        return ! in_array(
+            (int) $proveedor->Id_Estado_Proveedor,
+            [EstadoProveedor::APROBADO, EstadoProveedor::SUSPENDIDO],
+            true
+        );
+    }
+
+    protected function proveedorEditablePorInterno(Usuario $editor, int $idEmpresaActiva, int $idProveedor): Proveedor
+    {
+        app(CalificacionProveedorService::class)->verificarPuedeCalificarFicha($editor, $idEmpresaActiva);
+
+        $proveedor = Proveedor::where('Id_Empresa', $idEmpresaActiva)
+            ->where('Activo', 1)
+            ->find($idProveedor);
+
+        if (! $proveedor) {
+            throw new NotFoundHttpException('El proveedor no existe en la empresa activa.');
+        }
+
+        if (! self::fichaEditablePorInterno($proveedor)) {
+            throw ValidationException::withMessages([
+                'ficha' => ['Este proveedor ya está aprobado: su ficha es de solo lectura.'],
+            ]);
+        }
+
+        return $proveedor;
     }
 
     /** Mensaje que ve el proveedor si intenta enviar la ficha sin aceptar. */
@@ -223,6 +343,20 @@ class FichaProveedorService
             'Id_Proveedor' => $proveedor->Id_Proveedor,
             'Fecha_Confirmacion' => today(),
         ]);
+
+        $this->fichaRecienRegistrada = true;
+    }
+
+    /** Ver $fichaRecienRegistrada y AvisoFichaRegistradaService. */
+    protected function avisarSiSeRegistroLaFicha(Proveedor $proveedor): void
+    {
+        if (! $this->fichaRecienRegistrada) {
+            return;
+        }
+
+        $this->fichaRecienRegistrada = false;
+
+        app(AvisoFichaRegistradaService::class)->avisar($proveedor);
     }
 
     private function yaAceptoPoliticas(Proveedor $proveedor): bool

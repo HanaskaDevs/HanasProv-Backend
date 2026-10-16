@@ -465,6 +465,9 @@ class ConfiguracionService
         $piezas = BannerInformativo::query()
             ->when(! $incluirInactivas, fn ($query) => $query->where('Activo', 1))
             ->orderBy('Orden')
+            // Desempate estable: con dos piezas en el mismo Orden, SQL
+            // Server no garantiza cuál sale primero.
+            ->orderBy('Id_Banner_Informativo')
             ->get()
             ->map(fn (BannerInformativo $pieza) => [
                 'id_banner_informativo' => $pieza->Id_Banner_Informativo,
@@ -618,6 +621,50 @@ class ConfiguracionService
         $pieza->delete();
 
         $this->renovarVersionBanner($usuario);
+    }
+
+    /**
+     * Reordena TODAS las piezas de una vez, en el orden en que llegan los
+     * ids (la primera queda con Orden 1).
+     *
+     * Se exige la lista completa, activas y ocultas: con una lista parcial
+     * no hay forma de saber dónde van las que faltan, y mover una sola
+     * pieza editando su número dejaba empates que el carrusel resolvía a
+     * su manera.
+     *
+     * @param  array<int, int>  $idsEnOrden
+     * @return array<string, mixed>
+     */
+    public function reordenarPiezasBanner(Usuario $usuario, array $idsEnOrden): array
+    {
+        $this->verificarSistemas($usuario);
+
+        $idsEnOrden = array_map('intval', $idsEnOrden);
+        $existentes = BannerInformativo::pluck('Id_Banner_Informativo')->map(fn ($id) => (int) $id)->all();
+
+        $pedidos = $idsEnOrden;
+        sort($pedidos);
+        sort($existentes);
+
+        if (count(array_unique($idsEnOrden)) !== count($idsEnOrden) || $pedidos !== $existentes) {
+            throw ValidationException::withMessages([
+                'ids' => ['La lista debe traer cada pieza del banner exactamente una vez. Recarga la pantalla e intenta de nuevo.'],
+            ]);
+        }
+
+        DB::transaction(function () use ($usuario, $idsEnOrden) {
+            foreach ($idsEnOrden as $posicion => $idPieza) {
+                BannerInformativo::whereKey($idPieza)->update([
+                    'Orden' => $posicion + 1,
+                    'Modificado_Por' => $usuario->Id_Usuario,
+                    'Fecha_Modificacion' => $this->ahoraSql(),
+                ]);
+            }
+        });
+
+        $this->renovarVersionBanner($usuario);
+
+        return $this->obtenerBannerInformativo(incluirInactivas: true);
     }
 
     /**

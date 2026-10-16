@@ -115,10 +115,11 @@ class ProveedorService
 
     /**
      * Quién puede ver el listado y el detalle: Sistemas y Admin porque
-     * administran, Calidad porque la calificación de proveedores es suya.
-     * Son los únicos roles con las pantallas de Calificación y Detalle de
-     * proveedores en el menú. Compras y Guardia quedan fuera, y el
-     * Proveedor sobre todo: era el que podía bajarse a su competencia.
+     * administran, Calidad porque la calificación de proveedores es suya, y
+     * Compras porque desde el 16-oct-2026 también revisa y califica la
+     * ficha (ver CalificacionProveedorService::verificarPuedeCalificarFicha).
+     * Guardia queda fuera, y el Proveedor sobre todo: era el que podía
+     * bajarse a su competencia.
      */
     protected function verificarPuedeVer(Usuario $usuario, int $idEmpresa): void
     {
@@ -128,10 +129,11 @@ class ProveedorService
 
         $puede = $usuario->esSistemas($idEmpresa)
             || $usuario->esAdmin($idEmpresa)
-            || $usuario->esCalidad($idEmpresa);
+            || $usuario->esCalidad($idEmpresa)
+            || $usuario->esCompras($idEmpresa);
 
         if (! $puede) {
-            throw new AccessDeniedHttpException('Solo los roles Sistemas, Admin y Calidad pueden ver los proveedores de la empresa.');
+            throw new AccessDeniedHttpException('Solo los roles Sistemas, Admin, Calidad y Compras pueden ver los proveedores de la empresa.');
         }
     }
 }

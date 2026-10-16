@@ -2,6 +2,7 @@
 
 namespace App\Modules\Documentos_Proveedor\Http\Requests;
 
+use App\Shared\ArchivoPdf;
 use Illuminate\Foundation\Http\FormRequest;
 
 class SubirDocumentoRequest extends FormRequest
@@ -14,7 +15,9 @@ class SubirDocumentoRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'archivo' => ['required', 'file', 'mimes:pdf', 'max:4096'],
+            // ArchivoPdf y no 'mimes:pdf': acepta los PDF con algo antes del
+            // encabezado (ver la clase), que Acrobat abre y libmagic no.
+            'archivo' => ['required', 'file', new ArchivoPdf, 'max:4096'],
             /*
              * MÍNIMO UN MES DE VIGENCIA (pedido del usuario, 23-sep-2026).
              *
