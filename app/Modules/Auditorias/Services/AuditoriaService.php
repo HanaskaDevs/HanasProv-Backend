@@ -297,13 +297,6 @@ class AuditoriaService
     }
 
     /**
-     * Solo Sistemas y Calidad (pedido explícito del usuario, 26-ago-2026:
-     * "Auditorías solo para los roles CALIDAD y SISTEMAS") -> Admin quedó
-     * fuera a propósito, a diferencia de Calificación de Recepciones
-     * (CalificacionRecepcionService::verificarAcceso), que SÍ sigue
-     * incluyendo a Admin.
-     */
-    /**
      * Resumen para el panel de bienvenida de Calidad (pedido explícito del
      * usuario, 27-ago-2026: reemplazar el cartel genérico "usa el menú
      * lateral..." por algo con información real). Solo cuenta lo que ya
@@ -346,9 +339,57 @@ class AuditoriaService
         ];
     }
 
+    /**
+     * Mini reporte de la pantalla de Auditorías: una fila por proveedor ya
+     * auditado, con su ÚLTIMA auditoría finalizada (la misma que cuenta en
+     * la calificación global, ver CalificacionGlobalService::
+     * componenteAuditoriaProveedor) y cuántas lleva en total.
+     *
+     * Se agrupa en PHP y no en SQL: una empresa del grupo tiene decenas de
+     * auditorías, y así se evita un ROW_NUMBER() propio de SQL Server.
+     */
+    public function reporteUltimasPorProveedor(Usuario $usuario, int $idEmpresa): Collection
+    {
+        $this->verificarAcceso($usuario, $idEmpresa);
+
+        return Auditoria::where('Id_Empresa', $idEmpresa)
+            ->where('Estado', 'Finalizada')
+            ->whereNotNull('Porcentaje_Cumplimiento')
+            ->with(['proveedor', 'auditor', 'tipoAuditoria'])
+            ->orderByDesc('Fecha_Auditoria')
+            ->orderByDesc('Id_Auditoria')
+            ->get()
+            ->groupBy('Id_Proveedor')
+            ->map(function (Collection $auditorias) {
+                /** @var Auditoria $ultima */
+                $ultima = $auditorias->first();
+
+                return [
+                    'id_proveedor' => (int) $ultima->Id_Proveedor,
+                    'proveedor' => $ultima->proveedor
+                        ? ($ultima->proveedor->Nombre_Comercial ?: $ultima->proveedor->Razon_Social)
+                        : null,
+                    'ruc' => $ultima->proveedor?->Ruc,
+                    'tipo_auditoria' => $ultima->tipoAuditoria?->Nombre,
+                    'fecha' => $ultima->Fecha_Auditoria?->format('Y-m-d'),
+                    'auditor' => $ultima->auditor?->Nombre_Completo,
+                    'porcentaje' => (float) $ultima->Porcentaje_Cumplimiento,
+                    'cantidad' => $auditorias->count(),
+                ];
+            })
+            ->sortBy('proveedor', SORT_NATURAL | SORT_FLAG_CASE)
+            ->values();
+    }
+
+    /**
+     * Sistemas, Admin y Calidad. Admin había quedado fuera el 26-ago-2026
+     * y vuelve con acceso completo, auditar incluido (pedido explícito del
+     * usuario, 16-oct-2026), igual que en Calificación de Recepciones.
+     */
     protected function verificarAcceso(Usuario $usuario, int $idEmpresa): void
     {
         $tieneAcceso = $usuario->esSistemas($idEmpresa)
+            || $usuario->esAdmin($idEmpresa)
             || $usuario->esCalidad($idEmpresa);
 
         if (! $tieneAcceso) {

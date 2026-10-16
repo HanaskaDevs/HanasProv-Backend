@@ -41,7 +41,8 @@ class RevisionComprasProductoService
      * Quién puede resolver esta etapa: Compras (los dueños del paso),
      * más Admin y Sistemas -pedido explícito del usuario: "admin pueden
      * aprobar tanto en el proceso de compras como en el de calidad", y
-     * Sistemas tiene acceso total en todo el portal-.
+     * Sistemas tiene acceso total en todo el portal-. Calidad entra con
+     * acceso total desde el 16-oct-2026 (pedido explícito del usuario).
      */
     public function verificarAcceso(Usuario $usuario, int $idEmpresaActiva): void
     {
@@ -51,10 +52,11 @@ class RevisionComprasProductoService
 
         $puede = $usuario->esCompras($idEmpresaActiva)
             || $usuario->esAdmin($idEmpresaActiva)
-            || $usuario->esSistemas($idEmpresaActiva);
+            || $usuario->esSistemas($idEmpresaActiva)
+            || $usuario->esCalidad($idEmpresaActiva);
 
         if (! $puede) {
-            throw new AccessDeniedHttpException('Solo los roles Compras, Admin y Sistemas revisan los productos enviados.');
+            throw new AccessDeniedHttpException('Solo los roles Compras, Calidad, Admin y Sistemas revisan los productos enviados.');
         }
     }
 

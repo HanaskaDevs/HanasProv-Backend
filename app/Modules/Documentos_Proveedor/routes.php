@@ -2,6 +2,7 @@
 
 use App\Modules\Auth\Http\Middleware\EmpresaActiva;
 use App\Modules\Documentos_Proveedor\Http\Controllers\DocumentoProveedorController;
+use App\Modules\Documentos_Proveedor\Http\Controllers\PlanContingenciaNinoController;
 use App\Modules\Documentos_Proveedor\Http\Controllers\ReporteCaducidadController;
 use Illuminate\Support\Facades\Route;
 
@@ -26,4 +27,9 @@ Route::prefix('mi-documentos')
  * mirando los documentos de todos los proveedores de la empresa.
  */
 Route::get('/reportes/caducidad-documentos', [ReporteCaducidadController::class, 'index'])
+    ->middleware(['auth:sanctum', EmpresaActiva::class]);
+
+// Seguimiento del Plan de contingencia contra el fenómeno del Niño
+// (Sistemas / Admin / Calidad): tarjeta del panel de inicio y su detalle.
+Route::get('/reportes/plan-contingencia-nino', [PlanContingenciaNinoController::class, 'index'])
     ->middleware(['auth:sanctum', EmpresaActiva::class]);

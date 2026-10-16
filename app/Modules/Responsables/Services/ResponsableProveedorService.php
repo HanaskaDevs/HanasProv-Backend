@@ -175,7 +175,7 @@ class ResponsableProveedorService
             throw ValidationException::withMessages([
                 'responsable' => [
                     "No se puede eliminar: tiene {$responsable->asignaciones_count} proveedor(es) asignado(s). "
-                    .'Desactívalo, o importá el archivo con otro responsable para esos proveedores.',
+                    .'Desactívalo, o importa el archivo con otro responsable para esos proveedores.',
                 ],
             ]);
         }
@@ -331,7 +331,7 @@ class ResponsableProveedorService
                     $nroFila,
                     $codigo,
                     $correo,
-                    'Ese correo no está en la lista de responsables. Agregalo primero y volvé a importar.'
+                    'Ese correo no está en la lista de responsables. Agrégalo primero y vuelve a importar.'
                 );
 
                 continue;

@@ -56,6 +56,14 @@ class CalificacionRecepcionController extends Controller
         );
     }
 
+    /** Mini reporte: la última calificación de cada proveedor calificado. */
+    public function reporte(Request $request): JsonResponse
+    {
+        return response()->json(
+            $this->servicio->reporteUltimasPorProveedor($request->user(), $this->idEmpresa($request))
+        );
+    }
+
     /** Retoma el borrador del proveedor o arranca uno nuevo, y lo devuelve armado. */
     public function iniciar(Request $request): JsonResponse
     {

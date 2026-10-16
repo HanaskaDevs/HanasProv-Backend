@@ -85,7 +85,7 @@ Route::prefix('productos-proveedor')
  *
  *     proveedor envía  ->  COMPRAS  ->  Calidad  ->  aprobado
  *
- * La resuelven Compras, Admin y Sistemas (lo valida
+ * La resuelven Compras, Calidad, Admin y Sistemas (lo valida
  * RevisionComprasProductoService::verificarAcceso).
  */
 Route::prefix('productos-revision')

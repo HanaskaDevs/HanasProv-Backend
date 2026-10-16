@@ -101,6 +101,14 @@ class AvisoProductosService
             return;
         }
 
+        // Calidad también resuelve la etapa de Compras (16-oct-2026): si el
+        // que aprobó ES de Calidad, el producto igual pasa a su etapa, pero
+        // avisarle a Calidad que tiene pendiente lo que ella misma acaba
+        // de mover sería ruido.
+        if ($quienAprobo->esCalidad($proveedor->Id_Empresa)) {
+            return;
+        }
+
         $destinatarios = $this->correosDelRol($proveedor->Id_Empresa, 'Calidad');
 
         if (empty($destinatarios)) {

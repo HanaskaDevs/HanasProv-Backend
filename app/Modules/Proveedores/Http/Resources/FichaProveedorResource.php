@@ -47,6 +47,9 @@ class FichaProveedorResource extends JsonResource
              * formulario, no pueden volver a discrepar.
              */
             'seccion_1_completa' => FichaProveedorService::seccion1EstaCompleta($this->resource),
+            // Si el personal interno (Compras / quienes califican la ficha)
+            // la puede editar: no, una vez aprobado el proveedor.
+            'editable_por_interno' => FichaProveedorService::fichaEditablePorInterno($this->resource),
 
             /**
              * Fecha (sin hora, 'Y-m-d') en que el proveedor aceptó las

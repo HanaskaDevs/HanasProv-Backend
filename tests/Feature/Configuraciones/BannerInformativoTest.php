@@ -133,6 +133,89 @@ class BannerInformativoTest extends TestCase
         $this->assertSame(['Primera', 'Segunda', 'Tercera'], $titulos);
     }
 
+    /** Crea las piezas con esos títulos, en ese orden, y devuelve sus ids. */
+    private function crearPiezas(array $cabeceras, array $titulos): array
+    {
+        return array_map(
+            fn (string $titulo) => $this->post(
+                '/api/configuraciones/banner-informativo/piezas',
+                ['media' => $this->imagen(), 'titulo' => $titulo],
+                $cabeceras
+            )->assertSuccessful()->json('Id_Banner_Informativo'),
+            $titulos
+        );
+    }
+
+    /** Sistemas reordena las piezas y el carrusel sale en el orden nuevo. */
+    public function test_sistemas_reordena_las_piezas(): void
+    {
+        $empresa = $this->crearEmpresa();
+        $sistemas = $this->crearUsuarioInterno($empresa, 'Sistemas');
+        $cabeceras = $this->cabecerasComo($sistemas, $empresa);
+
+        [$a, $b, $c] = $this->crearPiezas($cabeceras, ['A', 'B', 'C']);
+        $this->encender($cabeceras)->assertOk();
+
+        $this->putJson('/api/configuraciones/banner-informativo/piezas/orden', ['ids' => [$c, $a, $b]], $cabeceras)
+            ->assertOk()
+            ->assertJsonPath('piezas.0.titulo', 'C');
+
+        $titulos = collect($this->getJson('/api/banner-informativo', $cabeceras)->json('piezas'))
+            ->pluck('titulo')
+            ->all();
+
+        $this->assertSame(['C', 'A', 'B'], $titulos);
+    }
+
+    /**
+     * Reordenar también renueva la versión: si no, quien ya cerró el
+     * banner nunca vería el orden nuevo.
+     */
+    public function test_reordenar_renueva_la_version(): void
+    {
+        $empresa = $this->crearEmpresa();
+        $sistemas = $this->crearUsuarioInterno($empresa, 'Sistemas');
+        $cabeceras = $this->cabecerasComo($sistemas, $empresa);
+
+        [$a, $b] = $this->crearPiezas($cabeceras, ['A', 'B']);
+        $versionAntes = $this->encender($cabeceras)->json('version');
+
+        $this->travel(2)->seconds();
+
+        $versionDespues = $this->putJson('/api/configuraciones/banner-informativo/piezas/orden', ['ids' => [$b, $a]], $cabeceras)
+            ->assertOk()
+            ->json('version');
+
+        $this->assertNotSame($versionAntes, $versionDespues);
+    }
+
+    /** La lista tiene que traer cada pieza una sola vez: ni faltantes, ni repetidas, ni ajenas. */
+    public function test_reordenar_con_una_lista_incompleta_se_rechaza(): void
+    {
+        $empresa = $this->crearEmpresa();
+        $sistemas = $this->crearUsuarioInterno($empresa, 'Sistemas');
+        $cabeceras = $this->cabecerasComo($sistemas, $empresa);
+
+        [$a, $b, $c] = $this->crearPiezas($cabeceras, ['A', 'B', 'C']);
+        $url = '/api/configuraciones/banner-informativo/piezas/orden';
+
+        $this->putJson($url, ['ids' => [$a, $b]], $cabeceras)->assertStatus(422);
+        $this->putJson($url, ['ids' => [$a, $a, $b]], $cabeceras)->assertStatus(422);
+        $this->putJson($url, ['ids' => [$a, $b, $c, 999999999]], $cabeceras)->assertStatus(422);
+    }
+
+    public function test_solo_sistemas_puede_reordenar(): void
+    {
+        $empresa = $this->crearEmpresa();
+        $sistemas = $this->crearUsuarioInterno($empresa, 'Sistemas');
+        [$a, $b] = $this->crearPiezas($this->cabecerasComo($sistemas, $empresa), ['A', 'B']);
+
+        $admin = $this->crearUsuarioInterno($empresa, 'Admin');
+
+        $this->putJson('/api/configuraciones/banner-informativo/piezas/orden', ['ids' => [$b, $a]], $this->cabecerasComo($admin, $empresa))
+            ->assertForbidden();
+    }
+
     /** También admite un video. */
     public function test_admite_un_video(): void
     {

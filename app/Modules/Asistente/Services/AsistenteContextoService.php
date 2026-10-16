@@ -6,6 +6,7 @@ use App\Modules\Auditorias\Models\Auditoria;
 use App\Modules\Auditorias\Models\CalificacionRecepcion;
 use App\Modules\Auth\Models\Usuario;
 use App\Modules\Documentos_Proveedor\Models\DocumentoProveedor;
+use App\Modules\Documentos_Proveedor\Models\TipoDocumento;
 use App\Modules\Documentos_Proveedor\Services\DocumentoProveedorService;
 use App\Modules\Ficha_Productos\Models\Producto;
 use App\Modules\Ficha_Productos\Services\ProductoService;
@@ -241,7 +242,7 @@ class AsistenteContextoService
 
         if ($responsable === null) {
             return 'CONTACTO EN HANASKA'."\n"
-                .'Este proveedor NO tiene una persona asignada. Si pregunta con quién contactarse, decile que '
+                .'Este proveedor NO tiene una persona asignada. Si pregunta con quién contactarse, dile que '
                 .'todavía no tiene un responsable asignado y que lo consulte con el equipo de Compras. '
                 .'NO inventes ningún correo ni teléfono.';
         }
@@ -255,8 +256,8 @@ class AsistenteContextoService
         return 'CONTACTO EN HANASKA (la persona asignada a ESTE proveedor)'."\n"
             .$linea."\n"
             .'Si pregunta con quién contactarse, a quién escribirle, quién lo atiende, o si tiene una duda que no '
-            .'podés resolver, pasale estos datos tal cual: "Para dudas o inquietudes contáctese con ...". '
-            .'Usá SOLO estos datos, no los de ninguna otra persona.';
+            .'puedes resolver, pásale estos datos tal cual: "Para dudas o inquietudes contáctese con ...". '
+            .'Usa SOLO estos datos, no los de ninguna otra persona.';
     }
 
     /**
@@ -327,6 +328,15 @@ class AsistenteContextoService
                 $lineas[] = 'VENCIDOS O POR VENCER: '.$this->lista($vencidos)
                     .'. Recuerda que vencido el plazo hay 15 días de gracia y después se suspende el acceso.';
             }
+
+            // Opcional, pero la empresa lo pide a todos: Hana se lo recuerda
+            // también al entrar a Documentación (ver HanaBot en el front).
+            $tienePlanNino = $subidos->contains(
+                fn (DocumentoProveedor $doc) => $doc->tipoDocumento?->Codigo_Archivo === TipoDocumento::CODIGO_PLAN_CONTINGENCIA_NINO
+            );
+            $lineas[] = $tienePlanNino
+                ? 'Ya cargó su Plan de contingencia contra el fenómeno del Niño.'
+                : 'NO cargó su Plan de contingencia contra el fenómeno del Niño: es opcional, no frena nada, pero recuérdaselo. Se carga en Documentación, en cualquier momento (aunque ya haya registrado su documentación).';
 
             return implode("\n", $lineas);
         } catch (\Throwable $e) {

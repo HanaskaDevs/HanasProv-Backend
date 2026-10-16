@@ -26,6 +26,20 @@ class TipoDocumento extends Model
         'Activo' => 'boolean',
     ];
 
+    /** Plan de contingencia contra el fenómeno del Niño (16-oct-2026). */
+    public const CODIGO_PLAN_CONTINGENCIA_NINO = 'PCNINO';
+
+    /**
+     * Documento INFORMATIVO: el proveedor lo puede subir en cualquier
+     * momento (aunque ya haya registrado su documentación) y Calidad lo ve,
+     * pero no lo califica. Al subirlo queda resuelto, así ningún contador
+     * de "por calificar" lo toma y no frena la aprobación del proveedor.
+     */
+    public function esInformativo(): bool
+    {
+        return $this->Codigo_Archivo === self::CODIGO_PLAN_CONTINGENCIA_NINO;
+    }
+
     public function documentosProveedor(): HasMany
     {
         return $this->hasMany(DocumentoProveedor::class, 'Id_Tipo_Documento');

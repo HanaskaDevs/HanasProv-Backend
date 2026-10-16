@@ -596,21 +596,24 @@ class AltaProveedorCompletaTest extends TestCase
     }
 
     /**
-     * Abrirle la calificación a Calidad no la abre para cualquier interno:
-     * Compras sigue sin poder calificar la ficha ni los documentos.
+     * Compras califica la FICHA desde el 16-oct-2026, pero los documentos
+     * siguen siendo de Calidad.
      */
-    public function test_compras_no_califica_la_ficha_ni_los_documentos(): void
+    public function test_compras_califica_la_ficha_pero_no_los_documentos(): void
     {
         $empresa = $this->crearEmpresa();
         [, $proveedor] = $this->crearProveedorConUsuario($empresa);
         $compras = $this->crearUsuarioInterno($empresa, 'Compras');
         $cabeceras = $this->cabecerasComo($compras, $empresa);
 
+        $this->getJson("/api/proveedores/{$proveedor->Id_Proveedor}/ficha-calificacion", $cabeceras)
+            ->assertOk();
+
         $this->postJson(
             "/api/proveedores/{$proveedor->Id_Proveedor}/ficha-calificacion",
             ['aprobado' => true],
             $cabeceras
-        )->assertForbidden();
+        )->assertSuccessful();
 
         $this->getJson("/api/proveedores/{$proveedor->Id_Proveedor}/documentos-calificacion", $cabeceras)
             ->assertForbidden();

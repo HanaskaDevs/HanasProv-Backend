@@ -22,10 +22,9 @@ use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 /**
  * Calendario de Horarios de Entrega de Proveedores.
  *
- * Solo VEN el calendario Sistemas, Admin, Compras y Calidad (pedido
- * explícito del usuario). Solo GESTIONAN (CRUD) Sistemas y Admin -> Compras
- * y Calidad quedan de solo lectura, igual que el resto de catálogos
- * administrativos del portal.
+ * VEN y GESTIONAN (CRUD) el calendario Sistemas, Admin, Compras y Calidad
+ * (Calidad tiene acceso total desde el 16-oct-2026, pedido explícito del
+ * usuario). Ver verificarAccesoLectura y verificarAccesoGestion.
  *
  * El "Código Proveedor" que pide el usuario es el código BC
  * (BC_Ficha_Proveedor.Nro_Proveedor), NO se guarda en esta tabla: se
@@ -140,17 +139,19 @@ class HorarioEntregaService
     }
 
     /**
-     * Gestión (CRUD) del calendario: Sistemas, Admin y Compras (pedido
-     * explícito del usuario, 27-ago-2026). Calidad se queda solo con
-     * lectura (ver verificarAccesoLectura) -> puede VER el calendario
-     * pero no crear/editar/eliminar horarios.
+     * Gestión (CRUD) del calendario: Sistemas, Admin, Compras (27-ago-2026)
+     * y Calidad (acceso total desde el 16-oct-2026, pedido explícito del
+     * usuario).
      */
     public function verificarAccesoGestion(Usuario $usuario, int $idEmpresa): void
     {
-        $tieneAcceso = $usuario->esSistemas($idEmpresa) || $usuario->esAdmin($idEmpresa) || $usuario->esCompras($idEmpresa);
+        $tieneAcceso = $usuario->esSistemas($idEmpresa)
+            || $usuario->esAdmin($idEmpresa)
+            || $usuario->esCompras($idEmpresa)
+            || $usuario->esCalidad($idEmpresa);
 
         if (! $tieneAcceso) {
-            throw new AccessDeniedHttpException('Solo Sistemas, Admin o Compras pueden gestionar el calendario de horarios de entrega.');
+            throw new AccessDeniedHttpException('Solo Sistemas, Admin, Compras o Calidad pueden gestionar el calendario de horarios de entrega.');
         }
     }
 

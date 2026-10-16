@@ -170,15 +170,15 @@ class AprobacionAutomaticaTest extends TestCase
     }
 
     /** Un rol sin permiso no puede calificar, aunque tenga acceso a la empresa. */
-    public function test_compras_no_puede_calificar(): void
+    public function test_guardia_no_puede_calificar(): void
     {
         $empresa = $this->crearEmpresa();
-        $compras = $this->crearUsuarioInterno($empresa, 'Compras');
+        $guardia = $this->crearUsuarioInterno($empresa, 'Guardia');
         [, $proveedor] = $this->crearProveedorConUsuario($empresa);
 
         $this->expectException(\Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException::class);
 
         app(CalificacionProveedorService::class)
-            ->calificarFichaGeneral($compras, $empresa->Id_Empresa, $proveedor->Id_Proveedor, aprobado: true);
+            ->calificarFichaGeneral($guardia, $empresa->Id_Empresa, $proveedor->Id_Proveedor, aprobado: true);
     }
 }
