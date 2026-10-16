@@ -10,6 +10,7 @@ use App\Modules\Ficha_Productos\Models\TipoDocumentoProducto;
 use App\Modules\Ficha_Productos\Models\UnidadPresentacion;
 use App\Modules\Proveedores\Models\Proveedor;
 use App\Shared\MueveArchivoAHistorico;
+use App\Shared\ArchivoPdf;
 use App\Shared\SaneadorNombreArchivo;
 use App\Shared\VerificaArchivoFisico;
 use Illuminate\Http\UploadedFile;
@@ -441,6 +442,10 @@ class ProductoService
                 'nombre_documento' => ['Indica el nombre de este documento.'],
             ]);
         }
+
+        // Sin lo que haya antes de "%PDF-" (ver ArchivoPdf): el hash, el
+        // tamaño y el tipo se calculan sobre lo que de verdad se guarda.
+        $archivo = ArchivoPdf::limpiar($archivo);
 
         return DB::transaction(function () use ($usuario, $producto, $tipo, $archivo, $fechaCaducidad, $nombreDocumento) {
             $registroArchivo = Archivo::create([
@@ -993,8 +998,18 @@ class ProductoService
         return round(($l * $a * $h) / 1_000_000, 6);
     }
 
-    protected function proveedorDeTrabajo(Usuario $usuario, int $idEmpresaActiva, ?int $idProveedorObjetivo = null): Proveedor
-    {
+    /**
+     * $soloLectura: la operación solo MIRA (ver un documento). Ahí también
+     * entra Calidad, que revisa productos desde la bandeja de Compras
+     * (Productos por revisar) pero no carga ni edita en nombre del
+     * proveedor.
+     */
+    protected function proveedorDeTrabajo(
+        Usuario $usuario,
+        int $idEmpresaActiva,
+        ?int $idProveedorObjetivo = null,
+        bool $soloLectura = false
+    ): Proveedor {
         if ($idProveedorObjetivo === null) {
             if ($usuario->Tipo_Usuario !== 'Proveedor') {
                 throw new AccessDeniedHttpException('Solo usuarios externos (Proveedor) gestionan su ficha de productos.');
@@ -1009,7 +1024,11 @@ class ProductoService
             return $proveedor;
         }
 
-        $this->verificarAccesoInterno($usuario, $idEmpresaActiva);
+        if ($soloLectura && $usuario->Tipo_Usuario === 'Interno' && $usuario->esCalidad($idEmpresaActiva)) {
+            // Calidad solo mira: nada que validar más allá del rol.
+        } else {
+            $this->verificarAccesoInterno($usuario, $idEmpresaActiva);
+        }
 
         $proveedor = Proveedor::where('Id_Empresa', $idEmpresaActiva)
             ->where('Activo', 1)
@@ -1056,7 +1075,7 @@ class ProductoService
 
     public function descargarDocumento(Usuario $usuario, int $idEmpresaActiva, int $idDocumentoProducto, ?int $idProveedorObjetivo = null)
     {
-        $proveedor = $this->proveedorDeTrabajo($usuario, $idEmpresaActiva, $idProveedorObjetivo);
+        $proveedor = $this->proveedorDeTrabajo($usuario, $idEmpresaActiva, $idProveedorObjetivo, soloLectura: true);
 
         $documento = DocumentoProducto::whereHas('producto', fn($q) => $q->where('Id_Proveedor', $proveedor->Id_Proveedor))
             ->with('archivo')

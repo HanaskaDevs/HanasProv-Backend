@@ -48,6 +48,16 @@ class AuditoriaController extends Controller
         );
     }
 
+    /** Mini reporte: la última auditoría de cada proveedor auditado. */
+    public function reporte(Request $request): JsonResponse
+    {
+        $idEmpresaActiva = (int) $request->attributes->get('id_empresa_activa');
+
+        return response()->json(
+            $this->auditoriaService->reporteUltimasPorProveedor($request->user(), $idEmpresaActiva)
+        );
+    }
+
     /**
      * Retoma o crea la auditoría (Borrador) para el tipo+proveedor elegidos,
      * y devuelve el formulario completo ya armado.

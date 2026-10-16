@@ -3,6 +3,10 @@
 .env
 .env.backup
 .env.production
+# Cualquier copia del .env (p. ej. .env.bak-20261015-maillog) trae credenciales:
+# GitHub bloqueó un push por eso el 16-oct-2026.
+.env.*
+!.env.example
 .phpactor.json
 .phpunit.result.cache
 /.fleet

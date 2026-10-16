@@ -139,6 +139,43 @@ class CalificacionRecepcionService
     }
 
     /**
+     * Mini reporte de la pantalla de Recepciones: una fila por proveedor
+     * ya calificado, con su ÚLTIMA calificación finalizada (la que cuenta
+     * en la calificación global) y cuántas lleva en total.
+     */
+    public function reporteUltimasPorProveedor(Usuario $usuario, int $idEmpresaActiva): Collection
+    {
+        $this->verificarAcceso($usuario, $idEmpresaActiva);
+
+        return CalificacionRecepcion::where('Id_Empresa', $idEmpresaActiva)
+            ->where('Estado', CalificacionRecepcion::ESTADO_FINALIZADA)
+            ->whereNotNull('Porcentaje_Obtenido')
+            ->with(['proveedor', 'auditor'])
+            ->orderByDesc('Fecha_Recepcion')
+            ->orderByDesc('Id_Calificacion_Recepcion')
+            ->get()
+            ->groupBy('Id_Proveedor')
+            ->map(function (Collection $calificaciones) {
+                /** @var CalificacionRecepcion $ultima */
+                $ultima = $calificaciones->first();
+
+                return [
+                    'id_proveedor' => (int) $ultima->Id_Proveedor,
+                    'proveedor' => $ultima->proveedor
+                        ? ($ultima->proveedor->Nombre_Comercial ?: $ultima->proveedor->Razon_Social)
+                        : null,
+                    'ruc' => $ultima->proveedor?->Ruc,
+                    'fecha' => $ultima->Fecha_Recepcion?->toDateString(),
+                    'auditor' => $ultima->auditor?->Nombre_Completo,
+                    'porcentaje' => (float) $ultima->Porcentaje_Obtenido,
+                    'cantidad' => $calificaciones->count(),
+                ];
+            })
+            ->sortBy('proveedor', SORT_NATURAL | SORT_FLAG_CASE)
+            ->values();
+    }
+
+    /**
      * Formulario completo: cabecera, los 13 parámetros con su respuesta
      * actual (si ya la tiene) y el resumen de puntaje.
      */
@@ -226,7 +263,7 @@ class CalificacionRecepcionService
 
         if ($this->listarParametros()->isEmpty()) {
             throw ValidationException::withMessages([
-                'parametros' => ['No hay parámetros de recepción configurados. Corré el seeder RecepcionParametroSeeder.'],
+                'parametros' => ['No hay parámetros de recepción configurados. Corre el seeder RecepcionParametroSeeder.'],
             ]);
         }
 
@@ -426,21 +463,15 @@ class CalificacionRecepcionService
         }
     }
 
-    /** Mismos roles que el resto de Auditorías: Sistemas, Admin y Calidad. */
     /**
-     * Calificar recepciones: Sistemas y Calidad. Admin quedó FUERA
-     * (decisión del negocio, 1-sep-2026): no califica ni auditorías ni
-     * recepciones, igual que ya pasaba con AuditoriaService.
-     *
-     * Admin NO se queda sin ver los resultados: la nota de auditoría y la
-     * de recepción son dos de los cinco componentes de la calificación
-     * global, y esa la sigue viendo en Reportes -> Calificación de
-     * proveedores. Lo que pierde es el permiso de PONER la nota, no el de
-     * leerla.
+     * Mismos roles que Auditorías: Sistemas, Admin y Calidad. Admin había
+     * quedado fuera el 1-sep-2026 y vuelve con acceso completo, calificar
+     * incluido (pedido explícito del usuario, 16-oct-2026).
      */
     protected function verificarAcceso(Usuario $usuario, int $idEmpresa): void
     {
         $tieneAcceso = $usuario->esSistemas($idEmpresa)
+            || $usuario->esAdmin($idEmpresa)
             || $usuario->esCalidad($idEmpresa);
 
         if (! $tieneAcceso) {

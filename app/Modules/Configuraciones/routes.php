@@ -83,6 +83,8 @@ Route::prefix('configuraciones')
         Route::get('/banner-informativo', [BannerInformativoController::class, 'index']);
         Route::put('/banner-informativo', [BannerInformativoController::class, 'guardar']);
         Route::post('/banner-informativo/piezas', [BannerInformativoController::class, 'crearPieza']);
+        // Antes de /piezas/{pieza}: si no, 'orden' se tomaría como el id de una pieza.
+        Route::put('/banner-informativo/piezas/orden', [BannerInformativoController::class, 'reordenarPiezas']);
         Route::post('/banner-informativo/piezas/{pieza}', [BannerInformativoController::class, 'actualizarPieza']);
         Route::delete('/banner-informativo/piezas/{pieza}', [BannerInformativoController::class, 'eliminarPieza']);
 

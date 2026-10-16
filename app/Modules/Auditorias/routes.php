@@ -11,6 +11,8 @@ Route::prefix('auditorias')
         Route::get('/tipos', [AuditoriaController::class, 'tiposAuditoria']);
         Route::get('/proveedores', [AuditoriaController::class, 'proveedores']);
         Route::get('/resumen', [AuditoriaController::class, 'resumen']);
+        // Segmento fijo: antes de /{auditoria}.
+        Route::get('/reporte', [AuditoriaController::class, 'reporte']);
         Route::post('/iniciar', [AuditoriaController::class, 'iniciar']);
         Route::get('/{auditoria}', [AuditoriaController::class, 'mostrar']);
         Route::post('/{auditoria}/respuestas', [AuditoriaController::class, 'guardarRespuesta']);
@@ -23,7 +25,7 @@ Route::prefix('auditorias')
  * tablas y su propio service (ver la migración para el porqué).
  *
  * Las rutas con segmento fijo (parametros / proveedores / historial /
- * iniciar) van ANTES de /{calificacion}: si no, "parametros" entraría por
+ * reporte / iniciar) van ANTES de /{calificacion}: si no, "parametros" entraría por
  * el comodín y terminaría buscando una calificación con ese id.
  */
 Route::prefix('calificacion-recepciones')
@@ -32,6 +34,7 @@ Route::prefix('calificacion-recepciones')
         Route::get('/parametros', [CalificacionRecepcionController::class, 'parametros']);
         Route::get('/proveedores', [CalificacionRecepcionController::class, 'proveedores']);
         Route::get('/historial', [CalificacionRecepcionController::class, 'historial']);
+        Route::get('/reporte', [CalificacionRecepcionController::class, 'reporte']);
         Route::post('/iniciar', [CalificacionRecepcionController::class, 'iniciar']);
 
         Route::get('/{calificacion}', [CalificacionRecepcionController::class, 'mostrar']);

@@ -10,6 +10,7 @@ use App\Modules\Proveedores\Models\ProveedorCuentaBancaria;
 use App\Modules\Documentos_Proveedor\Models\TipoDocumentoClaseExcluida;
 use App\Modules\Proveedores\Models\Proveedor;
 use App\Shared\MueveArchivoAHistorico;
+use App\Shared\ArchivoPdf;
 use App\Shared\SaneadorNombreArchivo;
 use App\Shared\VerificaArchivoFisico;
 use Illuminate\Http\UploadedFile;
@@ -102,6 +103,12 @@ class DocumentoProveedorService
                 // puede extraer). Se marca por Codigo_Archivo y no por
                 // Id_Tipo_Documento para no clavar un id en el front.
                 'requiere_datos_bancarios' => $tipo->Codigo_Archivo === self::CODIGO_CERTIFICADO_BANCARIO,
+                // Plan de contingencia contra el fenómeno del Niño: se sube
+                // en cualquier momento y no se califica (ver
+                // TipoDocumento::esInformativo). El código va para que el
+                // front pueda enlazar directo a este documento.
+                'codigo' => $tipo->Codigo_Archivo,
+                'informativo' => $tipo->esInformativo(),
                 'documentos' => $tipo->documentosProveedor->map(fn (DocumentoProveedor $doc) => [
                     'id_documento_proveedor' => $doc->Id_Documento_Proveedor,
                     'nombre_original' => $doc->archivo->Nombre_Original,
@@ -163,13 +170,17 @@ class DocumentoProveedorService
         // documento existente que reemplazar, hay que subir uno nuevo
         // desde cero, y ese flujo pasa por ESTE método, no por
         // reemplazarDocumento.
-        if ($proveedor->Fecha_Registro_Documentacion !== null && ! $proveedor->Correcciones_Pendientes) {
+        $tipo = TipoDocumento::where('Activo', 1)->findOrFail($idTipoDocumento);
+
+        // Los informativos (Plan de contingencia Niño) se piden justamente a
+        // proveedores ya registrados o aprobados: no les aplica el bloqueo.
+        if ($proveedor->Fecha_Registro_Documentacion !== null
+            && ! $proveedor->Correcciones_Pendientes
+            && ! $tipo->esInformativo()) {
             throw ValidationException::withMessages([
                 'archivo' => ['Tu documentación ya fue registrada y no se puede modificar.'],
             ]);
         }
-
-        $tipo = TipoDocumento::where('Activo', 1)->findOrFail($idTipoDocumento);
 
         if ($tipo->Requiere_Fecha_Caducidad && ! $fechaCaducidad) {
             throw ValidationException::withMessages([
@@ -208,6 +219,7 @@ class DocumentoProveedorService
                 'Activo' => 1,
                 'Creado_Por' => $usuario->Id_Usuario,
                 'Fecha_Creacion' => now(),
+                ...$this->calificacionDeInformativo($tipo),
             ])->load('archivo', 'tipoDocumento');
         });
     }
@@ -249,9 +261,12 @@ class DocumentoProveedorService
         $proximoAVencer = $documentoActual->Fecha_Caducidad !== null
             && $documentoActual->Fecha_Caducidad->lte(now()->addDays(30));
 
+        // 3) Es informativo (Plan de contingencia Niño): se puede cambiar
+        //    siempre, igual que se puede subir siempre.
         $puedeEditarAunqueEsteRegistrada =
             ($proveedor->Correcciones_Pendientes && $documentoActual->Estado_Calificacion !== 'Aprobado')
-            || $proximoAVencer;
+            || $proximoAVencer
+            || $documentoActual->tipoDocumento->esInformativo();
 
         if ($proveedor->Fecha_Registro_Documentacion !== null && ! $puedeEditarAunqueEsteRegistrada) {
             throw ValidationException::withMessages([
@@ -311,6 +326,7 @@ class DocumentoProveedorService
                 'Activo' => 1,
                 'Creado_Por' => $usuario->Id_Usuario,
                 'Fecha_Creacion' => now(),
+                ...$this->calificacionDeInformativo($tipo),
             ]);
 
             // Si estaba rechazado y el admin ya había "Registrado" la
@@ -351,7 +367,9 @@ class DocumentoProveedorService
 
         // Misma regla que reemplazarDocumento: se puede borrar mientras
         // haya correcciones pendientes de confirmar y no esté Aprobado.
-        $puedeEditarAunqueEsteRegistrada = $proveedor->Correcciones_Pendientes && $documento->Estado_Calificacion !== 'Aprobado';
+        // El informativo (Plan de contingencia Niño) se maneja siempre.
+        $puedeEditarAunqueEsteRegistrada = ($proveedor->Correcciones_Pendientes && $documento->Estado_Calificacion !== 'Aprobado')
+            || $documento->tipoDocumento->esInformativo();
 
         if ($proveedor->Fecha_Registro_Documentacion !== null && ! $puedeEditarAunqueEsteRegistrada) {
             throw ValidationException::withMessages([
@@ -399,6 +417,10 @@ class DocumentoProveedorService
      */
     protected function guardarArchivoFisico(Usuario $usuario, Proveedor $proveedor, TipoDocumento $tipo, UploadedFile $archivo, ?string $nombreDocumento): Archivo
     {
+        // Sin lo que haya antes de "%PDF-" (ver ArchivoPdf): el hash, el
+        // tamaño y el tipo se calculan sobre lo que de verdad se guarda.
+        $archivo = ArchivoPdf::limpiar($archivo);
+
         $registroArchivo = Archivo::create([
             'Id_Proveedor' => $proveedor->Id_Proveedor,
             // Arranca vacío -> se completa más abajo, junto con
@@ -680,5 +702,27 @@ class DocumentoProveedorService
         }
 
         return $proveedor;
+    }
+
+    /**
+     * Un documento informativo nace RESUELTO: con Estado_Calificacion en
+     * null, cada contador de "por calificar" (panel, listado de
+     * proveedores, Hana, aprobación automática) lo tomaría como pendiente,
+     * y Calidad no tiene nada que calificar. Las pantallas muestran
+     * "Recibido" mirando el flag 'informativo', no este estado.
+     *
+     * @return array<string, mixed>
+     */
+    protected function calificacionDeInformativo(TipoDocumento $tipo): array
+    {
+        if (! $tipo->esInformativo()) {
+            return [];
+        }
+
+        return [
+            'Estado_Calificacion' => 'Aprobado',
+            'Comentario_Calificacion' => 'Documento informativo: no requiere calificación.',
+            'Fecha_Calificacion' => now(),
+        ];
     }
 }

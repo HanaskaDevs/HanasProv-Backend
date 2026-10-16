@@ -7,8 +7,8 @@ use Illuminate\Support\Facades\Route;
 /**
  * Calendario de Horarios de Entrega de Proveedores (Perecibles / No
  * Perecibles / Fruver). Ver el catálogo con GET /horarios-entrega es para
- * Sistemas, Admin, Compras y Calidad; el resto de verbos (crear/editar/
- * borrar) es solo Sistemas/Admin -> el service es el que corta el acceso,
+ * Sistemas, Admin, Compras y Calidad, y los mismos cuatro lo gestionan
+ * (crear/editar/borrar) -> el service es el que corta el acceso,
  * estas rutas no filtran por rol.
  *
  * '/mios', '/proveedores', '/hoy' y '/aprobaciones' van ANTES de rutas con

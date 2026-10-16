@@ -13,7 +13,8 @@ use Tests\TestCase;
  * empresa: hasta ahora el grupo de rutas solo pedía estar logueado con
  * empresa activa, así que un usuario Proveedor podía bajarse la lista de su
  * competencia. Estos tests fijan quién entra: listado y detalle para
- * Sistemas, Admin y Calidad; el alta solo para Sistemas y Admin (ver
+ * Sistemas, Admin, Calidad y Compras (Compras desde el 16-oct-2026, porque
+ * califica la ficha); el alta solo para Sistemas y Admin (ver
  * ProveedorService).
  */
 class AccesoListadoProveedoresTest extends TestCase
@@ -56,13 +57,13 @@ class AccesoListadoProveedoresTest extends TestCase
         $this->assertFalse(Proveedor::where('Ruc', $ruc)->exists());
     }
 
-    /** Roles internos sin pantalla que use el listado. */
-    public function test_compras_y_guardia_no_pueden_listar_proveedores(): void
+    /** Guardia solo marca arribos: no ve proveedores. */
+    public function test_guardia_no_puede_listar_proveedores(): void
     {
         $empresa = $this->crearEmpresa();
         $this->crearProveedorConUsuario($empresa);
 
-        foreach (['Compras', 'Guardia'] as $rol) {
+        foreach (['Guardia'] as $rol) {
             $interno = $this->crearUsuarioInterno($empresa, $rol);
 
             $this->getJson('/api/proveedores', $this->cabecerasComo($interno, $empresa))
@@ -70,12 +71,12 @@ class AccesoListadoProveedoresTest extends TestCase
         }
     }
 
-    public function test_compras_y_guardia_no_pueden_ver_el_detalle_de_un_proveedor(): void
+    public function test_guardia_no_puede_ver_el_detalle_de_un_proveedor(): void
     {
         $empresa = $this->crearEmpresa();
         [, $proveedor] = $this->crearProveedorConUsuario($empresa);
 
-        foreach (['Compras', 'Guardia'] as $rol) {
+        foreach (['Guardia'] as $rol) {
             $interno = $this->crearUsuarioInterno($empresa, $rol);
 
             $this->getJson("/api/proveedores/{$proveedor->Id_Proveedor}", $this->cabecerasComo($interno, $empresa))
@@ -115,12 +116,12 @@ class AccesoListadoProveedoresTest extends TestCase
         $this->assertSame(EstadoProveedor::ASPIRANTE, (int) $creado->Id_Estado_Proveedor);
     }
 
-    public function test_sistemas_admin_y_calidad_listan_los_proveedores_de_su_empresa(): void
+    public function test_sistemas_admin_calidad_y_compras_listan_los_proveedores_de_su_empresa(): void
     {
         $empresa = $this->crearEmpresa();
         [, $proveedor] = $this->crearProveedorConUsuario($empresa);
 
-        foreach (['Sistemas', 'Admin', 'Calidad'] as $rol) {
+        foreach (['Sistemas', 'Admin', 'Calidad', 'Compras'] as $rol) {
             $interno = $this->crearUsuarioInterno($empresa, $rol);
 
             $this->getJson('/api/proveedores', $this->cabecerasComo($interno, $empresa))

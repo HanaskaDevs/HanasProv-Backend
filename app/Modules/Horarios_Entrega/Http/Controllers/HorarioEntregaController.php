@@ -10,7 +10,7 @@ use Illuminate\Http\Request;
 
 /**
  * Calendario de Horarios de Entrega de Proveedores. Los permisos
- * (lectura: Sistemas/Admin/Compras/Calidad; gestión: solo Sistemas/Admin;
+ * (lectura y gestión: Sistemas/Admin/Compras/Calidad;
  * cambios de estado: Guardia/Sistemas/Calidad; resolver solicitudes de
  * aprobación: solo Calidad/Sistemas) los valida el service, no estas
  * rutas -> mismo criterio que Auditorías.
