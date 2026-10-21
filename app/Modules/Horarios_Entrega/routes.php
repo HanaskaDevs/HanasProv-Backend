@@ -36,6 +36,8 @@ Route::prefix('horarios-entrega')
         Route::get('/aprobaciones', [HorarioEntregaController::class, 'solicitudesPendientes']);
         Route::post('/aprobaciones/{solicitud}/aprobar', [HorarioEntregaController::class, 'aprobarSolicitud']);
         Route::post('/aprobaciones/{solicitud}/rechazar', [HorarioEntregaController::class, 'rechazarSolicitud']);
+        // Carga masiva desde Excel (Sistemas). Segmento fijo, antes de {horario}.
+        Route::post('/carga-masiva', [HorarioEntregaController::class, 'cargaMasiva']);
         Route::post('/', [HorarioEntregaController::class, 'store']);
         Route::put('/{horario}', [HorarioEntregaController::class, 'update']);
         Route::delete('/{horario}', [HorarioEntregaController::class, 'destroy']);
