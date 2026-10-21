@@ -406,7 +406,7 @@ class HorarioEntregaService
         $proveedores = Proveedor::where('Id_Empresa', $idEmpresa)
             ->where('Activo', 1)
             ->orderBy('Razon_Social')
-            ->get(['Id_Proveedor', 'Razon_Social', 'Nombre_Comercial', 'Ruc']);
+            ->get(['Id_Proveedor', 'Razon_Social', 'Nombre_Comercial', 'Ruc', 'Nro_Proveedor_BC']);
 
         $codigosBc = $this->resolverCodigosBc($idEmpresa, $proveedores);
 
@@ -414,6 +414,8 @@ class HorarioEntregaService
             'id_proveedor' => $p->Id_Proveedor,
             'nombre' => $p->Nombre_Comercial ?: $p->Razon_Social,
             'codigo_bc' => $codigosBc[$p->Ruc] ?? null,
+            // Para buscar también por RUC en el selector.
+            'ruc' => $p->Ruc,
         ])->values();
     }
 
@@ -790,6 +792,20 @@ class HorarioEntregaService
     // ------------------------------------------------------------------
 
     /**
+     * Código BC de cada proveedor, por RUC.
+     *
+     * DE DÓNDE SALE: de BC_Ficha_Proveedor, la copia de la ficha de
+     * proveedores de Business Central que llena un ETL EXTERNO (esta app
+     * nunca le escribe), cruzando su Nro_Identificacion con el RUC del
+     * portal. Si el ETL deja de correr, los proveedores creados en BC
+     * después de su última carga no aparecen ahí (pasó: la última carga de
+     * las tablas BC_Ficha_* fue el 14-sep-2026, mientras los pedidos seguían
+     * al día).
+     *
+     * RESPALDO (21-oct-2026): el Nro_Proveedor_BC que guarda el propio
+     * portal cuando aprueba a un proveedor y lo postea a BC. Ese no depende
+     * del ETL. Gana BC_Ficha_Proveedor si están los dos.
+     *
      * @param  Collection<int, Proveedor>  $proveedores
      * @return array<string, string> Ruc -> código BC (Nro_Proveedor)
      */
@@ -801,17 +817,26 @@ class HorarioEntregaService
             return [];
         }
 
+        $delPortal = $proveedores
+            ->filter(fn ($p) => $p->Ruc && $p->Nro_Proveedor_BC)
+            ->mapWithKeys(fn ($p) => [$p->Ruc => trim($p->Nro_Proveedor_BC)])
+            ->all();
+
         $empresa = Empresa::find($idEmpresa);
 
         if (! $empresa || ! $empresa->Empresa_BC) {
-            return [];
+            return $delPortal;
         }
 
-        return DB::table('BC_Ficha_Proveedor')
+        $deBc = DB::table('BC_Ficha_Proveedor')
             ->where('Empresa', trim($empresa->Empresa_BC))
             ->whereIn('Nro_Identificacion', $rucs)
             ->pluck('Nro_Proveedor', 'Nro_Identificacion')
             ->all();
+
+        // + y no array_merge: los RUC son numéricos, PHP los guarda como
+        // claves enteras y array_merge las renumera. Con + gana BC.
+        return $deBc + $delPortal;
     }
 
     private function serializar(HorarioEntregaProveedor $h, array $codigosBc): array

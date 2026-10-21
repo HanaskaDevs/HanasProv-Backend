@@ -4,6 +4,7 @@ namespace App\Modules\Horarios_Entrega\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Modules\Horarios_Entrega\Models\HorarioEntregaProveedor;
+use App\Modules\Horarios_Entrega\Services\CargaMasivaHorariosService;
 use App\Modules\Horarios_Entrega\Services\HorarioEntregaService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -17,8 +18,10 @@ use Illuminate\Http\Request;
  */
 class HorarioEntregaController extends Controller
 {
-    public function __construct(protected HorarioEntregaService $servicio)
-    {
+    public function __construct(
+        protected HorarioEntregaService $servicio,
+        protected CargaMasivaHorariosService $cargaMasiva
+    ) {
     }
 
     private function idEmpresa(Request $request): int
@@ -48,6 +51,28 @@ class HorarioEntregaController extends Controller
         return response()->json(
             $this->servicio->proveedoresDisponibles($request->user(), $this->idEmpresa($request))
         );
+    }
+
+    /**
+     * Carga masiva desde Excel (solo Sistemas). Con confirmar = false es
+     * una vista previa que no escribe nada; con true, aplica.
+     */
+    public function cargaMasiva(Request $request): JsonResponse
+    {
+        $datos = $request->validate([
+            'identificador' => ['required', 'string'],
+            'confirmar' => ['sometimes', 'boolean'],
+            'filas' => ['present', 'array'],
+            'filas.*' => ['array'],
+        ]);
+
+        return response()->json($this->cargaMasiva->procesar(
+            $request->user(),
+            $this->idEmpresa($request),
+            $datos['identificador'],
+            $datos['filas'],
+            $request->boolean('confirmar')
+        ));
     }
 
     public function store(Request $request): JsonResponse
