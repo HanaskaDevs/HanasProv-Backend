@@ -412,7 +412,7 @@ class HorarioEntregaService
 
         return $proveedores->map(fn (Proveedor $p) => [
             'id_proveedor' => $p->Id_Proveedor,
-            'nombre' => $p->Nombre_Comercial ?: $p->Razon_Social,
+            'nombre' => $p->nombreVisible(),
             'codigo_bc' => $codigosBc[$p->Ruc] ?? null,
             // Para buscar también por RUC en el selector.
             'ruc' => $p->Ruc,
@@ -603,7 +603,7 @@ class HorarioEntregaService
         $urlRevision = rtrim(config('app.frontend_url'), '/') . '/calendario/aprobaciones';
 
         Mail::to($destinatario)->send(new SolicitudAprobacionArriboMail(
-            $proveedor ? ($proveedor->Nombre_Comercial ?: $proveedor->Razon_Social) : 'Proveedor',
+            ($proveedor?->nombreVisible() ?? 'Proveedor'),
             $horario->Hora_Llegada,
             $solicitante->Nombre_Completo,
             $solicitud->Fecha_Solicitud->format('d/m/Y H:i'),
@@ -627,9 +627,7 @@ class HorarioEntregaService
             ->map(fn (SolicitudAprobacionArribo $s) => [
                 'id_solicitud_aprobacion_arribo' => $s->Id_Solicitud_Aprobacion_Arribo,
                 'id_horario_entrega_proveedor' => $s->Id_Horario_Entrega_Proveedor,
-                'nombre_proveedor' => $s->horario?->proveedor
-                    ? ($s->horario->proveedor->Nombre_Comercial ?: $s->horario->proveedor->Razon_Social)
-                    : null,
+                'nombre_proveedor' => $s->horario?->proveedor?->nombreVisible(),
                 'hora_llegada' => $s->horario?->Hora_Llegada,
                 'fecha' => $s->Fecha->format('Y-m-d'),
                 'solicitado_por' => $s->solicitante?->Nombre_Completo,
@@ -847,7 +845,7 @@ class HorarioEntregaService
             'id_horario_entrega_proveedor' => $h->Id_Horario_Entrega_Proveedor,
             'id_proveedor' => $h->Id_Proveedor,
             'codigo_proveedor' => $proveedor ? ($codigosBc[$proveedor->Ruc] ?? null) : null,
-            'nombre_proveedor' => $proveedor ? ($proveedor->Nombre_Comercial ?: $proveedor->Razon_Social) : null,
+            'nombre_proveedor' => $proveedor?->nombreVisible(),
             'clasificacion' => $h->Clasificacion,
             'dia_entrega' => $h->Dia_Entrega,
             'anden_puerta' => $h->Anden_Puerta,

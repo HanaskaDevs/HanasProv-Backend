@@ -2,6 +2,7 @@
 
 namespace App\Modules\Pedidos\Services;
 
+use App\Modules\Proveedores\Models\Proveedor;
 use App\Models\Empresa;
 use App\Modules\Auth\Models\Usuario;
 use Illuminate\Support\Collection;
@@ -145,10 +146,40 @@ class PedidoInternoService
             ->orderBy('d.Nro_Linea')
             ->get();
 
+        $this->usarRazonSocialDelPortal($filas, $idEmpresaActiva);
+
         $nroPedidos = $filas->pluck('Nro_Pedido')->unique()->values()->all();
         $cantidadesRecibidas = $this->obtenerCantidadesRecibidas($empresaBc, $nroPedidos);
 
         return $this->agruparPorBodega($filas, $cantidadesRecibidas, $bodegasPermitidas);
+    }
+
+    /**
+     * El nombre del proveedor es su RAZÓN SOCIAL DEL PORTAL (23-oct-2026),
+     * igual que en el resto de las pantallas: se busca por RUC. El nombre
+     * de BC queda solo para los proveedores que no están registrados en el
+     * portal.
+     */
+    protected function usarRazonSocialDelPortal(Collection $filas, int $idEmpresaActiva): void
+    {
+        $rucs = $filas->pluck('Ruc_Proveedor')->filter()->map(fn ($ruc) => trim((string) $ruc))->unique()->values();
+
+        if ($rucs->isEmpty()) {
+            return;
+        }
+
+        $delPortal = Proveedor::where('Id_Empresa', $idEmpresaActiva)
+            ->whereIn('Ruc', $rucs)
+            ->whereNotNull('Razon_Social')
+            ->pluck('Razon_Social', 'Ruc');
+
+        foreach ($filas as $fila) {
+            $ruc = trim((string) $fila->Ruc_Proveedor);
+
+            if ($ruc !== '' && isset($delPortal[$ruc])) {
+                $fila->Nombre_Proveedor = $delPortal[$ruc];
+            }
+        }
     }
 
     /**

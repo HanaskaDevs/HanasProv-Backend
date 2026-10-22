@@ -63,7 +63,7 @@ class AvisoFichaRegistradaService
 
         try {
             Mail::to($destinatarios)->queue(new FichaRegistradaMail(
-                nombreProveedor: $proveedor->Nombre_Comercial ?: ($proveedor->Razon_Social ?: 'Proveedor'),
+                nombreProveedor: $proveedor->nombreVisible(),
                 rucProveedor: $proveedor->Ruc ?: null,
                 nombreResponsable: $responsable['nombre'] ?? null,
                 // Abre la calificación de ESE proveedor directamente.

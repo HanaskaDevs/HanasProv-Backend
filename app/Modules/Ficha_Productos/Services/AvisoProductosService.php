@@ -312,7 +312,7 @@ class AvisoProductosService
 
     private function nombreDe($proveedor): string
     {
-        return $proveedor->Nombre_Comercial ?: ($proveedor->Razon_Social ?: 'Proveedor');
+        return $proveedor->nombreVisible();
     }
 
     private function url(string $ruta): string

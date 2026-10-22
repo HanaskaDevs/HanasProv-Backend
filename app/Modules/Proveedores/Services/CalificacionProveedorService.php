@@ -870,7 +870,7 @@ class CalificacionProveedorService
         }
 
         $nombreEmpresa = $proveedor->empresa?->Nombre_Comercial ?? $proveedor->empresa?->Razon_Social ?? 'Hanaska';
-        $nombreProveedor = $proveedor->Nombre_Comercial ?: $proveedor->Razon_Social;
+        $nombreProveedor = $proveedor->nombreVisible();
 
         (new AnonymousNotifiable())
             ->route('mail', $proveedor->Email)
@@ -893,7 +893,7 @@ class CalificacionProveedorService
         }
 
         $nombreEmpresa = $proveedor->empresa?->Nombre_Comercial ?? $proveedor->empresa?->Razon_Social ?? 'Hanaska';
-        $nombreProveedor = $proveedor->Nombre_Comercial ?: $proveedor->Razon_Social;
+        $nombreProveedor = $proveedor->nombreVisible();
 
         $campos = $camposRechazados->map(fn (CalificacionCampoFicha $c) => [
             'nombre' => self::ETIQUETAS_CAMPOS_FICHA[$c->Nombre_Campo] ?? $c->Nombre_Campo,
