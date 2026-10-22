@@ -81,6 +81,33 @@ class Proveedor extends BaseModel
         });
     }
 
+    /** Lo que se muestra cuando el proveedor todavía no tiene razón social. */
+    public const NOMBRE_SIN_FICHA = 'Proveedor sin ficha completada';
+
+    /**
+     * EL nombre con que se muestra al proveedor en TODO el portal: pantallas,
+     * correos, reportes y Hana (pedido explícito del usuario, 23-oct-2026).
+     * Es la RAZÓN SOCIAL, no el nombre comercial ni el nombre de la persona
+     * dueña del usuario. Ya existe desde la activación de la cuenta; si
+     * todavía no hay (un acceso a otra empresa que no llenó la ficha), un
+     * texto que lo dice.
+     *
+     * Usarlo siempre que haya que mostrar a un proveedor: un `Nombre_Comercial
+     * ?: Razon_Social` suelto en otro lado vuelve a mostrar el comercial.
+     */
+    public function nombreVisible(): string
+    {
+        return self::nombreVisibleDe($this->Razon_Social);
+    }
+
+    /** Para filas que no son el modelo (consultas con join). */
+    public static function nombreVisibleDe(?string $razonSocial): string
+    {
+        $razonSocial = trim((string) $razonSocial);
+
+        return $razonSocial !== '' ? $razonSocial : self::NOMBRE_SIN_FICHA;
+    }
+
     /** mb_ y no strtoupper: con strtoupper la "ñ" y las tildes quedaban en minúscula. */
     public static function enMayusculas(?string $texto): ?string
     {

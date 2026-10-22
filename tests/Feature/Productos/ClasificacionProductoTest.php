@@ -200,4 +200,56 @@ class ClasificacionProductoTest extends TestCase
         $this->assertTrue($nsanitaria['obligatorio']);
         $this->assertFalse($nsanitaria['obligatorio_en_fruver']);
     }
+
+    /**
+     * Quien revisa (Compras, Calidad, Admin, Sistemas) le pone la categoría
+     * a un producto que ya está en revisión y no la tenía (23-oct-2026). No
+     * le cambia el estado: sigue en revisión.
+     */
+    public function test_quien_revisa_le_pone_la_categoria_a_un_producto_en_revision(): void
+    {
+        [, $proveedor, $empresa] = $this->proveedor();
+
+        foreach (['Compras', 'Calidad', 'Admin', 'Sistemas'] as $rol) {
+            $producto = $this->producto($proveedor, null);
+            $producto->forceFill(['Bloqueado' => 1, 'Estado_Calificacion' => 'Pendiente', 'Etapa_Aprobacion' => Producto::ETAPA_COMPRAS])->save();
+            $revisor = $this->crearUsuarioInterno($empresa, $rol);
+
+            $this->putJson(
+                "/api/productos-proveedor/{$proveedor->Id_Proveedor}/{$producto->Id_Producto}/clasificacion",
+                ['clasificacion' => 'Fruver'],
+                $this->cabecerasComo($revisor, $empresa)
+            )->assertOk()->assertJsonPath('clasificacion', 'Fruver');
+
+            $producto->refresh();
+            $this->assertTrue((bool) $producto->Bloqueado, "Rol {$rol}: sigue en revisión");
+            $this->assertSame('Pendiente', $producto->Estado_Calificacion);
+        }
+    }
+
+    /** A uno aprobado no se le cambia por este atajo: lo devolvería a revisión. */
+    public function test_a_un_producto_aprobado_no_se_le_cambia_la_categoria_por_el_atajo(): void
+    {
+        [, $proveedor, $empresa] = $this->proveedor();
+        $aprobado = $this->producto($proveedor, Producto::PERECIBLES);
+        $aprobado->forceFill(['Bloqueado' => 1, 'Estado_Calificacion' => 'Aprobado'])->save();
+
+        $this->putJson(
+            "/api/productos-proveedor/{$proveedor->Id_Proveedor}/{$aprobado->Id_Producto}/clasificacion",
+            ['clasificacion' => 'Fruver'],
+            $this->cabecerasComo($this->crearUsuarioInterno($empresa, 'Admin'), $empresa)
+        )->assertForbidden();
+    }
+
+    public function test_guardia_no_le_pone_la_categoria(): void
+    {
+        [, $proveedor, $empresa] = $this->proveedor();
+        $producto = $this->producto($proveedor, null);
+
+        $this->putJson(
+            "/api/productos-proveedor/{$proveedor->Id_Proveedor}/{$producto->Id_Producto}/clasificacion",
+            ['clasificacion' => 'Fruver'],
+            $this->cabecerasComo($this->crearUsuarioInterno($empresa, 'Guardia'), $empresa)
+        )->assertForbidden();
+    }
 }

@@ -161,9 +161,7 @@ class CalificacionRecepcionService
 
                 return [
                     'id_proveedor' => (int) $ultima->Id_Proveedor,
-                    'proveedor' => $ultima->proveedor
-                        ? ($ultima->proveedor->Nombre_Comercial ?: $ultima->proveedor->Razon_Social)
-                        : null,
+                    'proveedor' => $ultima->proveedor?->nombreVisible(),
                     'ruc' => $ultima->proveedor?->Ruc,
                     'fecha' => $ultima->Fecha_Recepcion?->toDateString(),
                     'auditor' => $ultima->auditor?->Nombre_Completo,

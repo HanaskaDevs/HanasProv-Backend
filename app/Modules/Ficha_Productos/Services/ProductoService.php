@@ -1057,9 +1057,15 @@ class ProductoService
      * categoría antes de mostrar los documentos, porque de ella depende
      * cuáles son obligatorios.
      *
-     * Mismas reglas de edición que actualizar(), salvo una: a un producto
-     * APROBADO no se le cambia por acá, porque eso lo devolvería a
-     * calificación por un costado. Para eso está la edición completa.
+     * QUIÉN Y CUÁNDO:
+     *  - El proveedor (y el comprador por él): mientras el producto se pueda
+     *    editar, mismas reglas que actualizar().
+     *  - El personal que REVISA (Compras, Calidad, Admin, Sistemas), además,
+     *    con el producto EN REVISIÓN (23-oct-2026): los productos que ya
+     *    estaban en "Productos por revisar" no tenían categoría y nadie podía
+     *    ponérsela. No cambia el estado del producto, solo completa el dato.
+     *  - A un producto APROBADO no se le cambia por acá: eso lo devolvería a
+     *    calificación por un costado. Para eso está la edición completa.
      */
     public function asignarClasificacion(
         Usuario $usuario,
@@ -1074,12 +1080,26 @@ class ProductoService
             ]);
         }
 
-        $producto = $this->productoDeTrabajo($usuario, $idEmpresaActiva, $idProducto, $idProveedorObjetivo);
+        $esRevisor = $idProveedorObjetivo !== null && $this->esRevisorDeProductos($usuario, $idEmpresaActiva);
+
+        // soloLectura deja entrar a Calidad, que revisa pero no carga productos.
+        $proveedor = $this->proveedorDeTrabajo($usuario, $idEmpresaActiva, $idProveedorObjetivo, soloLectura: $esRevisor);
+        $producto = Producto::where('Id_Proveedor', $proveedor->Id_Proveedor)
+            ->where('Activo', 1)
+            ->with('proveedor')
+            ->findOrFail($idProducto);
 
         $esCorreccionDeRechazado = $producto->proveedor->Correcciones_Pendientes_Productos
             && $producto->Estado_Calificacion === 'Rechazado';
+        $enRevision = $producto->Bloqueado && $producto->Estado_Calificacion === 'Pendiente';
 
-        if ($producto->Bloqueado && ! $esCorreccionDeRechazado) {
+        if ($producto->Estado_Calificacion === 'Aprobado') {
+            throw new AccessDeniedHttpException(
+                'Este producto ya está aprobado: su categoría se cambia editando el producto.'
+            );
+        }
+
+        if ($producto->Bloqueado && ! $esCorreccionDeRechazado && ! ($esRevisor && $enRevision)) {
             throw new AccessDeniedHttpException(
                 'Este producto ya fue enviado a revisión: su categoría no se puede cambiar desde acá.'
             );
@@ -1092,6 +1112,17 @@ class ProductoService
         ])->save();
 
         return $producto->load(['unidadPresentacion', 'grupos', 'documentos.tipoDocumento', 'documentos.archivo']);
+    }
+
+    /** Quien revisa productos en "Productos por revisar" y en la calificación de Calidad. */
+    protected function esRevisorDeProductos(Usuario $usuario, int $idEmpresaActiva): bool
+    {
+        return $usuario->Tipo_Usuario === 'Interno' && (
+            $usuario->esCompras($idEmpresaActiva)
+            || $usuario->esCalidad($idEmpresaActiva)
+            || $usuario->esAdmin($idEmpresaActiva)
+            || $usuario->esSistemas($idEmpresaActiva)
+        );
     }
 
     /** @return \Illuminate\Support\Collection<int, TipoDocumentoProducto> */
