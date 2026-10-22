@@ -13,6 +13,7 @@ use App\Modules\Ficha_Productos\Services\ProductoService;
 use App\Modules\Pedidos\Models\PedidoCompra;
 use App\Modules\Pedidos\Services\PedidoInternoService;
 use App\Modules\Pedidos\Services\PedidoService;
+use App\Modules\Proveedores\Models\EstadoProveedor;
 use App\Modules\Proveedores\Models\Proveedor;
 use App\Modules\Responsables\Services\ResponsableProveedorService;
 use Illuminate\Support\Facades\Log;
@@ -25,9 +26,10 @@ use App\Modules\Reclamos\Services\ReclamoService;
  *
  * Dos principios que explican la forma de este archivo:
  *
- *  1. EL DATO YA RESUELTO, NO LA TABLA. El modelo no consulta nada: recibe
- *     "te faltan 2 documentos: X e Y" en vez de un listado que tenga que
- *     interpretar. Por eso alcanza un modelo económico como Haiku.
+ *  1. EL DATO YA RESUELTO, NO LA TABLA. El modelo recibe "te faltan 2
+ *     documentos: X e Y" en vez de un listado que tenga que interpretar.
+ *     Cuando necesita filas (un listado, un Excel) las pide con las
+ *     herramientas de AsistenteHerramientas; esto es solo el resumen.
  *
  *  2. EL ALCANCE ES PARTE DEL CONTEXTO. Lo que se manda define de qué puede
  *     hablar Hana. Un proveedor solo recibe sus propios datos, y un interno
@@ -593,63 +595,95 @@ class AsistenteContextoService
             .$lista;
     }
 
+    /**
+     * Copia del menú real por rol (HanasProv-Frontend
+     * src/shared/config/menuConfig.ts) más las páginas que el rol puede
+     * abrir aunque no estén en el menú. Si cambia el menú, se actualiza acá:
+     * una ruta de más es un [IR_A:] que lleva al usuario a una pantalla que
+     * le responde "acceso denegado".
+     */
     protected function seccionesDisponibles(Usuario $usuario, int $idEmpresaActiva): array
     {
         if ($usuario->Tipo_Usuario === 'Proveedor') {
-            return [
+            $secciones = [
                 '/mi-ficha' => 'Mi Ficha (datos generales del proveedor)',
                 '/documentos' => 'Documentación (subir/reemplazar documentos y ver su calificación)',
-                '/productos' => 'Ficha Productos (catálogo del proveedor)',
+                '/productos' => 'Productos (catálogo del proveedor)',
                 '/calificacion' => 'Calificación (postulación y calificación global)',
                 '/pedidos' => 'Pedidos (pedidos de compra y % de entrega)',
                 '/reclamos/abiertos' => 'Reclamos Abiertos',
                 '/reclamos/cerrados' => 'Reclamos Cerrados',
                 '/politicas' => 'Políticas',
             ];
+
+            // Un Aspirante no tiene pedidos ni reclamos todavía, y el menú
+            // le esconde esas secciones (ETIQUETAS_OCULTAS_PARA_ASPIRANTE).
+            $proveedor = $usuario->proveedores()->where('Proveedor.Id_Empresa', $idEmpresaActiva)->first();
+
+            if ((int) $proveedor?->Id_Estado_Proveedor !== EstadoProveedor::APROBADO) {
+                unset($secciones['/pedidos'], $secciones['/reclamos/abiertos'], $secciones['/reclamos/cerrados'], $secciones['/politicas']);
+            }
+
+            return $secciones;
         }
 
+        $proveedores = [
+            '/proveedores/detalle' => 'Detalle de proveedores (estado de ficha y documentación)',
+            '/proveedores' => 'Calificación de proveedores (ficha, documentos y productos)',
+            '/usuarios/proveedores' => 'Cuentas de proveedores (activación de cuentas y reenvío de códigos)',
+            '/catalogo-productos' => 'Catálogo de productos (con su código BC)',
+            '/productos-revision' => 'Productos por revisar',
+            '/productos-proveedor' => 'Productos por proveedor',
+        ];
+        $operacion = [
+            '/pedidos' => 'Pedidos (vista interna por bodega, % de entrega)',
+            '/reclamos/abiertos' => 'Reclamos abiertos',
+            '/reclamos/cerrados' => 'Reclamos cerrados',
+            '/cambios-precio' => 'Cambios de precio',
+        ];
+        $calidad = [
+            '/auditorias' => 'Calificación de auditorías',
+            '/auditorias/recepciones' => 'Calificación de recepciones',
+            '/politicas' => 'Políticas',
+        ];
+        $reportes = [
+            '/reportes/calificacion-proveedores' => 'Reporte de calificación de proveedores',
+            '/reportes/cumplimiento-entregas' => 'Reporte de cumplimiento de entregas (fill rate)',
+            '/reportes/caducidad-documentos' => 'Reporte de caducidad de documentos',
+            '/calendario' => 'Calendario de horarios de entrega',
+        ];
+
         return match ($this->rolEn($usuario, $idEmpresaActiva)) {
-            'Sistemas' => [
+            'Sistemas' => $proveedores + $operacion + [
+                '/calendario/seguimiento' => 'Seguimiento de hoy (arribos)',
+                '/calendario/aprobaciones' => 'Aprobaciones de arribo',
+            ] + $calidad + [
                 '/empresas' => 'Empresas',
-                '/usuarios/internos' => 'Usuarios Internos',
-                '/usuarios/proveedores' => 'Cuentas de Proveedores',
-                '/proveedores' => 'Proveedores',
-                '/proveedores/detalle' => 'Detalle de Proveedores (estado de ficha y documentación)',
-                '/catalogo-productos' => 'Catálogo de Productos',
-                '/pedidos' => 'Pedidos (vista interna por bodega)',
-                '/reclamos/abiertos' => 'Reclamos Abiertos',
-                '/reclamos/cerrados' => 'Reclamos Cerrados',
-                '/auditorias' => 'Auditorías',
-                '/calendario' => 'Calendario de horarios de entrega',
+                '/usuarios/internos' => 'Usuarios internos',
                 '/catalogos' => 'Catálogos',
                 '/configuraciones' => 'Configuraciones',
-            ],
-            'Admin' => [
-                '/usuarios/proveedores' => 'Cuentas de Proveedores',
-                '/proveedores' => 'Calificación de Proveedores',
-                '/proveedores/detalle' => 'Detalle de Proveedores (estado de ficha y documentación)',
-                '/catalogo-productos' => 'Catálogo de Productos',
-                '/pedidos' => 'Pedidos (vista interna por bodega)',
-                '/reclamos/abiertos' => 'Reclamos Abiertos',
-                '/reclamos/cerrados' => 'Reclamos Cerrados',
-                '/auditorias' => 'Auditorías',
+            ] + $reportes,
+            'Admin' => $proveedores + $operacion + $calidad + $reportes,
+            'Compras' => [
+                '/proveedores' => 'Fichas de proveedores',
+                '/productos-revision' => 'Productos por revisar',
+                '/productos-proveedor' => 'Productos por proveedor',
+                '/pedidos' => 'Pedidos (vista interna por bodega, % de entrega)',
                 '/calendario' => 'Calendario de horarios de entrega',
+                '/reclamos/abiertos' => 'Reclamos abiertos',
+                '/reclamos/cerrados' => 'Reclamos cerrados',
             ],
             'Calidad' => [
-                '/proveedores' => 'Calificación de Proveedores (ficha, documentos y productos)',
-                '/proveedores/detalle' => 'Detalle de Proveedores (estado de ficha y documentación)',
-                '/auditorias' => 'Auditorías',
-                '/pedidos' => 'Pedidos (vista interna por bodega)',
-                '/reclamos/abiertos' => 'Reclamos Abiertos',
-                '/reclamos/cerrados' => 'Reclamos Cerrados',
+                '/proveedores/detalle' => 'Detalle de proveedores (estado de ficha y documentación)',
+                '/proveedores' => 'Calificación de proveedores (ficha, documentos y productos)',
+                '/productos-revision' => 'Productos por revisar',
                 '/calendario' => 'Calendario de horarios de entrega',
-            ],
-            'Compras' => [
-                '/pedidos' => 'Pedidos (vista interna por bodega, % de entrega)',
-                '/cambios-precio' => 'Cambios de Precio',
-                '/reclamos/abiertos' => 'Reclamos Abiertos',
-                '/reclamos/cerrados' => 'Reclamos Cerrados',
-                '/calendario' => 'Calendario de horarios de entrega',
+                '/calendario/aprobaciones' => 'Aprobaciones de arribo',
+                '/reclamos/abiertos' => 'Reclamos abiertos',
+                '/reclamos/cerrados' => 'Reclamos cerrados',
+                '/auditorias' => 'Calificación de auditorías',
+                '/auditorias/recepciones' => 'Calificación de recepciones',
+                '/reportes/caducidad-documentos' => 'Reporte de caducidad de documentos',
             ],
             'Guardia' => [
                 '/calendario/seguimiento' => 'Seguimiento de hoy (marcar arribo)',

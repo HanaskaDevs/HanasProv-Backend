@@ -5,6 +5,7 @@ namespace App\Modules\Asistente\Services;
 use App\Modules\Asistente\Models\AsistenteConsumo;
 use Anthropic\Messages\Usage;
 use Carbon\CarbonInterface;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Tope de gasto del asistente contra la API de Claude.
@@ -93,7 +94,7 @@ class AsistentePresupuestoService
      */
     public function calcularCosto(Usage $uso): float
     {
-        $precios = config('services.anthropic.precios_usd_por_millon');
+        $precios = $this->preciosDelModelo((string) config('services.anthropic.model'));
 
         $porMillon = fn (int $tokens, float $precio): float => $tokens / 1_000_000 * $precio;
 
@@ -104,6 +105,27 @@ class AsistentePresupuestoService
             + $porMillon($uso->cacheReadInputTokens ?? 0, (float) $precios['cache_lectura']),
             6
         );
+    }
+
+    /**
+     * La tarifa del modelo configurado. Un modelo sin fila en
+     * config/services.php NO puede dejar el tope ciego: se cobra con la
+     * tarifa más cara de la tabla (el tope corta antes, nunca después) y
+     * queda en el log para que alguien agregue la fila correcta.
+     *
+     * @return array{entrada: float, salida: float, cache_escritura: float, cache_lectura: float}
+     */
+    protected function preciosDelModelo(string $modelo): array
+    {
+        $tabla = config('services.anthropic.precios_usd_por_millon');
+
+        if (isset($tabla[$modelo])) {
+            return $tabla[$modelo];
+        }
+
+        Log::error('Asistente: el modelo no tiene tarifa en config/services.php, se usa la más cara', ['modelo' => $modelo]);
+
+        return collect($tabla)->sortByDesc('salida')->first();
     }
 
     /**
