@@ -18,6 +18,16 @@ class Producto extends BaseModel
     public const ETAPA_COMPRAS = 'Compras';
     public const ETAPA_CALIDAD = 'Calidad';
 
+    /**
+     * Categoría del producto (22-oct-2026). Mismos valores que la
+     * clasificación del calendario de horarios.
+     */
+    public const PERECIBLES = 'Perecibles';
+    public const NO_PERECIBLES = 'No_Perecibles';
+    public const FRUVER = 'Fruver';
+
+    public const CLASIFICACIONES = [self::PERECIBLES, self::NO_PERECIBLES, self::FRUVER];
+
     protected $table = 'Producto';
     protected $primaryKey = 'Id_Producto';
     public $timestamps = false;
@@ -32,6 +42,7 @@ class Producto extends BaseModel
         'Calificado_Por', 'Fecha_Calificacion',
         'Precio_En_Revision',
         'Bc_Nro_Producto',
+        'Clasificacion',
         'Creado_Por', 'Fecha_Creacion', 'Modificado_Por', 'Fecha_Modificacion',
     ];
 

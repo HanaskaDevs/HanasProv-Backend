@@ -61,6 +61,21 @@ class ProductoController extends Controller
         return response()->json(new ProductoResource($actualizado));
     }
 
+    /** Solo la categoría (productos cargados antes de que se pidiera). */
+    public function asignarClasificacion(Request $request, int $producto): JsonResponse
+    {
+        $datos = $request->validate(['clasificacion' => ['required', 'string']]);
+
+        $actualizado = $this->productoService->asignarClasificacion(
+            $request->user(),
+            (int) $request->attributes->get('id_empresa_activa'),
+            $producto,
+            $datos['clasificacion']
+        );
+
+        return response()->json(new ProductoResource($actualizado));
+    }
+
     public function subirDocumento(SubirDocumentoProductoRequest $request, int $producto, int $tipoDocumento): JsonResponse
     {
         $idEmpresaActiva = (int) $request->attributes->get('id_empresa_activa');
@@ -92,6 +107,10 @@ class ProductoController extends Controller
                 'nombre_documento' => $tipo->Nombre_Documento,
                 'carpeta_slug' => $tipo->Carpeta_Slug,
                 'obligatorio' => (bool) $tipo->Obligatorio,
+                // false en la Notificación sanitaria: en un producto Fruver
+                // deja de ser obligatoria (TipoDocumentoProducto::
+                // esObligatorioPara es la regla; esto es para la pantalla).
+                'obligatorio_en_fruver' => $tipo->esObligatorioPara(\App\Modules\Ficha_Productos\Models\Producto::FRUVER),
                 'permite_multiples' => (bool) $tipo->Permite_Multiples,
                 'requiere_fecha_caducidad' => (bool) $tipo->Requiere_Fecha_Caducidad,
             ])->values()

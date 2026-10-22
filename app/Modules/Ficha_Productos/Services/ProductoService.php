@@ -123,6 +123,10 @@ class ProductoService
                 'Nombre_Producto' => mb_strtoupper($data['nombre_producto'], 'UTF-8'),
                 'Codigo_Barras' => $data['codigo_barras'] ?? null,
                 'Precio' => $data['precio'] ?? null,
+                // Perecibles / No_Perecibles / Fruver (22-oct-2026): decide
+                // qué documentos son obligatorios (ver
+                // TipoDocumentoProducto::esObligatorioPara).
+                'Clasificacion' => $data['clasificacion'] ?? null,
                 ...$this->medidasDelProducto($data),
                 'Activo' => 1,
                 'Bloqueado' => 0,
@@ -223,6 +227,10 @@ class ProductoService
                 'Modificado_Por' => $usuario->Id_Usuario,
                 'Fecha_Modificacion' => now(),
             ];
+
+            if (array_key_exists('clasificacion', $data)) {
+                $cambios['Clasificacion'] = $data['clasificacion'];
+            }
 
             if ($estaAprobado) {
                 // Mismos campos que escribe registrar(): el producto entra a
@@ -339,7 +347,9 @@ class ProductoService
         // documento OBLIGATORIOS (Ficha técnica, Análisis de
         // Laboratorio) nunca se pueden borrar del todo, solo
         // reemplazar. Antes esto solo se ocultaba en el frontend.
-        if ($documento->tipoDocumento->Obligatorio) {
+        // Obligatorio PARA ESTE PRODUCTO: en Fruver la Notificación sanitaria
+        // es opcional y entonces sí se puede borrar.
+        if ($documento->tipoDocumento->esObligatorioPara($documento->producto->Clasificacion)) {
             throw ValidationException::withMessages([
                 'archivo' => ['Este documento es obligatorio, no se puede eliminar. Puede reemplazarlo por otro.'],
             ]);
@@ -678,20 +688,17 @@ class ProductoService
             ->with('documentos.tipoDocumento')
             ->get();
 
-        $tiposObligatorios = TipoDocumentoProducto::where('Activo', 1)
-            ->where('Obligatorio', 1)
-            ->pluck('Id_Tipo_Documento_Producto');
-
+        $tiposActivos = $this->tiposDocumentoActivos();
         $productosIncompletos = [];
 
         foreach ($productos as $producto) {
-            $tiposSubidos = $producto->documentos
-                ->where('Activo', true)
-                ->pluck('Id_Tipo_Documento_Producto');
+            if (! $producto->Clasificacion) {
+                $productosIncompletos[] = $producto->Nombre_Producto.' (falta la categoría)';
 
-            $faltantes = $tiposObligatorios->diff($tiposSubidos);
+                continue;
+            }
 
-            if ($faltantes->isNotEmpty()) {
+            if ($this->faltantesObligatorios($producto, $tiposActivos)->isNotEmpty()) {
                 $productosIncompletos[] = $producto->Nombre_Producto;
             }
         }
@@ -759,15 +766,16 @@ class ProductoService
             ]);
         }
 
-        $tiposObligatorios = TipoDocumentoProducto::where('Activo', 1)
-            ->where('Obligatorio', 1)
-            ->pluck('Id_Tipo_Documento_Producto');
+        $tiposActivos = $this->tiposDocumentoActivos();
 
         foreach ($productos as $producto) {
-            $tiposSubidos = $producto->documentos->where('Activo', true)->pluck('Id_Tipo_Documento_Producto');
-            $faltantes = $tiposObligatorios->diff($tiposSubidos);
+            if (! $producto->Clasificacion) {
+                throw ValidationException::withMessages([
+                    'productos' => ["El producto \"{$producto->Nombre_Producto}\" no tiene categoría (Perecibles, No Perecibles o Fruver)."],
+                ]);
+            }
 
-            if ($faltantes->isNotEmpty()) {
+            if ($this->faltantesObligatorios($producto, $tiposActivos)->isNotEmpty()) {
                 throw ValidationException::withMessages([
                     'productos' => ["El producto \"{$producto->Nombre_Producto}\" no tiene todos los documentos obligatorios."],
                 ]);
@@ -842,14 +850,15 @@ class ProductoService
             ->with('documentos')
             ->firstOrFail();
 
-        $tiposObligatorios = TipoDocumentoProducto::where('Activo', 1)
-            ->where('Obligatorio', 1)
-            ->pluck('Id_Tipo_Documento_Producto');
+        if (! $producto->Clasificacion) {
+            throw ValidationException::withMessages([
+                'producto' => ['Elige la categoría del producto (Perecibles, No Perecibles o Fruver) antes de reenviarlo.'],
+            ]);
+        }
 
         $documentosActivos = $producto->documentos->where('Activo', true);
-        $tiposSubidos = $documentosActivos->pluck('Id_Tipo_Documento_Producto');
 
-        if ($tiposObligatorios->diff($tiposSubidos)->isNotEmpty()) {
+        if ($this->faltantesObligatorios($producto, $this->tiposDocumentoActivos())->isNotEmpty()) {
             throw ValidationException::withMessages([
                 'producto' => ['Todavía te falta cargar algún documento obligatorio de este producto.'],
             ]);
@@ -1039,6 +1048,72 @@ class ProductoService
         }
 
         return $proveedor;
+    }
+
+    /**
+     * Asigna SOLO la categoría a un producto que todavía no la tiene (o
+     * cambiarla mientras se puede editar). La usa el modal de documentos
+     * con los productos que se cargaron antes del 22-oct-2026: se pide la
+     * categoría antes de mostrar los documentos, porque de ella depende
+     * cuáles son obligatorios.
+     *
+     * Mismas reglas de edición que actualizar(), salvo una: a un producto
+     * APROBADO no se le cambia por acá, porque eso lo devolvería a
+     * calificación por un costado. Para eso está la edición completa.
+     */
+    public function asignarClasificacion(
+        Usuario $usuario,
+        int $idEmpresaActiva,
+        int $idProducto,
+        string $clasificacion,
+        ?int $idProveedorObjetivo = null
+    ): Producto {
+        if (! in_array($clasificacion, Producto::CLASIFICACIONES, true)) {
+            throw ValidationException::withMessages([
+                'clasificacion' => ['Elige Perecibles, No Perecibles o Fruver.'],
+            ]);
+        }
+
+        $producto = $this->productoDeTrabajo($usuario, $idEmpresaActiva, $idProducto, $idProveedorObjetivo);
+
+        $esCorreccionDeRechazado = $producto->proveedor->Correcciones_Pendientes_Productos
+            && $producto->Estado_Calificacion === 'Rechazado';
+
+        if ($producto->Bloqueado && ! $esCorreccionDeRechazado) {
+            throw new AccessDeniedHttpException(
+                'Este producto ya fue enviado a revisión: su categoría no se puede cambiar desde acá.'
+            );
+        }
+
+        $producto->forceFill([
+            'Clasificacion' => $clasificacion,
+            'Modificado_Por' => $usuario->Id_Usuario,
+            'Fecha_Modificacion' => now(),
+        ])->save();
+
+        return $producto->load(['unidadPresentacion', 'grupos', 'documentos.tipoDocumento', 'documentos.archivo']);
+    }
+
+    /** @return \Illuminate\Support\Collection<int, TipoDocumentoProducto> */
+    protected function tiposDocumentoActivos(): \Illuminate\Support\Collection
+    {
+        return TipoDocumentoProducto::where('Activo', 1)->get();
+    }
+
+    /**
+     * Tipos obligatorios PARA ESTE PRODUCTO (según su categoría) que todavía
+     * no tiene cargados.
+     *
+     * @param  \Illuminate\Support\Collection<int, TipoDocumentoProducto>  $tiposActivos
+     */
+    protected function faltantesObligatorios(Producto $producto, \Illuminate\Support\Collection $tiposActivos): \Illuminate\Support\Collection
+    {
+        $tiposSubidos = $producto->documentos->where('Activo', true)->pluck('Id_Tipo_Documento_Producto');
+
+        return $tiposActivos
+            ->filter(fn (TipoDocumentoProducto $tipo) => $tipo->esObligatorioPara($producto->Clasificacion))
+            ->pluck('Id_Tipo_Documento_Producto')
+            ->diff($tiposSubidos);
     }
 
     /**

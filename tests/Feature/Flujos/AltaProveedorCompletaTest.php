@@ -159,6 +159,7 @@ class AltaProveedorCompletaTest extends TestCase
 
         $idProducto = (int) $this->postJson('/api/mis-productos', [
             'nombre_producto' => 'PRODUCTO DE PRUEBA E2E',
+            'clasificacion' => 'Perecibles',
             'id_unidad_presentacion' => $unidad->Id_Unidad_Presentacion,
             'precio' => 10.5,
             'unidad_por_caja' => 12,

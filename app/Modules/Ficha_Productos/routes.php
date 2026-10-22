@@ -20,6 +20,7 @@ Route::prefix('mis-productos')
         // Editar un producto propio (nombre, unidad, medidas, grupos...).
         // Va después de las rutas literales para que '{producto}' no se
         // coma un 'registrar' o un 'resumen-registro'.
+        Route::put('/{producto}/clasificacion', [ProductoController::class, 'asignarClasificacion']);
         Route::put('/{producto}', [ProductoController::class, 'update']);
         Route::get('/resumen-registro', [ProductoController::class, 'resumenRegistro']);
         Route::post('/registrar', [ProductoController::class, 'registrar']);
@@ -74,6 +75,7 @@ Route::prefix('productos-proveedor')
 
         Route::get('/{proveedor}', [ProductosDeProveedorController::class, 'index']);
         Route::post('/{proveedor}', [ProductosDeProveedorController::class, 'store']);
+        Route::put('/{proveedor}/{producto}/clasificacion', [ProductosDeProveedorController::class, 'asignarClasificacion']);
         Route::put('/{proveedor}/{producto}', [ProductosDeProveedorController::class, 'update']);
         Route::delete('/{proveedor}/{producto}', [ProductosDeProveedorController::class, 'destroy']);
     });

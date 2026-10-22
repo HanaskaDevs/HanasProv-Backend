@@ -46,6 +46,9 @@ class ProductoResource extends JsonResource
             'unidad_ancho_cm' => $this->Unidad_Ancho_Cm,
             'unidad_alto_cm' => $this->Unidad_Alto_Cm,
             'precio_en_revision' => (bool) $this->Precio_En_Revision,
+            // Perecibles / No_Perecibles / Fruver; null en los productos
+            // cargados antes del 22-oct-2026 (se pide al abrirlos).
+            'clasificacion' => $this->Clasificacion,
             'bloqueado' => (bool) $this->Bloqueado,
             'estado_calificacion' => $this->Estado_Calificacion,
             /*

@@ -123,7 +123,7 @@ class PresupuestoAsistenteTest extends TestCase
         // de entrada + 1 * precio de salida.
         $uso = $this->uso(entrada: 1_000_000, salida: 1_000_000);
 
-        $precios = config('services.anthropic.precios_usd_por_millon');
+        $precios = $this->preciosDelModeloDePrueba();
         $esperado = round((float) $precios['entrada'] + (float) $precios['salida'], 6);
 
         $this->assertSame($esperado, $this->servicio()->calcularCosto($uso));
@@ -131,7 +131,7 @@ class PresupuestoAsistenteTest extends TestCase
 
     public function test_los_tokens_de_cache_se_cobran_a_su_propia_tarifa(): void
     {
-        $precios = config('services.anthropic.precios_usd_por_millon');
+        $precios = $this->preciosDelModeloDePrueba();
 
         $uso = $this->uso(entrada: 0, salida: 0, cacheEscritura: 1_000_000, cacheLectura: 1_000_000);
 
@@ -172,5 +172,30 @@ class PresupuestoAsistenteTest extends TestCase
 
         $this->assertSame(5.0, $estado['semanal']['limite']);
         $this->assertSame(20.0, $estado['mensual']['limite']);
+    }
+
+    /**
+     * Desde el 22-oct-2026 las tarifas son POR MODELO
+     * (services.anthropic.precios_usd_por_millon.<modelo>). Se fija el
+     * modelo en la prueba para no depender del ANTHROPIC_MODEL del .env.
+     *
+     * @return array{entrada: float, salida: float, cache_escritura: float, cache_lectura: float}
+     */
+    private function preciosDelModeloDePrueba(): array
+    {
+        config(['services.anthropic.model' => 'claude-sonnet-5-5']);
+
+        return config('services.anthropic.precios_usd_por_millon.claude-sonnet-5-5');
+    }
+
+    /** Un modelo sin tarifa no deja el tope ciego: se cobra con la más cara de la tabla. */
+    public function test_un_modelo_sin_tarifa_se_cobra_con_la_mas_cara(): void
+    {
+        config(['services.anthropic.model' => 'modelo-que-no-esta-en-la-tabla']);
+        $uso = $this->uso(entrada: 1_000_000, salida: 0);
+
+        $masCara = max(array_column(config('services.anthropic.precios_usd_por_millon'), 'entrada'));
+
+        $this->assertSame(round((float) $masCara, 6), $this->servicio()->calcularCosto($uso));
     }
 }

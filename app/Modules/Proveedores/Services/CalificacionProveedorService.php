@@ -421,6 +421,10 @@ class CalificacionProveedorService
             'productos' => $productos->map(fn (Producto $producto) => [
                 'id_producto' => $producto->Id_Producto,
                 'nombre_producto' => $producto->Nombre_Producto,
+                // Perecibles / No_Perecibles / Fruver: en Fruver la
+                // Notificación sanitaria es opcional, así que Calidad tiene
+                // que ver la categoría para entender por qué no está.
+                'clasificacion' => $producto->Clasificacion,
                 'codigo_barras' => $producto->Codigo_Barras,
                 'unidad_presentacion' => $producto->unidadPresentacion?->Nombre_Unidad,
                 'precio' => $producto->Precio,
