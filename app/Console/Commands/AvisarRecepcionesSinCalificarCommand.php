@@ -102,7 +102,7 @@ class AvisarRecepcionesSinCalificarCommand extends Command
             }
 
             $casos[] = [
-                'proveedor' => $proveedor->Razon_Social ?: ($proveedor->Nombre_Comercial ?: 'Proveedor sin razón social'),
+                'proveedor' => $proveedor->nombreVisible(),
                 'ruc' => $proveedor->Ruc,
                 'empresa' => $horario->empresa?->Nombre_Comercial ?? $horario->empresa?->Razon_Social ?? 'Empresa',
                 'hora_entrega' => $entrega->Hora_Entregado_Real?->format('H:i') ?? '—',

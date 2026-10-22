@@ -47,9 +47,13 @@ class ReclamoNotification extends Notification implements ShouldQueue
                     : "Nueva respuesta en reclamo: {$this->reclamo->Asunto}"
             )
             ->greeting($this->esMensajeInicial ? 'Se ha registrado un nuevo reclamo' : 'Hay una nueva respuesta en el reclamo')
-            ->line("Proveedor: {$this->reclamo->proveedor->Razon_Social}")
+            ->line("Proveedor: {$this->reclamo->proveedor->nombreVisible()}")
             ->line("Asunto: {$this->reclamo->Asunto}")
-            ->line("De: {$autor->Nombre_Completo}")
+            // Si escribió el proveedor, se lo nombra por su razón social y no
+            // por la persona dueña del usuario (23-oct-2026).
+            ->line('De: '.($autor->Tipo_Usuario === 'Proveedor'
+                ? $this->reclamo->proveedor->nombreVisible()
+                : $autor->Nombre_Completo))
             ->line($this->mensaje->Mensaje);
 
         foreach ($this->mensaje->imagenes as $imagen) {

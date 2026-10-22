@@ -128,7 +128,7 @@ class CargaMasivaHorariosService
             ],
             'filas' => collect($resultados)->map(fn ($r) => collect($r)->except(['id_horario_existente', 'datos'])->all())->all(),
             'bajas' => $bajas->map(fn (HorarioEntregaProveedor $h) => [
-                'nombre_proveedor' => $h->proveedor ? ($h->proveedor->Nombre_Comercial ?: $h->proveedor->Razon_Social) : null,
+                'nombre_proveedor' => $h->proveedor?->nombreVisible(),
                 'clasificacion' => $h->Clasificacion,
                 'dia_entrega' => $h->Dia_Entrega,
                 'hora_llegada' => $h->Hora_Llegada,
@@ -226,7 +226,7 @@ class CargaMasivaHorariosService
         }
 
         $base['id_proveedor'] = $proveedor->Id_Proveedor;
-        $base['nombre_proveedor'] = $proveedor->Nombre_Comercial ?: $proveedor->Razon_Social;
+        $base['nombre_proveedor'] = $proveedor->nombreVisible();
 
         $llegada = self::hora($fila['hora_llegada'] ?? null);
 

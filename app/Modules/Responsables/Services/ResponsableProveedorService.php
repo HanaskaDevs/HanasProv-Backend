@@ -202,17 +202,39 @@ class ResponsableProveedorService
             ->get();
 
         // Nombre del proveedor según BC, en una sola consulta.
-        $nombresBc = $empresaBc === null
+        $fichasBc = $empresaBc === null
             ? collect()
             : DB::table('BC_Ficha_Proveedor')
                 ->where('Empresa', $empresaBc)
                 ->whereIn('Nro_Proveedor', $asignaciones->pluck('Nro_Proveedor_BC')->all())
-                ->pluck('Nombre', 'Nro_Proveedor');
+                ->get(['Nro_Proveedor', 'Nombre', 'Nro_Identificacion'])
+                ->keyBy('Nro_Proveedor');
+        $nombresBc = $fichasBc->map(fn ($f) => $f->Nombre);
+
+        // La razón social del PORTAL gana (23-oct-2026), igual que en el resto
+        // de las pantallas: por el código BC que guarda el portal al aprobar,
+        // o por el RUC de la ficha de BC.
+        $proveedoresPortal = Proveedor::where('Id_Empresa', $idEmpresaActiva)
+            ->whereNotNull('Razon_Social')
+            ->where(fn ($q) => $q
+                ->whereIn('Nro_Proveedor_BC', $asignaciones->pluck('Nro_Proveedor_BC')->all())
+                ->orWhereIn('Ruc', $fichasBc->pluck('Nro_Identificacion')->map(fn ($r) => trim((string) $r))->all()))
+            ->get(['Ruc', 'Razon_Social', 'Nro_Proveedor_BC']);
+        $porCodigo = $proveedoresPortal->filter(fn ($p) => $p->Nro_Proveedor_BC)->keyBy(fn ($p) => trim($p->Nro_Proveedor_BC));
+        $porRuc = $proveedoresPortal->keyBy(fn ($p) => trim((string) $p->Ruc));
+        $nombrePortal = function (string $codigo) use ($porCodigo, $porRuc, $fichasBc): ?string {
+            $proveedor = $porCodigo->get($codigo) ?? $porRuc->get(trim((string) ($fichasBc->get($codigo)?->Nro_Identificacion)));
+
+            return $proveedor?->Razon_Social;
+        };
 
         return $asignaciones->map(fn (ResponsableProveedor $asignacion) => [
             'id_responsable_proveedor' => $asignacion->Id_Responsable_Proveedor,
             'nro_proveedor_bc' => $asignacion->Nro_Proveedor_BC,
             'nombre_en_bc' => $nombresBc[$asignacion->Nro_Proveedor_BC] ?? null,
+            // Lo que se muestra: la razón social del portal, o el nombre de BC
+            // si el proveedor no está registrado en el portal.
+            'nombre_proveedor' => $nombrePortal($asignacion->Nro_Proveedor_BC) ?? ($nombresBc[$asignacion->Nro_Proveedor_BC] ?? null),
             'responsable' => [
                 'id_responsable' => $asignacion->responsable?->Id_Responsable,
                 'nombre' => $asignacion->responsable?->Nombre,

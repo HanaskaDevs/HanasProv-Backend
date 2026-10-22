@@ -78,7 +78,7 @@ class DashboardSistemasService
             ->get()
             ->map(fn (PedidoCompra $pedido) => [
                 'nro_pedido' => $pedido->Nro_Pedido,
-                'proveedor' => $pedido->proveedor?->Nombre_Comercial ?? $pedido->proveedor?->Razon_Social,
+                'proveedor' => $pedido->proveedor?->nombreVisible(),
                 'fecha_recepcion_esperada' => $pedido->Fecha_Recepcion_Esperada?->toDateString(),
                 'vencido' => $pedido->Fecha_Recepcion_Esperada !== null && $pedido->Fecha_Recepcion_Esperada->isPast(),
             ]);

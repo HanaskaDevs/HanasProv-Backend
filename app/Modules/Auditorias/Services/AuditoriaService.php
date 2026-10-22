@@ -332,7 +332,7 @@ class AuditoriaService
             'auditorias_en_borrador' => $enBorrador,
             'ultimas' => $ultimas->map(fn (Auditoria $a) => [
                 'id_auditoria' => $a->Id_Auditoria,
-                'proveedor' => $a->proveedor ? ($a->proveedor->Nombre_Comercial ?: $a->proveedor->Razon_Social) : null,
+                'proveedor' => $a->proveedor?->nombreVisible(),
                 'fecha_auditoria' => $a->Fecha_Auditoria?->format('Y-m-d'),
                 'porcentaje_cumplimiento' => (float) $a->Porcentaje_Cumplimiento,
             ])->values(),
@@ -366,9 +366,7 @@ class AuditoriaService
 
                 return [
                     'id_proveedor' => (int) $ultima->Id_Proveedor,
-                    'proveedor' => $ultima->proveedor
-                        ? ($ultima->proveedor->Nombre_Comercial ?: $ultima->proveedor->Razon_Social)
-                        : null,
+                    'proveedor' => $ultima->proveedor?->nombreVisible(),
                     'ruc' => $ultima->proveedor?->Ruc,
                     'tipo_auditoria' => $ultima->tipoAuditoria?->Nombre,
                     'fecha' => $ultima->Fecha_Auditoria?->format('Y-m-d'),
