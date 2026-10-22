@@ -68,17 +68,56 @@ class HerramientasAsistenteTest extends TestCase
 
     // ------------------------------------------------------- QUÉ HERRAMIENTAS
 
-    public function test_un_proveedor_no_recibe_ninguna_herramienta(): void
+    /**
+     * Desde el 22-oct-2026 (commit "Hana con Sonnet 5.5 y consultas del
+     * portal por rol") el proveedor SÍ tiene herramientas, pero solo las
+     * "mis_*", que resuelven el proveedor desde el usuario y nunca desde lo
+     * que pida el modelo. Ninguna de las de personal interno.
+     */
+    public function test_un_proveedor_solo_recibe_las_de_sus_propios_datos(): void
     {
         $empresa = $this->crearEmpresa();
         [$usuario] = $this->crearProveedorConUsuario($empresa);
 
-        $this->assertSame(
-            [],
-            $this->servicio()->definiciones($usuario, $empresa->Id_Empresa),
-            'Un proveedor no puede tener herramientas: sus datos ya vienen en el contexto, y una '
-            .'consulta libre sería una puerta lateral a datos de otros.'
-        );
+        $nombres = $this->nombres($this->servicio()->definiciones($usuario, $empresa->Id_Empresa));
+
+        $this->assertEqualsCanonicalizing([
+            'consultar_mis_documentos',
+            'consultar_mis_productos',
+            'consultar_mis_pedidos',
+            'consultar_mis_reclamos',
+            'consultar_mis_horarios',
+        ], $nombres);
+    }
+
+    /**
+     * Lo que protegía el test viejo ("una consulta libre sería una puerta
+     * lateral a datos de otros"): la consulta de un proveedor no devuelve
+     * nada de otro, aunque el modelo pida filtrar por su nombre.
+     */
+    public function test_las_consultas_del_proveedor_no_ven_datos_de_otro(): void
+    {
+        $empresa = $this->crearEmpresa();
+        [$usuario, $propio] = $this->crearProveedorConUsuario($empresa);
+        [, $ajeno] = $this->crearProveedorConUsuario($empresa);
+        $idUnidad = (int) DB::table('Unidad_Presentacion')->where('Activo', 1)->value('Id_Unidad_Presentacion');
+
+        foreach ([[$propio, 'PRODUCTO PROPIO'], [$ajeno, 'PRODUCTO AJENO']] as [$proveedor, $nombre]) {
+            DB::table('Producto')->insert([
+                'Id_Proveedor' => $proveedor->Id_Proveedor,
+                'Id_Unidad_Presentacion' => $idUnidad,
+                'Nombre_Producto' => $nombre,
+                'Activo' => 1,
+                'Bloqueado' => 0,
+                'Fecha_Creacion' => now(),
+            ]);
+        }
+
+        $todos = $this->servicio()->ejecutar('consultar_mis_productos', [], $usuario, $empresa->Id_Empresa);
+        $buscandoAjeno = $this->servicio()->ejecutar('consultar_mis_productos', ['producto' => 'AJENO'], $usuario, $empresa->Id_Empresa);
+
+        $this->assertSame(['PRODUCTO PROPIO'], array_column($todos['filas'], 'Producto'));
+        $this->assertSame([], $buscandoAjeno['filas']);
     }
 
     public function test_el_guardia_no_recibe_ninguna_herramienta(): void
@@ -100,8 +139,13 @@ class HerramientasAsistenteTest extends TestCase
         $this->assertContains('consultar_calificaciones_proveedores', $nombres);
     }
 
-    /** Compras ve pedidos, pero no el ranking de calificaciones. */
-    public function test_compras_solo_recibe_la_de_pedidos(): void
+    /**
+     * Cada herramienta va con los roles de su pantalla (22-oct-2026).
+     * Compras ve pedidos y también calificaciones (la calificación global
+     * se la muestra CalificacionGlobalController, que incluye a Compras),
+     * pero no auditorías ni la documentación de los proveedores.
+     */
+    public function test_compras_recibe_las_de_sus_pantallas(): void
     {
         $empresa = $this->crearEmpresa();
         $compras = $this->crearUsuarioInterno($empresa, 'Compras');
@@ -109,7 +153,10 @@ class HerramientasAsistenteTest extends TestCase
         $nombres = $this->nombres($this->servicio()->definiciones($compras, $empresa->Id_Empresa));
 
         $this->assertContains('consultar_pedidos', $nombres);
-        $this->assertNotContains('consultar_calificaciones_proveedores', $nombres);
+        $this->assertContains('consultar_calificaciones_proveedores', $nombres);
+        $this->assertNotContains('consultar_auditorias', $nombres);
+        $this->assertNotContains('consultar_documentos_proveedores', $nombres);
+        $this->assertNotContains('consultar_cuentas_proveedores', $nombres);
     }
 
     /** Calidad ve calificaciones, pero no pedidos por bodega. */
@@ -188,7 +235,8 @@ class HerramientasAsistenteTest extends TestCase
         $resultado = $this->servicio()->ejecutar('borrar_todo', [], $sistemas, $empresa->Id_Empresa);
 
         $this->assertSame([], $resultado['filas']);
-        $this->assertStringContainsString('No existe una herramienta', $resultado['texto']);
+        // Una que no existe pasa por el mismo camino que una no permitida.
+        $this->assertStringContainsString('no está disponible para este usuario', $resultado['texto']);
     }
 
     // ------------------------------------------------------------ CONVENIENCIA

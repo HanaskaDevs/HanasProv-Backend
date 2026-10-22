@@ -28,6 +28,8 @@ class ProductosDeProveedorTest extends TestCase
     {
         return [
             'nombre_producto' => 'Producto de prueba',
+            // Obligatoria desde el 22-oct-2026 (ver ClasificacionProductoTest).
+            'clasificacion' => 'Perecibles',
             'id_unidad_presentacion' => $this->idUnidad(),
             'precio' => 10.50,
             ...$extra,

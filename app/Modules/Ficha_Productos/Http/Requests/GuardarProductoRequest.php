@@ -2,6 +2,7 @@
 
 namespace App\Modules\Ficha_Productos\Http\Requests;
 
+use App\Modules\Ficha_Productos\Models\Producto;
 use App\Modules\Ficha_Productos\Models\UnidadPresentacion;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -17,6 +18,10 @@ class GuardarProductoRequest extends FormRequest
     {
         return [
             'nombre_producto' => ['required', 'string', 'max:200'],
+            // Categoría (22-oct-2026): obligatoria al crear y al editar. De
+            // ella depende qué documentos son obligatorios (en Fruver, la
+            // Notificación sanitaria es opcional).
+            'clasificacion' => ['required', Rule::in(Producto::CLASIFICACIONES)],
             'codigo_barras' => ['nullable', 'string', 'max:50'],
             'id_unidad_presentacion' => ['required', 'integer', 'exists:Unidad_Presentacion,Id_Unidad_Presentacion'],
             'precio' => ['nullable', 'numeric', 'min:0'],
