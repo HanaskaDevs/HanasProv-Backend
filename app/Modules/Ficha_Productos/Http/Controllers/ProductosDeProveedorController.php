@@ -120,6 +120,22 @@ class ProductosDeProveedorController extends Controller
         return response()->json(new ProductoResource($producto), 201);
     }
 
+    /** Solo la categoría (productos cargados antes de que se pidiera). */
+    public function asignarClasificacion(Request $request, int $proveedor, int $producto): JsonResponse
+    {
+        $datos = $request->validate(['clasificacion' => ['required', 'string']]);
+
+        $actualizado = $this->productoService->asignarClasificacion(
+            $request->user(),
+            $this->empresa($request),
+            $producto,
+            $datos['clasificacion'],
+            $proveedor
+        );
+
+        return response()->json(new ProductoResource($actualizado));
+    }
+
     public function update(GuardarProductoRequest $request, int $proveedor, int $producto): JsonResponse
     {
         $actualizado = $this->productoService->actualizar(
