@@ -8,6 +8,7 @@ use App\Modules\Documentos_Proveedor\Models\DocumentoProveedor;
 use App\Modules\Documentos_Proveedor\Models\TipoDocumento;
 use App\Modules\Documentos_Proveedor\Models\TipoDocumentoClaseExcluida;
 use App\Modules\Documentos_Proveedor\Services\DocumentoProveedorService;
+use App\Modules\Ficha_Productos\Models\DocumentoProducto;
 use App\Modules\Ficha_Productos\Models\Producto;
 use App\Modules\Proveedores\Models\CalificacionCampoFicha;
 use App\Modules\Proveedores\Models\ClaseProveedor;
@@ -425,6 +426,7 @@ class CalificacionProveedorService
                 // Notificación sanitaria es opcional, así que Calidad tiene
                 // que ver la categoría para entender por qué no está.
                 'clasificacion' => $producto->Clasificacion,
+                'oculto_proveedor' => (bool) $producto->Oculto_Proveedor,
                 'codigo_barras' => $producto->Codigo_Barras,
                 'unidad_presentacion' => $producto->unidadPresentacion?->Nombre_Unidad,
                 'precio' => $producto->Precio,
@@ -435,8 +437,51 @@ class CalificacionProveedorService
                     'id_documento_producto' => $doc->Id_Documento_Producto,
                     'nombre_documento' => $doc->tipoDocumento->Nombre_Documento,
                     'nombre_original' => $doc->archivo->Nombre_Original,
+                    // Caducidad (23-oct-2026): Calidad la ve, y si el tipo
+                    // la exige y falta (análisis cargados antes de que se
+                    // pidiera), la completa antes de aprobar.
+                    'fecha_caducidad' => $doc->Fecha_Caducidad?->toDateString(),
+                    'requiere_fecha_caducidad' => (bool) $doc->tipoDocumento->Requiere_Fecha_Caducidad,
                 ])->values(),
             ])->values(),
+        ];
+    }
+
+    /**
+     * Calidad escribe la fecha de caducidad de un documento de producto
+     * que no la tiene (23-oct-2026): los análisis de producto se cargaron
+     * sin fecha hasta que se empezó a pedir, y no se puede aprobar el
+     * producto sin ella. La fecha la toma del propio documento.
+     *
+     * @return array{id_documento_producto: int, fecha_caducidad: string}
+     */
+    public function asignarFechaCaducidadDocumentoProducto(
+        Usuario $admin,
+        int $idEmpresaActiva,
+        int $idDocumentoProducto,
+        string $fecha
+    ): array {
+        $this->verificarPuedeCalificar($admin, $idEmpresaActiva);
+
+        $validada = validator(['fecha_caducidad' => $fecha], [
+            'fecha_caducidad' => ['required', 'date_format:Y-m-d'],
+        ], [
+            'fecha_caducidad.date_format' => 'Indica la fecha completa: día, mes y año.',
+        ])->validate()['fecha_caducidad'];
+
+        $documento = DocumentoProducto::whereHas('producto.proveedor', fn ($q) => $q->where('Id_Empresa', $idEmpresaActiva))
+            ->where('Activo', 1)
+            ->findOrFail($idDocumentoProducto);
+
+        $documento->forceFill([
+            'Fecha_Caducidad' => $validada,
+            'Modificado_Por' => $admin->Id_Usuario,
+            'Fecha_Modificacion' => now(),
+        ])->save();
+
+        return [
+            'id_documento_producto' => $documento->Id_Documento_Producto,
+            'fecha_caducidad' => $documento->Fecha_Caducidad->toDateString(),
         ];
     }
 
@@ -485,6 +530,29 @@ class CalificacionProveedorService
             throw ValidationException::withMessages([
                 'producto' => ['Ya registraste la calificación de productos. Solo se puede volver a calificar cuando se reabra.'],
             ]);
+        }
+
+        /*
+         * No se aprueba con una fecha de caducidad faltante (23-oct-2026):
+         * los análisis de producto cargados antes de que se pidiera la fecha
+         * no la tienen, y Calidad la tiene que completar antes (ver
+         * asignarFechaCaducidadDocumentoProducto). Devolverlo sí se puede.
+         */
+        if ($aprobado) {
+            $sinFecha = DocumentoProducto::where('Id_Producto', $producto->Id_Producto)
+                ->where('Activo', 1)
+                ->whereNull('Fecha_Caducidad')
+                ->whereHas('tipoDocumento', fn ($q) => $q->where('Requiere_Fecha_Caducidad', 1))
+                ->with('tipoDocumento')
+                ->get();
+
+            if ($sinFecha->isNotEmpty()) {
+                throw ValidationException::withMessages([
+                    'producto' => ['Falta la fecha de caducidad de: '
+                        .$sinFecha->map(fn ($d) => $d->tipoDocumento->Nombre_Documento)->unique()->implode(', ')
+                        .'. Agrégala antes de aprobar el producto.'],
+                ]);
+            }
         }
 
         $producto->forceFill([

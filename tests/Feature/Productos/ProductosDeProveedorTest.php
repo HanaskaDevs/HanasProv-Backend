@@ -134,15 +134,27 @@ class ProductosDeProveedorTest extends TestCase
         )->assertForbidden();
     }
 
-    public function test_calidad_no_gestiona_productos_de_proveedores(): void
+    /** Calidad gestiona los productos de un proveedor igual que Compras (23-oct-2026). */
+    public function test_calidad_gestiona_productos_de_proveedores(): void
     {
         $empresa = $this->crearEmpresa();
         [, $proveedor] = $this->crearProveedorConUsuario($empresa);
         $calidad = $this->crearUsuarioInterno($empresa, 'Calidad');
+        $cabeceras = $this->cabecerasComo($calidad, $empresa);
+
+        $this->getJson("/api/productos-proveedor/{$proveedor->Id_Proveedor}", $cabeceras)->assertOk();
+        $this->postJson("/api/productos-proveedor/{$proveedor->Id_Proveedor}", $this->datosProducto(), $cabeceras)->assertCreated();
+    }
+
+    public function test_guardia_no_gestiona_productos_de_proveedores(): void
+    {
+        $empresa = $this->crearEmpresa();
+        [, $proveedor] = $this->crearProveedorConUsuario($empresa);
+        $guardia = $this->crearUsuarioInterno($empresa, 'Guardia');
 
         $this->getJson(
             "/api/productos-proveedor/{$proveedor->Id_Proveedor}",
-            $this->cabecerasComo($calidad, $empresa)
+            $this->cabecerasComo($guardia, $empresa)
         )->assertForbidden();
     }
 

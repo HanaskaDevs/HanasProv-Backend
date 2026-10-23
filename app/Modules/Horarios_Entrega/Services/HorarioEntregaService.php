@@ -781,8 +781,23 @@ class HorarioEntregaService
             'Hora_Llegada' => $validados['hora_llegada'],
             'Tiempo_Preparacion_Min' => $validados['tiempo_preparacion_min'] ?? null,
             'Tiempo_Permanencia_Min' => $validados['tiempo_permanencia_min'] ?? null,
-            'Hora_Salida' => $validados['hora_salida'] ?? null,
+            // La hora de salida ya no se escribe (23-oct-2026): es la llegada
+            // más el tiempo de permanencia. Sin permanencia, no hay salida.
+            'Hora_Salida' => self::horaDeSalida($validados['hora_llegada'], $validados['tiempo_permanencia_min'] ?? null),
         ];
+    }
+
+    /** "08:00" + 30 min = "08:30". null si no hay permanencia. */
+    public static function horaDeSalida(string $horaLlegada, ?int $permanenciaMin): ?string
+    {
+        if ($permanenciaMin === null) {
+            return null;
+        }
+
+        [$h, $m] = array_map('intval', explode(':', $horaLlegada));
+        $total = ($h * 60 + $m + $permanenciaMin) % (24 * 60);
+
+        return sprintf('%02d:%02d', intdiv($total, 60), $total % 60);
     }
 
     // ------------------------------------------------------------------

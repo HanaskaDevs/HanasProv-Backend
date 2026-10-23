@@ -28,6 +28,17 @@ class Producto extends BaseModel
 
     public const CLASIFICACIONES = [self::PERECIBLES, self::NO_PERECIBLES, self::FRUVER];
 
+    /**
+     * Productos que ve QUIEN MIRA (23-oct-2026). Sin proveedor objetivo es
+     * el propio proveedor mirando lo suyo: no ve los que el personal
+     * interno le ocultó (Oculto_Proveedor). El personal interno, que llega
+     * con el id del proveedor, los ve todos.
+     */
+    public function scopeParaQuienMira($query, ?int $idProveedorObjetivo)
+    {
+        return $query->when($idProveedorObjetivo === null, fn ($q) => $q->where('Oculto_Proveedor', 0));
+    }
+
     protected $table = 'Producto';
     protected $primaryKey = 'Id_Producto';
     public $timestamps = false;
@@ -43,11 +54,13 @@ class Producto extends BaseModel
         'Precio_En_Revision',
         'Bc_Nro_Producto',
         'Clasificacion',
+        'Oculto_Proveedor',
         'Creado_Por', 'Fecha_Creacion', 'Modificado_Por', 'Fecha_Modificacion',
     ];
 
     protected $casts = [
         'Precio' => 'decimal:2',
+        'Oculto_Proveedor' => 'boolean',
         'Peso' => 'decimal:3',
         // 6 decimales: el volumen es en m³ y sale de medidas en cm, así
         // que una caja chica da valores como 0,000150 (ver la migración

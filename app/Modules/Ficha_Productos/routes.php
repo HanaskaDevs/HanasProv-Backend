@@ -76,6 +76,7 @@ Route::prefix('productos-proveedor')
         Route::get('/{proveedor}', [ProductosDeProveedorController::class, 'index']);
         Route::post('/{proveedor}', [ProductosDeProveedorController::class, 'store']);
         Route::put('/{proveedor}/{producto}/clasificacion', [ProductosDeProveedorController::class, 'asignarClasificacion']);
+        Route::put('/{proveedor}/{producto}/visibilidad', [ProductosDeProveedorController::class, 'visibilidad']);
         Route::put('/{proveedor}/{producto}', [ProductosDeProveedorController::class, 'update']);
         Route::delete('/{proveedor}/{producto}', [ProductosDeProveedorController::class, 'destroy']);
     });
