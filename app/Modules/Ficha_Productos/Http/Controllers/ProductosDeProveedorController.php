@@ -120,6 +120,22 @@ class ProductosDeProveedorController extends Controller
         return response()->json(new ProductoResource($producto), 201);
     }
 
+    /** Ocultar / volver a mostrar el producto al proveedor. */
+    public function visibilidad(Request $request, int $proveedor, int $producto): JsonResponse
+    {
+        $datos = $request->validate(['oculto' => ['required', 'boolean']]);
+
+        $actualizado = $this->productoService->cambiarVisibilidadParaProveedor(
+            $request->user(),
+            $this->empresa($request),
+            $producto,
+            (bool) $datos['oculto'],
+            $proveedor
+        );
+
+        return response()->json(new ProductoResource($actualizado));
+    }
+
     /** Solo la categoría (productos cargados antes de que se pidiera). */
     public function asignarClasificacion(Request $request, int $proveedor, int $producto): JsonResponse
     {

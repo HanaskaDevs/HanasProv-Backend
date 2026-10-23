@@ -55,6 +55,7 @@ class ProductoService
 
         return $proveedor
             ->productos()
+            ->paraQuienMira($idProveedorObjetivo)
             ->where('Activo', 1)
             ->when($busqueda, function ($query) use ($busqueda) {
                 $query->where(function ($q) use ($busqueda) {
@@ -308,7 +309,7 @@ class ProductoService
     {
         $proveedor = $this->proveedorDeTrabajo($usuario, $idEmpresaActiva, $idProveedorObjetivo);
 
-        $productos = Producto::where('Id_Proveedor', $proveedor->Id_Proveedor)
+        $productos = Producto::where('Id_Proveedor', $proveedor->Id_Proveedor)->paraQuienMira($idProveedorObjetivo)
             ->whereIn('Id_Producto', $idsProductos)
             ->where('Bloqueado', 0)
             ->with('documentos.archivo')
@@ -339,7 +340,9 @@ class ProductoService
     {
         $proveedor = $this->proveedorDeTrabajo($usuario, $idEmpresaActiva, $idProveedorObjetivo);
 
-        $documento = DocumentoProducto::whereHas('producto', fn($q) => $q->where('Id_Proveedor', $proveedor->Id_Proveedor))
+        $documento = DocumentoProducto::whereHas('producto', fn($q) => $q
+                ->where('Id_Proveedor', $proveedor->Id_Proveedor)
+                ->paraQuienMira($idProveedorObjetivo))
             ->with('archivo', 'producto.proveedor', 'tipoDocumento')
             ->findOrFail($idDocumentoProducto);
 
@@ -682,7 +685,7 @@ class ProductoService
     {
         $proveedor = $this->proveedorDeTrabajo($usuario, $idEmpresaActiva, $idProveedorObjetivo);
 
-        $productos = $proveedor->productos()
+        $productos = $proveedor->productos()->paraQuienMira($idProveedorObjetivo)
             ->where('Activo', 1)
             ->when($idsProductos !== null, fn ($query) => $query->whereIn('Id_Producto', $idsProductos))
             ->with('documentos.tipoDocumento')
@@ -711,7 +714,7 @@ class ProductoService
             'puede_registrar' => $productos->count() > 0 && empty($productosIncompletos),
             // Conteo (no un booleano global) -> más útil para mostrar
             // "tienes N en revisión" en vez de un bloqueo de todo o nada.
-            'productos_en_revision' => Producto::where('Id_Proveedor', $proveedor->Id_Proveedor)
+            'productos_en_revision' => Producto::where('Id_Proveedor', $proveedor->Id_Proveedor)->paraQuienMira($idProveedorObjetivo)
                 ->where('Activo', 1)
                 ->where('Bloqueado', 1)
                 ->count(),
@@ -720,14 +723,14 @@ class ProductoService
             // -> los usan pantallas de resumen (ej. Calificación) que
             // necesitan el panorama completo sin pedir todo el catálogo
             // paginado solo para contar.
-            'productos_totales_catalogo' => Producto::where('Id_Proveedor', $proveedor->Id_Proveedor)
+            'productos_totales_catalogo' => Producto::where('Id_Proveedor', $proveedor->Id_Proveedor)->paraQuienMira($idProveedorObjetivo)
                 ->where('Activo', 1)
                 ->count(),
-            'productos_aprobados' => Producto::where('Id_Proveedor', $proveedor->Id_Proveedor)
+            'productos_aprobados' => Producto::where('Id_Proveedor', $proveedor->Id_Proveedor)->paraQuienMira($idProveedorObjetivo)
                 ->where('Activo', 1)
                 ->where('Estado_Calificacion', 'Aprobado')
                 ->count(),
-            'productos_rechazados' => Producto::where('Id_Proveedor', $proveedor->Id_Proveedor)
+            'productos_rechazados' => Producto::where('Id_Proveedor', $proveedor->Id_Proveedor)->paraQuienMira($idProveedorObjetivo)
                 ->where('Activo', 1)
                 ->where('Estado_Calificacion', 'Rechazado')
                 ->count(),
@@ -753,7 +756,7 @@ class ProductoService
     {
         $proveedor = $this->proveedorDeTrabajo($usuario, $idEmpresaActiva, $idProveedorObjetivo);
 
-        $productos = $proveedor->productos()
+        $productos = $proveedor->productos()->paraQuienMira($idProveedorObjetivo)
             ->where('Activo', 1)
             ->where('Bloqueado', 0)
             ->whereIn('Id_Producto', $idsProductos)
@@ -782,8 +785,8 @@ class ProductoService
             }
         }
 
-        DB::transaction(function () use ($proveedor, $idsProductos) {
-            Producto::where('Id_Proveedor', $proveedor->Id_Proveedor)
+        DB::transaction(function () use ($proveedor, $idsProductos, $idProveedorObjetivo) {
+            Producto::where('Id_Proveedor', $proveedor->Id_Proveedor)->paraQuienMira($idProveedorObjetivo)
                 ->where('Activo', 1)
                 ->where('Bloqueado', 0)
                 ->whereIn('Id_Producto', $idsProductos)
@@ -843,7 +846,7 @@ class ProductoService
     {
         $proveedor = $this->proveedorDeTrabajo($usuario, $idEmpresaActiva, $idProveedorObjetivo);
 
-        $producto = Producto::where('Id_Proveedor', $proveedor->Id_Proveedor)
+        $producto = Producto::where('Id_Proveedor', $proveedor->Id_Proveedor)->paraQuienMira($idProveedorObjetivo)
             ->where('Activo', 1)
             ->where('Id_Producto', $idProducto)
             ->where('Estado_Calificacion', 'Rechazado')
@@ -898,7 +901,7 @@ class ProductoService
             // queda ningún producto rechazado -> antes se apagaba
             // entero apenas se corregía un producto, aunque quedaran
             // otros rechazados sin tocar todavía.
-            $quedanRechazados = Producto::where('Id_Proveedor', $proveedor->Id_Proveedor)
+            $quedanRechazados = Producto::where('Id_Proveedor', $proveedor->Id_Proveedor)->paraQuienMira($idProveedorObjetivo)
                 ->where('Activo', 1)
                 ->where('Estado_Calificacion', 'Rechazado')
                 ->exists();
@@ -1085,6 +1088,7 @@ class ProductoService
         // soloLectura deja entrar a Calidad, que revisa pero no carga productos.
         $proveedor = $this->proveedorDeTrabajo($usuario, $idEmpresaActiva, $idProveedorObjetivo, soloLectura: $esRevisor);
         $producto = Producto::where('Id_Proveedor', $proveedor->Id_Proveedor)
+            ->paraQuienMira($idProveedorObjetivo)
             ->where('Activo', 1)
             ->with('proveedor')
             ->findOrFail($idProducto);
@@ -1107,6 +1111,39 @@ class ProductoService
 
         $producto->forceFill([
             'Clasificacion' => $clasificacion,
+            'Modificado_Por' => $usuario->Id_Usuario,
+            'Fecha_Modificacion' => now(),
+        ])->save();
+
+        return $producto->load(['unidadPresentacion', 'grupos', 'documentos.tipoDocumento', 'documentos.archivo']);
+    }
+
+    /**
+     * Oculta (o vuelve a mostrar) un producto AL PROVEEDOR (23-oct-2026). Lo
+     * hace el personal de "Productos por proveedor" (Compras, Calidad,
+     * Admin, Sistemas), nunca el proveedor.
+     *
+     * Oculto: el proveedor deja de verlo en su lista, en sus conteos, al
+     * registrar y en Hana. El personal interno lo sigue viendo, en gris.
+     * No se borra ni cambia de estado: si estaba en revisión, sigue en las
+     * bandejas de Compras y Calidad.
+     */
+    public function cambiarVisibilidadParaProveedor(
+        Usuario $usuario,
+        int $idEmpresaActiva,
+        int $idProducto,
+        bool $oculto,
+        int $idProveedorObjetivo
+    ): Producto {
+        // Con proveedor objetivo: solo personal interno (verificarAccesoInterno).
+        $proveedor = $this->proveedorDeTrabajo($usuario, $idEmpresaActiva, $idProveedorObjetivo);
+
+        $producto = Producto::where('Id_Proveedor', $proveedor->Id_Proveedor)
+            ->where('Activo', 1)
+            ->findOrFail($idProducto);
+
+        $producto->forceFill([
+            'Oculto_Proveedor' => $oculto,
             'Modificado_Por' => $usuario->Id_Usuario,
             'Fecha_Modificacion' => now(),
         ])->save();
@@ -1149,8 +1186,8 @@ class ProductoService
 
     /**
      * Quién puede cargar productos en nombre de un proveedor: Compras (el
-     * "comprador"), Admin y Sistemas. Se valida por EMPRESA ACTIVA y no de
-     * forma global, porque los proveedores que se ven son los de esa
+     * "comprador"), Calidad (desde el 23-oct-2026), Admin y Sistemas. Se
+     * valida por EMPRESA ACTIVA y no de forma global, porque los proveedores que se ven son los de esa
      * empresa.
      *
      * Público porque la pantalla del comprador también necesita
@@ -1159,13 +1196,16 @@ class ProductoService
      */
     public function verificarAccesoInterno(Usuario $usuario, int $idEmpresaActiva): void
     {
+        // Calidad entra con los mismos permisos que Compras desde el
+        // 23-oct-2026 (pedido explícito del usuario).
         $puedeAcceder = $usuario->esCompras($idEmpresaActiva)
+            || $usuario->esCalidad($idEmpresaActiva)
             || $usuario->esAdmin($idEmpresaActiva)
             || $usuario->esSistemas($idEmpresaActiva);
 
         if (! $puedeAcceder) {
             throw new AccessDeniedHttpException(
-                'Solo los roles Compras, Admin y Sistemas pueden gestionar los productos de un proveedor.'
+                'Solo los roles Compras, Calidad, Admin y Sistemas pueden gestionar los productos de un proveedor.'
             );
         }
     }
@@ -1174,7 +1214,7 @@ class ProductoService
     {
         $proveedor = $this->proveedorDeTrabajo($usuario, $idEmpresaActiva, $idProveedorObjetivo);
 
-        return Producto::where('Id_Proveedor', $proveedor->Id_Proveedor)
+        return Producto::where('Id_Proveedor', $proveedor->Id_Proveedor)->paraQuienMira($idProveedorObjetivo)
             ->with('proveedor')
             ->findOrFail($idProducto);
     }

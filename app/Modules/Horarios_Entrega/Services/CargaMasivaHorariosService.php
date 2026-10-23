@@ -241,15 +241,10 @@ class CargaMasivaHorariosService
             return $error('Tiempo mal escrito: usa minutos (30) o horas y minutos (0:30).');
         }
 
-        $salidaEscrita = $fila['hora_salida'] ?? null;
-        $salida = self::hora($salidaEscrita);
-
-        if (self::vacio($salidaEscrita)) {
-            // Sin hora de salida: llegada + permanencia, si se puede.
-            $salida = $permanencia !== null ? self::sumarMinutos($llegada, $permanencia) : null;
-        } elseif (! $salida) {
-            return $error('Hora de salida mal escrita (usa el formato 09:00).');
-        }
+        // La salida se calcula siempre (23-oct-2026): llegada + permanencia,
+        // igual que en la pantalla. Una columna de salida en el archivo se
+        // ignora.
+        $salida = HorarioEntregaService::horaDeSalida($llegada, $permanencia);
 
         $anden = trim((string) ($fila['anden_puerta'] ?? ''));
 
@@ -481,13 +476,5 @@ class CargaMasivaHorariosService
         }
 
         return $total <= 1000 ? $total : false;
-    }
-
-    private static function sumarMinutos(string $hora, int $minutos): string
-    {
-        [$h, $m] = array_map('intval', explode(':', $hora));
-        $total = ($h * 60 + $m + $minutos) % (24 * 60);
-
-        return sprintf('%02d:%02d', intdiv($total, 60), $total % 60);
     }
 }

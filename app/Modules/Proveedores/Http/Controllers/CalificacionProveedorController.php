@@ -156,6 +156,19 @@ class CalificacionProveedorController extends Controller
         ]);
     }
 
+    /** Calidad completa la fecha de caducidad de un documento de producto. */
+    public function asignarFechaCaducidadDocumentoProducto(Request $request, int $documentoProducto): JsonResponse
+    {
+        $idEmpresa = (int) $request->attributes->get('id_empresa_activa');
+
+        return response()->json($this->calificacionService->asignarFechaCaducidadDocumentoProducto(
+            $request->user(),
+            $idEmpresa,
+            $documentoProducto,
+            (string) $request->input('fecha_caducidad', '')
+        ));
+    }
+
     public function verDocumentoProducto(Request $request, int $documentoProducto)
     {
         $idEmpresa = (int) $request->attributes->get('id_empresa_activa');

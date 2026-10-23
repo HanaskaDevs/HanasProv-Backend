@@ -43,6 +43,7 @@ Route::prefix('proveedores')
         Route::post('/{proveedor}/productos-calificacion/registrar', [CalificacionProveedorController::class, 'registrarCalificacionProductos']);
         Route::post('/productos-calificacion/{producto}', [CalificacionProveedorController::class, 'calificarProducto']);
         Route::get('/productos-calificacion/documento/{documentoProducto}/ver', [CalificacionProveedorController::class, 'verDocumentoProducto']);
+        Route::put('/productos-calificacion/documento/{documentoProducto}/fecha-caducidad', [CalificacionProveedorController::class, 'asignarFechaCaducidadDocumentoProducto']);
     });
 
 // Ficha de Proveedor progresiva: exclusiva del propio usuario externo.
