@@ -49,6 +49,9 @@ class ProductoResource extends JsonResource
             // Perecibles / No_Perecibles / Fruver; null en los productos
             // cargados antes del 22-oct-2026 (se pide al abrirlos).
             'clasificacion' => $this->Clasificacion,
+            // true = el personal interno lo ocultó al proveedor (23-oct-2026):
+            // el proveedor no lo ve; los internos lo ven en gris.
+            'oculto_proveedor' => (bool) $this->Oculto_Proveedor,
             'bloqueado' => (bool) $this->Bloqueado,
             'estado_calificacion' => $this->Estado_Calificacion,
             /*

@@ -840,6 +840,8 @@ class AsistenteHerramientas
             ->where('p.Id_Empresa', $idEmpresa)
             ->where('p.Activo', 1)
             ->where('pr.Activo', 1)
+            // El proveedor no ve los productos que el personal le ocultó (23-oct-2026).
+            ->when($idProveedor !== null, fn ($q) => $q->where('pr.Oculto_Proveedor', 0))
             ->select([
                 'p.Razon_Social', 'p.Ruc', 'pr.Nombre_Producto', 'pr.Codigo_Barras', 'pr.Bc_Nro_Producto', 'pr.Precio',
                 'pr.Estado_Calificacion', 'pr.Bloqueado', 'pr.Etapa_Aprobacion', 'pr.Comentario_Calificacion',
