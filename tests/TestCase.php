@@ -7,8 +7,15 @@ use App\Models\Rol;
 use App\Modules\Auth\Models\Sesion;
 use App\Modules\Auth\Models\Usuario;
 use App\Modules\Auth\Models\UsuarioEmpresa;
+use App\Modules\Ficha_Productos\Models\Producto;
+use App\Modules\Ficha_Productos\Models\UnidadPresentacion;
+use App\Modules\Horarios_Entrega\Models\HorarioEntregaProveedor;
+use App\Modules\Pedidos\Models\PedidoCompra;
+use App\Modules\Proveedores\Models\CalificacionCampoFicha;
 use App\Modules\Proveedores\Models\EstadoProveedor;
 use App\Modules\Proveedores\Models\Proveedor;
+use App\Modules\Proveedores\Services\CalificacionProveedorService;
+use Carbon\CarbonInterface;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
 use Illuminate\Support\Facades\Hash;
@@ -120,6 +127,98 @@ abstract class TestCase extends BaseTestCase
      *
      * @return array{0: Usuario, 1: Proveedor}
      */
+    /**
+     * Deja al proveedor con entrega esa fecha (hoy si no se indica): el día
+     * en el calendario de horarios y un pedido con recepción esperada ese
+     * día. Desde el 26-oct-2026 hacen falta LAS DOS para calificar una
+     * recepción o empezar una auditoría; con $calendario / $pedido en false
+     * se arma el caso en que falta una.
+     */
+    protected function crearEntrega(
+        Empresa $empresa,
+        Proveedor $proveedor,
+        ?CarbonInterface $fecha = null,
+        string $horaLlegada = '07:00',
+        bool $calendario = true,
+        bool $pedido = true,
+        bool $habilitado = true
+    ): void {
+        $fecha = $fecha ? $fecha->copy()->startOfDay() : now()->startOfDay();
+
+        // Las recepciones solo se califican a proveedores con ficha y un
+        // producto aprobados: la entrega de prueba los deja así salvo que
+        // el test diga lo contrario.
+        if ($habilitado) {
+            $this->habilitarParaRecepcion($proveedor);
+        }
+        $dias = [0 => 'Domingo', 1 => 'Lunes', 2 => 'Martes', 3 => 'Miercoles', 4 => 'Jueves', 5 => 'Viernes', 6 => 'Sabado'];
+
+        if ($calendario) {
+            HorarioEntregaProveedor::create([
+                'Id_Empresa' => $empresa->Id_Empresa,
+                'Id_Proveedor' => $proveedor->Id_Proveedor,
+                'Clasificacion' => 'Fruver',
+                'Dia_Entrega' => $dias[$fecha->dayOfWeek],
+                'Hora_Llegada' => $horaLlegada,
+                'Activo' => 1,
+                'Fecha_Creacion' => now(),
+            ]);
+        }
+
+        if ($pedido) {
+            PedidoCompra::create([
+                'Id_Empresa' => $empresa->Id_Empresa,
+                'Id_Proveedor' => $proveedor->Id_Proveedor,
+                'Nro_Pedido' => 'TEST-'.random_int(100000, 999999),
+                'Fecha_Registro_BC' => $fecha->copy()->subDays(5)->toDateString(),
+                'Fecha_Recepcion_Esperada' => $fecha->toDateString(),
+                'Fecha_Sincronizacion' => now(),
+                'Activo' => 1,
+                'Estado' => 'Abierto',
+            ]);
+        }
+    }
+
+    /**
+     * Deja al proveedor habilitado para calificar recepciones: todos los
+     * campos de la ficha aprobados y un producto aprobado (ver
+     * AgendaRecepcionService::idsHabilitadosParaRecepcion). Idempotente.
+     */
+    protected function habilitarParaRecepcion(Proveedor $proveedor, bool $ficha = true, bool $producto = true): void
+    {
+        if ($ficha && ! CalificacionCampoFicha::where('Id_Proveedor', $proveedor->Id_Proveedor)->exists()) {
+            $campos = [
+                ...CalificacionProveedorService::CAMPOS_SECCION1,
+                CalificacionProveedorService::CAMPO_CLASE,
+                CalificacionProveedorService::CAMPO_CATEGORIA,
+            ];
+            // Calificado_Por no tiene foreign key: basta un usuario cualquiera.
+            $calificador = (int) Usuario::value('Id_Usuario');
+
+            foreach ($campos as $campo) {
+                CalificacionCampoFicha::create([
+                    'Id_Proveedor' => $proveedor->Id_Proveedor,
+                    'Nombre_Campo' => $campo,
+                    'Estado' => 'Aprobado',
+                    'Calificado_Por' => $calificador,
+                    'Fecha_Calificacion' => now(),
+                ]);
+            }
+        }
+
+        if ($producto && ! Producto::where('Id_Proveedor', $proveedor->Id_Proveedor)->where('Estado_Calificacion', 'Aprobado')->exists()) {
+            Producto::create([
+                'Id_Proveedor' => $proveedor->Id_Proveedor,
+                'Id_Unidad_Presentacion' => (int) UnidadPresentacion::where('Activo', 1)->value('Id_Unidad_Presentacion'),
+                'Nombre_Producto' => 'PRODUCTO APROBADO DE PRUEBA',
+                'Activo' => 1,
+                'Bloqueado' => 0,
+                'Estado_Calificacion' => 'Aprobado',
+                'Fecha_Creacion' => now(),
+            ]);
+        }
+    }
+
     protected function crearProveedorConUsuario(Empresa $empresa, array $extraProveedor = []): array
     {
         $email = 'prov_'.Str::lower(Str::random(10)).'@test.local';

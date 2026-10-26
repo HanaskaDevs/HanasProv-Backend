@@ -66,6 +66,8 @@ class AccesoYReporteAuditoriasTest extends TestCase
         $admin = $this->crearUsuarioInterno($empresa, 'Admin');
         [, $proveedor] = $this->crearProveedorConUsuario($empresa);
         $cabeceras = $this->cabecerasComo($admin, $empresa);
+        // Las dos se empiezan solo el día que el proveedor entrega (26-oct-2026).
+        $this->crearEntrega($empresa, $proveedor);
 
         $this->postJson('/api/auditorias/iniciar', [
             'id_tipo_auditoria' => TipoAuditoria::where('Activo', true)->firstOrFail()->Id_Tipo_Auditoria,
