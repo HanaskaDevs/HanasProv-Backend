@@ -39,6 +39,7 @@ Route::prefix('proveedores')
         Route::post('/{proveedor}/documentos-calificacion/registrar', [CalificacionProveedorController::class, 'registrarCalificacionDocumentos']);
         Route::post('/documentos-calificacion/{documentoProveedor}', [CalificacionProveedorController::class, 'calificarDocumento']);
         Route::get('/documentos-calificacion/{documentoProveedor}/ver', [CalificacionProveedorController::class, 'verDocumento']);
+        Route::put('/documentos-calificacion/{documentoProveedor}/fecha-caducidad', [CalificacionProveedorController::class, 'asignarFechaCaducidadDocumento']);
         Route::get('/{proveedor}/productos-calificacion', [CalificacionProveedorController::class, 'mostrarProductos']);
         Route::post('/{proveedor}/productos-calificacion/registrar', [CalificacionProveedorController::class, 'registrarCalificacionProductos']);
         Route::post('/productos-calificacion/{producto}', [CalificacionProveedorController::class, 'calificarProducto']);

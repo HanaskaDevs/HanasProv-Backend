@@ -156,6 +156,19 @@ class CalificacionProveedorController extends Controller
         ]);
     }
 
+    /** Quien califica completa la fecha de caducidad de un documento del proveedor (LUAE). */
+    public function asignarFechaCaducidadDocumento(Request $request, int $documentoProveedor): JsonResponse
+    {
+        $idEmpresa = (int) $request->attributes->get('id_empresa_activa');
+
+        return response()->json($this->calificacionService->asignarFechaCaducidadDocumentoProveedor(
+            $request->user(),
+            $idEmpresa,
+            $documentoProveedor,
+            (string) $request->input('fecha_caducidad', '')
+        ));
+    }
+
     /** Calidad completa la fecha de caducidad de un documento de producto. */
     public function asignarFechaCaducidadDocumentoProducto(Request $request, int $documentoProducto): JsonResponse
     {
