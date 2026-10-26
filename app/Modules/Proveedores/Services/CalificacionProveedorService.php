@@ -222,6 +222,10 @@ class CalificacionProveedorService
                 'categoria' => $tipo->Categoria,
                 'nombre_documento' => $tipo->Nombre_Documento,
                 'obligatorio' => (bool) $tipo->Obligatorio,
+                // LUAE (26-oct-2026): las cargadas antes de que se pidiera
+                // la fecha no la tienen, y quien califica la escribe acá
+                // (ver asignarFechaCaducidadDocumentoProveedor).
+                'requiere_fecha_caducidad' => (bool) $tipo->Requiere_Fecha_Caducidad,
                 // Plan de contingencia Niño: se ve y se descarga, pero no
                 // se califica (ver TipoDocumento::esInformativo).
                 'informativo' => $tipo->esInformativo(),
@@ -303,6 +307,19 @@ class CalificacionProveedorService
             ]);
         }
 
+        /*
+         * No se aprueba sin la fecha de caducidad (26-oct-2026): las LUAE
+         * cargadas antes de que se pidiera la fecha no la tienen, y quien
+         * califica la escribe antes de aprobar (ver
+         * asignarFechaCaducidadDocumentoProveedor). Rechazar sí se puede.
+         */
+        if ($aprobado && $documento->tipoDocumento?->Requiere_Fecha_Caducidad && $documento->Fecha_Caducidad === null) {
+            throw ValidationException::withMessages([
+                'documento' => ['Falta la fecha de caducidad de '.$documento->tipoDocumento->Nombre_Documento
+                    .'. Tómala del documento y guárdala antes de aprobarlo.'],
+            ]);
+        }
+
         $documento->forceFill([
             'Estado_Calificacion' => $aprobado ? 'Aprobado' : 'Rechazado',
             'Comentario_Calificacion' => $observacion,
@@ -321,6 +338,59 @@ class CalificacionProveedorService
         }
 
         return $documento->fresh(['archivo', 'tipoDocumento']);
+    }
+
+    /**
+     * Escribe la fecha de caducidad de un documento del proveedor que la
+     * pide y no la tiene (26-oct-2026): las LUAE se cargaron sin fecha hasta
+     * que se empezó a pedir. La fecha la toma del propio documento quien
+     * califica:
+     *  - sin calificar: Calidad, Admin o Sistemas, antes de aprobarla (sin
+     *    ella calificarDocumento no deja aprobar);
+     *  - ya aprobada: Admin o Calidad (también Sistemas, como en todo lo de
+     *    calificación). Por eso NO se frena con la calificación registrada,
+     *    a diferencia de calificarDocumento: no cambia el veredicto.
+     *
+     * Solo para tipos que piden fecha: un documento sin vencimiento no
+     * puede empezar a vencer por error.
+     *
+     * @return array{id_documento_proveedor: int, fecha_caducidad: string}
+     */
+    public function asignarFechaCaducidadDocumentoProveedor(
+        Usuario $admin,
+        int $idEmpresaActiva,
+        int $idDocumentoProveedor,
+        string $fecha
+    ): array {
+        $this->verificarPuedeCalificar($admin, $idEmpresaActiva);
+
+        $validada = validator(['fecha_caducidad' => $fecha], [
+            'fecha_caducidad' => ['required', 'date_format:Y-m-d'],
+        ], [
+            'fecha_caducidad.date_format' => 'Indica la fecha completa: día, mes y año.',
+        ])->validate()['fecha_caducidad'];
+
+        $documento = DocumentoProveedor::whereHas('proveedor', fn ($q) => $q->where('Id_Empresa', $idEmpresaActiva))
+            ->where('Activo', 1)
+            ->with('tipoDocumento')
+            ->findOrFail($idDocumentoProveedor);
+
+        if (! $documento->tipoDocumento?->Requiere_Fecha_Caducidad) {
+            throw ValidationException::withMessages([
+                'fecha_caducidad' => ['Este documento no lleva fecha de caducidad.'],
+            ]);
+        }
+
+        $documento->forceFill([
+            'Fecha_Caducidad' => $validada,
+            'Modificado_Por' => $admin->Id_Usuario,
+            'Fecha_Modificacion' => now(),
+        ])->save();
+
+        return [
+            'id_documento_proveedor' => $documento->Id_Documento_Proveedor,
+            'fecha_caducidad' => $documento->Fecha_Caducidad->toDateString(),
+        ];
     }
 
     /**

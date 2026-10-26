@@ -14,6 +14,10 @@ use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 
 class AuditoriaService
 {
+    public function __construct(protected AgendaRecepcionService $agenda)
+    {
+    }
+
     public function listarTiposAuditoria(Usuario $usuario, int $idEmpresa): Collection
     {
         $this->verificarAcceso($usuario, $idEmpresa);
@@ -43,12 +47,17 @@ class AuditoriaService
                 ->pluck('Id_Clase_Proveedor');
         }
 
+        // Quiénes entregan HOY (calendario de horarios Y pedido con recepción
+        // esperada hoy): solo a esos se les puede empezar una auditoría
+        // (26-oct-2026). Una consulta para toda la empresa, no por fila.
+        $conEntregaHoy = $this->agenda->idsConEntregaEse($idEmpresa, now()->startOfDay());
+
         return Proveedor::where('Id_Empresa', $idEmpresa)
             ->where('Activo', true)
             ->with(['estado', 'clases'])
             ->orderBy('Razon_Social')
             ->get()
-            ->map(function ($p) use ($idsClasesSugeridas) {
+            ->map(function ($p) use ($idsClasesSugeridas, $conEntregaHoy) {
                 $sugerido = $idsClasesSugeridas->isNotEmpty()
                     && $p->clases->pluck('Id_Clase_Proveedor')->intersect($idsClasesSugeridas)->isNotEmpty();
 
@@ -60,12 +69,12 @@ class AuditoriaService
                     'estado' => $p->estado?->Nombre_Estado,
                     'clases' => $p->clases->pluck('Nombre_Clase')->values(),
                     'sugerido' => $sugerido,
+                    'tiene_entrega_hoy' => in_array((int) $p->Id_Proveedor, $conEntregaHoy, true),
                 ];
             })
-            // Los sugeridos primero (orden estable: entre ellos y entre
-            // los demás se conserva el orden alfabético por Razon_Social
-            // ya aplicado en la consulta).
-            ->sortByDesc('sugerido')
+            // Primero los que entregan hoy, y entre ellos los sugeridos (orden
+            // estable: se conserva el alfabético por Razon_Social de la consulta).
+            ->sortBy([['tiene_entrega_hoy', 'desc'], ['sugerido', 'desc']])
             ->values();
     }
 
@@ -92,6 +101,12 @@ class AuditoriaService
         if ($borrador) {
             return $borrador;
         }
+
+        // Una auditoría nueva solo el día que el proveedor entrega: en el
+        // calendario de horarios con el día de hoy Y con un pedido con
+        // recepción esperada hoy (26-oct-2026). El borrador ya empezado se
+        // retoma igual, para no perder lo que se respondió.
+        $this->agenda->exigirEntrega($proveedor->Id_Proveedor, $idEmpresa, now()->startOfDay(), 'id_proveedor');
 
         return Auditoria::create([
             'Id_Empresa' => $idEmpresa,

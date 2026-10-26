@@ -216,6 +216,17 @@ return [
     */
     'suspension_documentos_desde' => env('SUSPENSION_DOCUMENTOS_DESDE', '2027-01-01'),
 
+    /*
+    | Desde cuándo la calificación de recepciones exige la documentación al
+    | día (pedido del usuario, 26-oct-2026). En 2026 a un proveedor que no
+    | subió sus documentos obligatorios, o que los tiene vencidos, igual se
+    | le califica la recepción: la pantalla solo lo marca. Desde esta fecha
+    | ya no se puede empezar una calificación hasta que se ponga al día.
+    | Misma idea que la suspensión de arriba: va como FECHA para que el
+    | cambio ocurra solo.
+    */
+    'recepciones_exigen_documentos_desde' => env('RECEPCIONES_EXIGEN_DOCUMENTOS_DESDE', '2027-01-01'),
+
     'proteccion_datos' => [
         'email' => env('PORTAL_EMAIL_PROTECCION_DATOS', 'protecciondedatos@hanaska.com'),
     ],

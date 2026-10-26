@@ -661,6 +661,63 @@ class DocumentoProveedorService
     }
 
     /**
+     * Qué le falta a un proveedor para tener la documentación al día: los
+     * obligatorios que le corresponden y no subió, y los que subió pero ya
+     * vencieron. Lo usa la calificación de recepciones, que desde 2027 no
+     * deja calificar a un proveedor con la documentación incompleta
+     * (26-oct-2026). No mira la calificación de cada documento: eso es
+     * asunto de la revisión de Calidad, no de que esté presentado.
+     *
+     * 'por_vencer': los que vencen en los próximos 30 días (todavía
+     * vigentes). Es lo único que muestra el aviso de la pantalla de
+     * recepciones (26-oct-2026); no cuenta para 'al_dia'.
+     *
+     * @return array{faltantes: list<string>, vencidos: list<string>, por_vencer: list<array{documento: string, fecha_caducidad: string}>, al_dia: bool}
+     */
+    public function pendientesDeDocumentacion(Proveedor $proveedor): array
+    {
+        $activos = DocumentoProveedor::where('Id_Proveedor', $proveedor->Id_Proveedor)
+            ->where('Activo', 1)
+            ->with('tipoDocumento')
+            ->get();
+
+        $idsSubidos = $activos->pluck('Id_Tipo_Documento')->map(fn ($id) => (int) $id)->all();
+
+        $faltantes = $this->tiposObligatoriosAplicables($proveedor)
+            ->reject(fn (TipoDocumento $tipo) => in_array((int) $tipo->Id_Tipo_Documento, $idsSubidos, true))
+            ->pluck('Nombre_Documento')
+            ->values()
+            ->all();
+
+        $vencidos = $activos
+            ->filter(fn (DocumentoProveedor $doc) => $doc->Fecha_Caducidad !== null && $doc->Fecha_Caducidad->lt(now()->startOfDay()))
+            ->map(fn (DocumentoProveedor $doc) => $doc->tipoDocumento?->Nombre_Documento ?? 'Documento')
+            ->unique()
+            ->values()
+            ->all();
+
+        // Mismo criterio de "próximo a vencer" que el checklist del proveedor.
+        $porVencer = $activos
+            ->filter(fn (DocumentoProveedor $doc) => $doc->Fecha_Caducidad !== null
+                && $doc->Fecha_Caducidad->gte(now()->startOfDay())
+                && $doc->Fecha_Caducidad->lte(now()->addDays(30)))
+            ->sortBy(fn (DocumentoProveedor $doc) => $doc->Fecha_Caducidad->toDateString())
+            ->map(fn (DocumentoProveedor $doc) => [
+                'documento' => $doc->tipoDocumento?->Nombre_Documento ?? 'Documento',
+                'fecha_caducidad' => $doc->Fecha_Caducidad->toDateString(),
+            ])
+            ->values()
+            ->all();
+
+        return [
+            'faltantes' => $faltantes,
+            'vencidos' => $vencidos,
+            'por_vencer' => $porVencer,
+            'al_dia' => $faltantes === [] && $vencidos === [],
+        ];
+    }
+
+    /**
      * Ids de Tipo_Documento que NO se le deben pedir a este proveedor
      * por alguna de sus Clases de Proveedor (ej. LUAE excluido para
      * "Productor Agrícola") -> ver Tipo_Documento_Clase_Excluida. Un

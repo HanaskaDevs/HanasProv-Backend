@@ -6,7 +6,10 @@ use App\Modules\Auditorias\Models\CalificacionRecepcion;
 use App\Modules\Auditorias\Models\CalificacionRecepcionRespuesta;
 use App\Modules\Auditorias\Models\RecepcionParametro;
 use App\Modules\Auth\Models\Usuario;
+use App\Modules\Documentos_Proveedor\Services\DocumentoProveedorService;
 use App\Modules\Proveedores\Models\Proveedor;
+use Carbon\CarbonInterface;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
@@ -33,8 +36,21 @@ class CalificacionRecepcionService
      */
     public const MAX_POR_ANIO = 2;
 
-    public function __construct(protected AgendaRecepcionService $agenda)
+    public function __construct(
+        protected AgendaRecepcionService $agenda,
+        protected DocumentoProveedorService $documentos
+    ) {
+    }
+
+    /**
+     * ¿Ya se exige la documentación al día para calificar una recepción?
+     * En 2026 no: se califica igual y la pantalla solo lo marca. Desde el
+     * 1-ene-2027 sí (ver config portal.recepciones_exigen_documentos_desde).
+     */
+    public function exigeDocumentacion(?CarbonInterface $hoy = null): bool
     {
+        return ($hoy ?? now())->copy()->startOfDay()
+            ->greaterThanOrEqualTo(Carbon::parse(config('portal.recepciones_exigen_documentos_desde'))->startOfDay());
     }
 
     // ------------------------------------------------------------------
@@ -59,8 +75,11 @@ class CalificacionRecepcionService
 
         $anio = (int) now()->year;
 
+        // Solo los habilitados para recepciones: ficha aprobada y al menos
+        // un producto aprobado (26-oct-2026, ver AgendaRecepcionService).
         $proveedores = Proveedor::where('Id_Empresa', $idEmpresaActiva)
             ->where('Activo', 1)
+            ->whereIn('Id_Proveedor', $this->agenda->idsHabilitadosParaRecepcion($idEmpresaActiva) ?: [0])
             ->with('estado')
             ->orderBy('Razon_Social')
             ->get();
@@ -83,13 +102,23 @@ class CalificacionRecepcionService
         // año. Se resuelve UNA vez para toda la empresa, no por proveedor:
         // el cálculo consulta el calendario de horarios y los pedidos, y
         // hacerlo dentro del map serían dos consultas por fila.
+        // Como máximo 3, en el orden del calendario (ver AgendaRecepcionService).
         $tocanHoy = $this->agenda->proveedoresQueTocanHoy($idEmpresaActiva)
             ->pluck('Id_Proveedor')
+            ->map(fn ($id) => (int) $id)
             ->all();
 
-        return $proveedores->map(function (Proveedor $p) use ($calificaciones, $ultimas, $tocanHoy) {
+        $exigeDocumentacion = $this->exigeDocumentacion();
+
+        return $proveedores->map(function (Proveedor $p) use ($calificaciones, $ultimas, $tocanHoy, $exigeDocumentacion) {
             $delAnio = $calificaciones->get($p->Id_Proveedor, collect());
             $ultima = $ultimas->get($p->Id_Proveedor, collect())->first();
+            $leTocaHoy = in_array((int) $p->Id_Proveedor, $tocanHoy, true);
+
+            // La documentación se revisa solo en los propuestos del día (a lo
+            // sumo 3): hacerlo en todos serían varias consultas por fila. Con
+            // los demás, el aviso lo da obtenerOCrearBorrador al intentar.
+            $documentacion = $leTocaHoy ? $this->documentos->pendientesDeDocumentacion($p) : null;
 
             return [
                 'id_proveedor' => $p->Id_Proveedor,
@@ -100,9 +129,13 @@ class CalificacionRecepcionService
                 // Ya no hay "fecha programada": la calificación se hace el
                 // día que el proveedor entrega, no un día sorteado del año
                 // (ver AgendaRecepcionService).
-                'le_toca_hoy' => in_array($p->Id_Proveedor, $tocanHoy, true),
+                'le_toca_hoy' => $leTocaHoy,
                 'calificaciones_del_anio' => $delAnio->count(),
-                'puede_calificar' => $delAnio->count() < self::MAX_POR_ANIO,
+                'puede_calificar' => $delAnio->count() < self::MAX_POR_ANIO
+                    && ! ($exigeDocumentacion && $documentacion !== null && ! $documentacion['al_dia']),
+                // null = no se revisó (no le toca hoy). En 2026 solo informa.
+                'documentacion' => $documentacion,
+                'exige_documentacion' => $exigeDocumentacion,
                 'ultima_calificacion' => $ultima ? [
                     'id_calificacion_recepcion' => $ultima->Id_Calificacion_Recepcion,
                     'fecha_recepcion' => $ultima->Fecha_Recepcion?->toDateString(),
@@ -257,7 +290,17 @@ class CalificacionRecepcionService
             return $borrador;
         }
 
+        $this->agenda->exigirHabilitado($proveedor, 'proveedor');
+
         $this->verificarTopeAnual($proveedor, $fechaRecepcion);
+
+        // Solo se califica una recepción que existe: ese día el proveedor
+        // tiene que estar en el calendario de horarios Y tener un pedido con
+        // recepción esperada (26-oct-2026).
+        $fecha = Carbon::parse($fechaRecepcion ?? now()->toDateString())->startOfDay();
+        $this->agenda->exigirEntrega($proveedor->Id_Proveedor, $idEmpresaActiva, $fecha, 'proveedor');
+
+        $this->verificarDocumentacion($proveedor);
 
         if ($this->listarParametros()->isEmpty()) {
             throw ValidationException::withMessages([
@@ -288,6 +331,17 @@ class CalificacionRecepcionService
         $this->verificarAcceso($usuario, $idEmpresaActiva);
         $calificacion = $this->calificacionDeLaEmpresa($idEmpresaActiva, $idCalificacion);
         $this->verificarEditable($calificacion);
+
+        // Cambiar la fecha a un día sin entrega dejaría evaluada una
+        // recepción que no existió.
+        if ($fechaRecepcion !== null && $fechaRecepcion !== $calificacion->Fecha_Recepcion?->toDateString()) {
+            $this->agenda->exigirEntrega(
+                (int) $calificacion->Id_Proveedor,
+                $idEmpresaActiva,
+                Carbon::parse($fechaRecepcion)->startOfDay(),
+                'fecha_recepcion'
+            );
+        }
 
         $calificacion->forceFill(array_filter([
             'Fecha_Recepcion' => $fechaRecepcion,
@@ -432,6 +486,32 @@ class CalificacionRecepcionService
     protected function calificacionDeLaEmpresa(int $idEmpresaActiva, int $idCalificacion): CalificacionRecepcion
     {
         return CalificacionRecepcion::where('Id_Empresa', $idEmpresaActiva)->findOrFail($idCalificacion);
+    }
+
+    /**
+     * Desde 2027 no se califica la recepción de un proveedor con la
+     * documentación incompleta o vencida (26-oct-2026). En 2026 no frena.
+     */
+    protected function verificarDocumentacion(Proveedor $proveedor): void
+    {
+        if (! $this->exigeDocumentacion()) {
+            return;
+        }
+
+        $pendientes = $this->documentos->pendientesDeDocumentacion($proveedor);
+
+        if ($pendientes['al_dia']) {
+            return;
+        }
+
+        $partes = array_filter([
+            $pendientes['faltantes'] !== [] ? 'le falta subir '.implode(', ', $pendientes['faltantes']) : null,
+            $pendientes['vencidos'] !== [] ? 'tiene vencido '.implode(', ', $pendientes['vencidos']) : null,
+        ]);
+
+        throw ValidationException::withMessages([
+            'proveedor' => ['No se puede calificar la recepción: el proveedor '.implode(' y ', $partes).'.'],
+        ]);
     }
 
     protected function verificarTopeAnual(Proveedor $proveedor, ?string $fechaRecepcion): void
