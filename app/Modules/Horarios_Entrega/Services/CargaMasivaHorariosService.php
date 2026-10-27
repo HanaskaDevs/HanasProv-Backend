@@ -14,7 +14,7 @@ use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 
 /**
  * Carga masiva del calendario de horarios desde Excel (21-oct-2026). Solo
- * Sistemas.
+ * Sistemas y Admin (Admin desde el 27-oct-2026, pedido del usuario).
  *
  * EL ARCHIVO REEMPLAZA EL CALENDARIO de las clasificaciones que trae
  * (decisión del usuario): para cada clasificación presente en el archivo,
@@ -54,8 +54,8 @@ class CargaMasivaHorariosService
      */
     public function procesar(Usuario $usuario, int $idEmpresa, string $identificador, array $filas, bool $confirmar): array
     {
-        if (! $usuario->esSistemas($idEmpresa)) {
-            throw new AccessDeniedHttpException('Solo Sistemas puede hacer la carga masiva de horarios.');
+        if (! $usuario->esSistemas($idEmpresa) && ! $usuario->esAdmin($idEmpresa)) {
+            throw new AccessDeniedHttpException('Solo Sistemas y Admin pueden hacer la carga masiva de horarios.');
         }
 
         if (! in_array($identificador, self::IDENTIFICADORES, true)) {
