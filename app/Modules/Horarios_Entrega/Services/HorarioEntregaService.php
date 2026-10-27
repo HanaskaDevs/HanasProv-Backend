@@ -250,6 +250,11 @@ class HorarioEntregaService
      * mostrarle al proveedor el horario y fechas que tiene para
      * entregar"). Sin permiso de lectura interno: cualquier usuario
      * Proveedor ve solo SU PROPIO horario, nunca el de otro.
+     *
+     * Cada día trae además sus pedidos (27-oct-2026, pedido del usuario:
+     * "que aparezcan sus números de pedido para ese día"): la próxima fecha
+     * de ese día de la semana (hoy incluido, a lo sumo 6 días adelante) y
+     * los pedidos abiertos del proveedor con recepción esperada esa fecha.
      */
     public function misHorarios(Usuario $usuario, int $idEmpresa): Collection
     {
@@ -271,8 +276,40 @@ class HorarioEntregaService
 
         $codigosBc = $this->resolverCodigosBc($idEmpresa, $horarios->pluck('proveedor')->filter());
 
+        // Próxima fecha de cada día de la semana, desde hoy.
+        $hoy = now()->startOfDay();
+        $proximaFecha = [];
+        for ($i = 0; $i < 7; $i++) {
+            $fecha = $hoy->copy()->addDays($i);
+            $proximaFecha[self::DIA_POR_INDICE[$fecha->dayOfWeek]] = $fecha->toDateString();
+        }
+
+        // Una sola consulta para la semana. CONVERT explícito: la columna es
+        // [date] y el driver es ambiguo con DATEFORMAT dmy (ver BaseModel).
+        $pedidosPorFecha = PedidoCompra::where('Id_Empresa', $idEmpresa)
+            ->where('Id_Proveedor', $proveedor->Id_Proveedor)
+            ->where('Activo', 1)
+            ->where('Estado', 'Abierto')
+            ->whereRaw('CONVERT(date, Fecha_Recepcion_Esperada) BETWEEN CONVERT(date, ?) AND CONVERT(date, ?)', [
+                $hoy->toDateString(),
+                $hoy->copy()->addDays(6)->toDateString(),
+            ])
+            ->orderBy('Nro_Pedido')
+            ->get(['Nro_Pedido', 'Fecha_Recepcion_Esperada'])
+            ->groupBy(fn (PedidoCompra $p) => $p->Fecha_Recepcion_Esperada?->format('Y-m-d'));
+
         return $horarios
-            ->map(fn (HorarioEntregaProveedor $h) => $this->serializar($h, $codigosBc))
+            ->map(function (HorarioEntregaProveedor $h) use ($codigosBc, $proximaFecha, $pedidosPorFecha) {
+                $fecha = $proximaFecha[$h->Dia_Entrega] ?? null;
+
+                return [
+                    ...$this->serializar($h, $codigosBc),
+                    'proxima_fecha' => $fecha,
+                    'pedidos' => $fecha
+                        ? $pedidosPorFecha->get($fecha, collect())->pluck('Nro_Pedido')->unique()->values()->all()
+                        : [],
+                ];
+            })
             ->sort(fn ($a, $b) => (self::ORDEN_DIAS[$a['dia_entrega']] ?? 99) <=> (self::ORDEN_DIAS[$b['dia_entrega']] ?? 99))
             ->values();
     }

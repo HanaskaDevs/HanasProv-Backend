@@ -187,15 +187,19 @@ class CargaMasivaHorariosTest extends TestCase
             ->assertJsonPath('resumen.errores', 1);
     }
 
-    public function test_solo_sistemas_hace_la_carga_masiva(): void
+    /** Sistemas y Admin (Admin desde el 27-oct-2026); Compras y Calidad no. */
+    public function test_solo_sistemas_y_admin_hacen_la_carga_masiva(): void
     {
         $empresa = $this->crearEmpresa();
         [, $proveedor] = $this->crearProveedorConUsuario($empresa);
 
-        foreach (['Admin', 'Compras', 'Calidad'] as $rol) {
+        foreach (['Compras', 'Calidad'] as $rol) {
             $this->cargar($this->crearUsuarioInterno($empresa, $rol), $empresa, 'ruc', [$this->fila($proveedor->Ruc)], confirmar: false)
                 ->assertForbidden();
         }
+
+        $this->cargar($this->crearUsuarioInterno($empresa, 'Admin'), $empresa, 'ruc', [$this->fila($proveedor->Ruc)], confirmar: false)
+            ->assertOk();
     }
 
     /** El selector de la pantalla también usa el código que guarda el portal al aprobar. */
