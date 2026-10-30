@@ -43,11 +43,19 @@ class RevisionComprasProductoService
      * aprobar tanto en el proceso de compras como en el de calidad", y
      * Sistemas tiene acceso total en todo el portal-. Calidad entra con
      * acceso total desde el 16-oct-2026 (pedido explícito del usuario).
+     *
+     * $soloVer: Catálogo (29-oct-2026) ve la bandeja -para saber qué entró y
+     * corregirle los datos desde Productos por proveedor- pero no aprueba,
+     * rechaza ni retira: esa decisión sigue siendo de Compras y Calidad.
      */
-    public function verificarAcceso(Usuario $usuario, int $idEmpresaActiva): void
+    public function verificarAcceso(Usuario $usuario, int $idEmpresaActiva, bool $soloVer = false): void
     {
         if ($usuario->Tipo_Usuario !== 'Interno') {
             throw new AccessDeniedHttpException('Solo usuarios internos revisan los productos enviados.');
+        }
+
+        if ($soloVer && $usuario->esCatalogo($idEmpresaActiva)) {
+            return;
         }
 
         $puede = $usuario->esCompras($idEmpresaActiva)
@@ -66,7 +74,7 @@ class RevisionComprasProductoService
      */
     public function pendientes(Usuario $usuario, int $idEmpresaActiva)
     {
-        $this->verificarAcceso($usuario, $idEmpresaActiva);
+        $this->verificarAcceso($usuario, $idEmpresaActiva, soloVer: true);
 
         return Producto::query()
             ->whereHas('proveedor', fn ($q) => $q->where('Id_Empresa', $idEmpresaActiva)->where('Activo', 1))

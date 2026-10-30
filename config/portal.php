@@ -227,6 +227,16 @@ return [
     */
     'recepciones_exigen_documentos_desde' => env('RECEPCIONES_EXIGEN_DOCUMENTOS_DESDE', '2027-01-01'),
 
+    /*
+    | Recordatorio de documentación incompleta (pedido del usuario,
+    | 29-oct-2026). Si un proveedor empezó a subir sus documentos
+    | obligatorios (al menos uno) pero le faltan otros, y pasan estos días sin
+    | que suba ninguno nuevo, se le manda un correo con la lista de lo que le
+    | falta. Se repite cada esta misma cantidad de días mientras siga igual
+    | (ver RecordatorioDocumentacionService).
+    */
+    'dias_recordatorio_documentacion' => (int) env('PORTAL_DIAS_RECORDATORIO_DOCUMENTACION', 7),
+
     'proteccion_datos' => [
         'email' => env('PORTAL_EMAIL_PROTECCION_DATOS', 'protecciondedatos@hanaska.com'),
     ],

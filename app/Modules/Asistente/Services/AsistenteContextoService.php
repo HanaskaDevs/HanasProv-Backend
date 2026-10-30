@@ -688,6 +688,11 @@ class AsistenteContextoService
             'Guardia' => [
                 '/calendario/seguimiento' => 'Seguimiento de hoy (marcar arribo)',
             ],
+            'Catálogo' => [
+                '/catalogo-productos' => 'Catálogo de productos (códigos de BC)',
+                '/productos-revision' => 'Productos por revisar (solo consulta)',
+                '/productos-proveedor' => 'Productos por proveedor (editar datos de productos)',
+            ],
             default => [],
         };
     }

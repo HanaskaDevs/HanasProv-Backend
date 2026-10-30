@@ -47,7 +47,7 @@ class ProductoService
         ?string $estado = null,
         ?int $idProveedorObjetivo = null
     ) {
-        $proveedor = $this->proveedorDeTrabajo($usuario, $idEmpresaActiva, $idProveedorObjetivo);
+        $proveedor = $this->proveedorDeTrabajo($usuario, $idEmpresaActiva, $idProveedorObjetivo, soloLectura: true);
 
         if ($pagina === 1 && ! $busqueda) {
             $this->sincronizarDesdeBC($proveedor, $idEmpresaActiva);
@@ -188,6 +188,14 @@ class ProductoService
      * precio abierta: ahí el precio está congelado esperando esa
      * resolución, y pisarlo por un costado dejaría a la solicitud
      * comparando contra un precio que ya no existe.
+     *
+     * ROL CATÁLOGO (29-oct-2026, pedido del usuario): edita los datos de
+     * cualquier producto, esté o no aprobado -también en revisión-, y el
+     * producto NO cambia de estado. Es personal interno que corrige datos
+     * (nombre, código de barras, unidad, medidas, categoría...), no un
+     * proveedor cambiando lo que ya se le aprobó; devolverlo a calificación
+     * por eso le quitaría la aprobación al proveedor sin motivo. La
+     * excepción del precio congelado vale igual para Catálogo.
      */
     public function actualizar(
         Usuario $usuario,
@@ -196,14 +204,18 @@ class ProductoService
         array $data,
         ?int $idProveedorObjetivo = null
     ): Producto {
-        $producto = $this->productoDeTrabajo($usuario, $idEmpresaActiva, $idProducto, $idProveedorObjetivo);
+        $producto = $this->productoDeTrabajo($usuario, $idEmpresaActiva, $idProducto, $idProveedorObjetivo, edicionDeDatos: true);
 
-        $estaAprobado = $producto->Estado_Calificacion === 'Aprobado';
+        $esCatalogo = $this->esRolCatalogo($usuario, $idEmpresaActiva, $idProveedorObjetivo);
+
+        // Para Catálogo se edita sin tocar el estado: ni se devuelve a
+        // calificación ni se frena por estar en revisión.
+        $estaAprobado = $producto->Estado_Calificacion === 'Aprobado' && ! $esCatalogo;
 
         $esCorreccionDeRechazado = $producto->proveedor->Correcciones_Pendientes_Productos
             && $producto->Estado_Calificacion === 'Rechazado';
 
-        if ($producto->Bloqueado && ! $estaAprobado && ! $esCorreccionDeRechazado) {
+        if ($producto->Bloqueado && ! $esCatalogo && $producto->Estado_Calificacion !== 'Aprobado' && ! $esCorreccionDeRechazado) {
             throw new AccessDeniedHttpException(
                 'Este producto está en revisión en este momento y no se puede editar hasta que lo califiquen.'
             );
@@ -683,7 +695,7 @@ class ProductoService
      */
     public function resumenRegistro(Usuario $usuario, int $idEmpresaActiva, ?array $idsProductos = null, ?int $idProveedorObjetivo = null): array
     {
-        $proveedor = $this->proveedorDeTrabajo($usuario, $idEmpresaActiva, $idProveedorObjetivo);
+        $proveedor = $this->proveedorDeTrabajo($usuario, $idEmpresaActiva, $idProveedorObjetivo, soloLectura: true);
 
         $productos = $proveedor->productos()->paraQuienMira($idProveedorObjetivo)
             ->where('Activo', 1)
@@ -1015,12 +1027,19 @@ class ProductoService
      * entra Calidad, que revisa productos desde la bandeja de Compras
      * (Productos por revisar) pero no carga ni edita en nombre del
      * proveedor.
+     *
+     * $edicionDeDatos: la operación edita los DATOS de un producto (no sus
+     * documentos). Junto con $soloLectura, es lo único que puede hacer el
+     * rol Catálogo (29-oct-2026); todo lo demás (crear, eliminar, subir o
+     * borrar documentos, registrar, ocultar) se le niega acá, en un solo
+     * lugar, para que ningún método nuevo quede abierto por olvido.
      */
     protected function proveedorDeTrabajo(
         Usuario $usuario,
         int $idEmpresaActiva,
         ?int $idProveedorObjetivo = null,
-        bool $soloLectura = false
+        bool $soloLectura = false,
+        bool $edicionDeDatos = false
     ): Proveedor {
         if ($idProveedorObjetivo === null) {
             if ($usuario->Tipo_Usuario !== 'Proveedor') {
@@ -1040,6 +1059,12 @@ class ProductoService
             // Calidad solo mira: nada que validar más allá del rol.
         } else {
             $this->verificarAccesoInterno($usuario, $idEmpresaActiva);
+        }
+
+        if (! $soloLectura && ! $edicionDeDatos && $usuario->esCatalogo($idEmpresaActiva)) {
+            throw new AccessDeniedHttpException(
+                'El rol Catálogo solo edita los datos de los productos: no carga documentos ni crea, elimina o registra productos.'
+            );
         }
 
         $proveedor = Proveedor::where('Id_Empresa', $idEmpresaActiva)
@@ -1084,9 +1109,12 @@ class ProductoService
         }
 
         $esRevisor = $idProveedorObjetivo !== null && $this->esRevisorDeProductos($usuario, $idEmpresaActiva);
+        // Catálogo (29-oct-2026) completa la categoría en cualquier estado:
+        // es un dato del producto y no le cambia el estado.
+        $esCatalogo = $this->esRolCatalogo($usuario, $idEmpresaActiva, $idProveedorObjetivo);
 
         // soloLectura deja entrar a Calidad, que revisa pero no carga productos.
-        $proveedor = $this->proveedorDeTrabajo($usuario, $idEmpresaActiva, $idProveedorObjetivo, soloLectura: $esRevisor);
+        $proveedor = $this->proveedorDeTrabajo($usuario, $idEmpresaActiva, $idProveedorObjetivo, soloLectura: $esRevisor, edicionDeDatos: $esCatalogo);
         $producto = Producto::where('Id_Proveedor', $proveedor->Id_Proveedor)
             ->paraQuienMira($idProveedorObjetivo)
             ->where('Activo', 1)
@@ -1097,13 +1125,13 @@ class ProductoService
             && $producto->Estado_Calificacion === 'Rechazado';
         $enRevision = $producto->Bloqueado && $producto->Estado_Calificacion === 'Pendiente';
 
-        if ($producto->Estado_Calificacion === 'Aprobado') {
+        if ($producto->Estado_Calificacion === 'Aprobado' && ! $esCatalogo) {
             throw new AccessDeniedHttpException(
                 'Este producto ya está aprobado: su categoría se cambia editando el producto.'
             );
         }
 
-        if ($producto->Bloqueado && ! $esCorreccionDeRechazado && ! ($esRevisor && $enRevision)) {
+        if ($producto->Bloqueado && ! $esCatalogo && ! $esCorreccionDeRechazado && ! ($esRevisor && $enRevision)) {
             throw new AccessDeniedHttpException(
                 'Este producto ya fue enviado a revisión: su categoría no se puede cambiar desde acá.'
             );
@@ -1149,6 +1177,14 @@ class ProductoService
         ])->save();
 
         return $producto->load(['unidadPresentacion', 'grupos', 'documentos.tipoDocumento', 'documentos.archivo']);
+    }
+
+    /** ¿Es el rol Catálogo trabajando los productos de un proveedor? */
+    protected function esRolCatalogo(Usuario $usuario, int $idEmpresaActiva, ?int $idProveedorObjetivo): bool
+    {
+        return $idProveedorObjetivo !== null
+            && $usuario->Tipo_Usuario === 'Interno'
+            && $usuario->esCatalogo($idEmpresaActiva);
     }
 
     /** Quien revisa productos en "Productos por revisar" y en la calificación de Calidad. */
@@ -1201,18 +1237,26 @@ class ProductoService
         $puedeAcceder = $usuario->esCompras($idEmpresaActiva)
             || $usuario->esCalidad($idEmpresaActiva)
             || $usuario->esAdmin($idEmpresaActiva)
-            || $usuario->esSistemas($idEmpresaActiva);
+            || $usuario->esSistemas($idEmpresaActiva)
+            // Catálogo (29-oct-2026) entra, pero proveedorDeTrabajo lo
+            // limita a mirar y a editar datos.
+            || $usuario->esCatalogo($idEmpresaActiva);
 
         if (! $puedeAcceder) {
             throw new AccessDeniedHttpException(
-                'Solo los roles Compras, Calidad, Admin y Sistemas pueden gestionar los productos de un proveedor.'
+                'Solo los roles Compras, Calidad, Catálogo, Admin y Sistemas pueden gestionar los productos de un proveedor.'
             );
         }
     }
 
-    protected function productoDeTrabajo(Usuario $usuario, int $idEmpresaActiva, int $idProducto, ?int $idProveedorObjetivo = null): Producto
-    {
-        $proveedor = $this->proveedorDeTrabajo($usuario, $idEmpresaActiva, $idProveedorObjetivo);
+    protected function productoDeTrabajo(
+        Usuario $usuario,
+        int $idEmpresaActiva,
+        int $idProducto,
+        ?int $idProveedorObjetivo = null,
+        bool $edicionDeDatos = false
+    ): Producto {
+        $proveedor = $this->proveedorDeTrabajo($usuario, $idEmpresaActiva, $idProveedorObjetivo, edicionDeDatos: $edicionDeDatos);
 
         return Producto::where('Id_Proveedor', $proveedor->Id_Proveedor)->paraQuienMira($idProveedorObjetivo)
             ->with('proveedor')
