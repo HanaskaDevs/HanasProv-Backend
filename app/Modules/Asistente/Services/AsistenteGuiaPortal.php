@@ -103,18 +103,21 @@ class AsistenteGuiaPortal
         LA CALIFICACIÓN GLOBAL (nota de desempeño, sobre 100)
         Es distinta de la calificación de ingreso de arriba: mide cómo se está
         portando el proveedor ya aprobado. Se reparte así:
-        - Fill rate de entregas: 50 puntos. Es el promedio del porcentaje
+        - Fill rate de entregas: 35 puntos. Es el promedio del porcentaje
           entregado de cada pedido YA CERRADO. Un pedido en curso todavía no
           cuenta.
         - Auditoría de proveedor: 15 puntos, según la última auditoría
           finalizada.
         - Documentación: 15 puntos, y es todo o nada: se dan completos solo si
           TODOS los documentos obligatorios están aprobados y vigentes.
+        - Productos aprobados: 15 puntos, todo o nada: se dan si tiene al menos
+          un producto aprobado; sin ninguno aprobado son 0.
         - Reclamos: 10 puntos. Sin reclamos en los últimos 12 meses se dan los
           10; cada reclamo de ese período descuenta 1 punto, hasta 0.
         - Auditoría de recepción: 10 puntos, según la última finalizada.
-        Si una auditoría todavía no se hizo, esos puntos se dan completos por
-        defecto y la nota se marca como pendiente de verificar.
+        Si una auditoría todavía no se hizo, o todavía no hay pedidos cerrados,
+        esa parte no cuenta: la nota se calcula sobre 100 con lo que sí se
+        pudo medir.
         TEXTO;
     }
 
@@ -132,6 +135,10 @@ class AsistenteGuiaPortal
           reclamos y el calendario de entregas.
         - Compras: pedidos por bodega, calendario de entregas, marcar entregas
           completadas y reclamos.
+        - Catálogo: Catálogo de productos (códigos de BC), Productos por
+          proveedor y Productos por revisar. Edita los datos de cualquier
+          producto, esté o no aprobado, sin cambiar su estado; no carga
+          documentos, no crea ni elimina productos y no aprueba ni rechaza.
         - Guardia: solo la pantalla de seguimiento del día, donde marca que un
           proveedor arribó. Nada más.
 
@@ -171,11 +178,13 @@ class AsistenteGuiaPortal
         se calculan solos. Hay un modo TV para la pantalla de recepción.
 
         LA CALIFICACIÓN GLOBAL DEL PROVEEDOR (sobre 100)
-        Fill rate 50 (promedio del porcentaje entregado de cada pedido cerrado),
+        Fill rate 35 (promedio del porcentaje entregado de cada pedido cerrado),
         auditoría de proveedor 15, documentación 15 (todo o nada: todos los
-        obligatorios aprobados y vigentes), reclamos 10 (menos 1 por reclamo del
-        último año) y auditoría de recepción 10. Una auditoría que no se hizo se
-        puntúa completa por defecto y la nota queda marcada como no verificada.
+        obligatorios aprobados y vigentes), productos aprobados 15 (todo o nada:
+        al menos un producto aprobado), reclamos 10 (menos 1 por reclamo del
+        último año) y auditoría de recepción 10. Lo que no se pudo medir (una
+        auditoría que no se hizo, ningún pedido cerrado) no cuenta y la nota se
+        calcula sobre lo medido; los productos aprobados se miden siempre.
         TEXTO;
     }
 }

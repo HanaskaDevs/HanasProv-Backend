@@ -12,6 +12,7 @@ use App\Console\Commands\AvisarRecepcionesSinCalificarCommand;
 use App\Console\Commands\AvisarVencimientoDocumentosCommand;
 use App\Console\Commands\SuspenderProveedoresDocumentacionVencidaCommand;
 use App\Console\Commands\SincronizarEstadosSighCommand;
+use App\Console\Commands\RecordarDocumentacionIncompletaCommand;
 
 /*
 |--------------------------------------------------------------------------
@@ -111,6 +112,12 @@ Schedule::command(AvisarRecepcionesDelDiaCommand::class)->dailyAt('05:00');
 // de quedar suspendido, no después.
 Schedule::command(AvisarVencimientoDocumentosCommand::class)->dailyAt('07:30');
 Schedule::command(SuspenderProveedoresDocumentacionVencidaCommand::class)->dailyAt('08:30');
+
+// Documentación incompleta (29-oct-2026): al proveedor que subió algo, le
+// faltan obligatorios y lleva 7 días sin subir nada nuevo, un correo con la
+// lista de lo que le falta; se repite cada 7 días mientras siga igual. A las
+// 09:00, en horario de oficina, para que pueda ponerse a cargarlos.
+Schedule::command(RecordarDocumentacionIncompletaCommand::class)->dailyAt('09:00');
 
 Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());

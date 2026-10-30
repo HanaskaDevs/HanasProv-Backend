@@ -39,16 +39,20 @@ class CatalogoProductoService
      * con el catálogo. La validación es por EMPRESA ACTIVA (no global
      * como esSistemasGlobal()), porque los datos que se ven acá son de
      * la empresa activa de la sesión.
+     *
+     * Catálogo (29-oct-2026) entra con acceso completo: es justamente el rol
+     * que carga los códigos de BC.
      */
     public function verificarAcceso(Usuario $usuario, int $idEmpresaActiva): void
     {
         $puedeAcceder = $usuario->esSistemas($idEmpresaActiva)
             || $usuario->esAdmin($idEmpresaActiva)
-            || $usuario->esCompras($idEmpresaActiva);
+            || $usuario->esCompras($idEmpresaActiva)
+            || $usuario->esCatalogo($idEmpresaActiva);
 
         if (! $puedeAcceder) {
             throw new AccessDeniedHttpException(
-                'Solo los roles Sistemas, Admin y Compras pueden acceder al catálogo de productos.'
+                'Solo los roles Sistemas, Admin, Compras y Catálogo pueden acceder al catálogo de productos.'
             );
         }
     }

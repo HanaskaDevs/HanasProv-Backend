@@ -8,6 +8,8 @@ use App\Modules\Auditorias\Models\TipoAuditoria;
 use App\Modules\Documentos_Proveedor\Models\Archivo;
 use App\Modules\Documentos_Proveedor\Models\DocumentoProveedor;
 use App\Modules\Documentos_Proveedor\Services\DocumentoProveedorService;
+use App\Modules\Ficha_Productos\Models\Producto;
+use App\Modules\Ficha_Productos\Models\UnidadPresentacion;
 use App\Modules\Pedidos\Models\DetallePedidoCompra;
 use App\Modules\Pedidos\Models\PedidoCompra;
 use App\Modules\Proveedores\Models\Proveedor;
@@ -17,8 +19,8 @@ use Tests\TestCase;
 
 /**
  * Calificación global de desempeño, sobre 100 puntos:
- * fill rate 50 + auditoría de proveedor 15 + documentos 15 +
- * reclamos 10 + auditoría de recepción 10.
+ * fill rate 35 + auditoría de proveedor 15 + documentos 15 +
+ * productos aprobados 15 + reclamos 10 + auditoría de recepción 10.
  *
  * Lo que más importa cubrir acá son las reglas que NO son obvias leyendo
  * los pesos: el promedio del fill rate se hace POR PEDIDO (no sobre el total
@@ -116,15 +118,105 @@ class CalificacionGlobalTest extends TestCase
         }
     }
 
+    /** Un producto activo del proveedor con el estado de calificación dado. */
+    private function productoCon(Proveedor $proveedor, ?string $estado): Producto
+    {
+        return Producto::create([
+            'Id_Proveedor' => $proveedor->Id_Proveedor,
+            'Id_Unidad_Presentacion' => UnidadPresentacion::where('Activo', 1)->value('Id_Unidad_Presentacion'),
+            'Nombre_Producto' => 'PRODUCTO DE PRUEBA '.random_int(1000, 9999),
+            'Activo' => 1,
+            'Bloqueado' => $estado === null ? 0 : 1,
+            'Estado_Calificacion' => $estado,
+            'Fecha_Creacion' => now(),
+        ]);
+    }
+
     public function test_los_pesos_de_las_secciones_suman_cien(): void
     {
         $this->assertSame(100,
             CalificacionGlobalService::PESO_FILL_RATE
             + CalificacionGlobalService::PESO_AUDITORIA_PROVEEDOR
             + CalificacionGlobalService::PESO_DOCUMENTOS
+            + CalificacionGlobalService::PESO_PRODUCTOS
             + CalificacionGlobalService::PESO_RECLAMOS
             + CalificacionGlobalService::PESO_AUDITORIA_RECEPCION
         );
+    }
+
+    /**
+     * Fill rate, documentos, productos y reclamos se reparten los mismos 75
+     * puntos que antes eran solo de fill rate, documentos y reclamos
+     * (29-oct-2026).
+     */
+    public function test_fill_rate_documentos_productos_y_reclamos_suman_75(): void
+    {
+        $this->assertSame(75,
+            CalificacionGlobalService::PESO_FILL_RATE
+            + CalificacionGlobalService::PESO_DOCUMENTOS
+            + CalificacionGlobalService::PESO_PRODUCTOS
+            + CalificacionGlobalService::PESO_RECLAMOS
+        );
+    }
+
+    /**
+     * El caso que pidió el usuario (RUC 1792122465001): documentación
+     * completa, sin reclamos, sin pedidos ni auditorías, y NINGÚN producto
+     * aprobado. Antes sacaba 100; ahora productos se mide en 0.
+     */
+    public function test_sin_producto_aprobado_la_nota_no_llega_a_cien(): void
+    {
+        $empresa = $this->crearEmpresa();
+        [, $proveedor] = $this->crearProveedorConUsuario($empresa, ['Ciudad' => 'Quito']);
+        $admin = $this->crearUsuarioInterno($empresa, 'Admin');
+
+        $this->documentacionCompleta($proveedor, $admin->Id_Usuario);
+        // 5 productos, ninguno aprobado.
+        foreach (['Pendiente', 'Pendiente', 'Rechazado', null, null] as $estado) {
+            $this->productoCon($proveedor, $estado);
+        }
+
+        $resultado = $this->servicio()->calcular($proveedor->fresh());
+        $productos = $this->componente($resultado, 'productos');
+
+        $this->assertSame(0.0, $productos['puntaje']);
+        $this->assertSame(15, $productos['peso']);
+        $this->assertStringContainsString('Ninguno de sus 5', $productos['detalle']);
+        // Documentos 15 + reclamos 10 + productos 0 = 25 de 40 evaluados.
+        $this->assertSame(40, $resultado['peso_evaluado']);
+        $this->assertSame(62.5, $resultado['puntaje_total']);
+    }
+
+    public function test_con_un_producto_aprobado_de_cinco_se_lleva_los_puntos_de_productos(): void
+    {
+        $empresa = $this->crearEmpresa();
+        [, $proveedor] = $this->crearProveedorConUsuario($empresa, ['Ciudad' => 'Quito']);
+        $admin = $this->crearUsuarioInterno($empresa, 'Admin');
+
+        $this->documentacionCompleta($proveedor, $admin->Id_Usuario);
+        foreach (['Aprobado', 'Pendiente', 'Pendiente', 'Rechazado', null] as $estado) {
+            $this->productoCon($proveedor, $estado);
+        }
+
+        $resultado = $this->servicio()->calcular($proveedor->fresh());
+        $productos = $this->componente($resultado, 'productos');
+
+        $this->assertSame(15.0, $productos['puntaje']);
+        $this->assertStringContainsString('1 de 5', $productos['detalle']);
+        $this->assertSame(100.0, $resultado['puntaje_total']);
+    }
+
+    public function test_sin_productos_cargados_productos_se_mide_en_cero(): void
+    {
+        $empresa = $this->crearEmpresa();
+        [, $proveedor] = $this->crearProveedorConUsuario($empresa);
+
+        $resultado = $this->servicio()->calcular($proveedor);
+
+        // Nunca queda "sin datos": si quedara, el proveedor sin productos
+        // volvería a sacar 100.
+        $this->assertNotContains('productos', $this->clavesSinDatos($resultado));
+        $this->assertSame(0.0, $this->componente($resultado, 'productos')['puntaje']);
     }
 
     public function test_el_fill_rate_promedia_por_pedido_y_no_por_cantidad_total(): void
@@ -143,7 +235,7 @@ class CalificacionGlobalTest extends TestCase
         $fillRate = $this->componente($this->servicio()->calcular($proveedor->fresh()), 'fill_rate');
 
         $this->assertSame(75.0, $fillRate['porcentaje']);
-        $this->assertSame(37.5, $fillRate['puntaje']);
+        $this->assertSame(26.25, $fillRate['puntaje']); // 75% de 35
     }
 
     public function test_los_pedidos_abiertos_no_entran_al_fill_rate(): void
@@ -200,14 +292,16 @@ class CalificacionGlobalTest extends TestCase
         $this->assertContains('auditoria_recepcion', $sinDatos);
         $this->assertContains('fill_rate', $sinDatos);
 
-        // Solo documentación (15) y reclamos (10) entran al denominador.
-        $this->assertSame(25, $resultado['peso_evaluado']);
+        // Solo documentación (15), productos (15, se mide siempre) y
+        // reclamos (10) entran al denominador.
+        $this->assertSame(40, $resultado['peso_evaluado']);
         $this->assertTrue($resultado['evaluable']);
     }
 
     /**
-     * Un proveedor al que solo se le mide la documentación, y la tiene al
-     * día, saca 100: no se lo castiga por auditorías que la empresa no hizo.
+     * Un proveedor con la documentación al día y un producto aprobado, sin
+     * nada más medido, saca 100: no se lo castiga por auditorías que la
+     * empresa no hizo.
      */
     public function test_con_lo_poco_evaluado_en_orden_la_nota_es_cien(): void
     {
@@ -216,11 +310,12 @@ class CalificacionGlobalTest extends TestCase
         $admin = $this->crearUsuarioInterno($empresa, 'Admin');
 
         $this->documentacionCompleta($proveedor, $admin->Id_Usuario);
+        $this->productoCon($proveedor, 'Aprobado');
 
         $resultado = $this->servicio()->calcular($proveedor->fresh());
 
         $this->assertSame(100.0, $resultado['puntaje_total']);
-        $this->assertSame(25, $resultado['peso_evaluado']);
+        $this->assertSame(40, $resultado['peso_evaluado']);
     }
 
     /**
@@ -234,7 +329,9 @@ class CalificacionGlobalTest extends TestCase
         [, $proveedor] = $this->crearProveedorConUsuario($empresa, ['Ciudad' => 'Quito']);
         $interno = $this->crearUsuarioInterno($empresa, 'Calidad');
 
-        // Documentación en 0 de 15, reclamos en 10 de 10 -> 10 sobre 25 = 40.
+        // Documentación en 0 de 15, productos en 15 de 15, reclamos en 10 de
+        // 10 -> 25 sobre 40 = 62.5.
+        $this->productoCon($proveedor, 'Aprobado');
         Reclamo::create([
             'Id_Empresa' => $empresa->Id_Empresa,
             'Id_Proveedor' => $proveedor->Id_Proveedor,
@@ -251,9 +348,9 @@ class CalificacionGlobalTest extends TestCase
         $this->assertSame(15, $documentos['peso'], 'La fila conserva su peso original.');
         $this->assertSame(0.0, $documentos['puntaje']);
 
-        $this->assertSame(10.0, $resultado['puntaje_obtenido']);
-        $this->assertSame(25, $resultado['peso_evaluado']);
-        $this->assertSame(40.0, $resultado['puntaje_total']);
+        $this->assertSame(25.0, $resultado['puntaje_obtenido']);
+        $this->assertSame(40, $resultado['peso_evaluado']);
+        $this->assertSame(62.5, $resultado['puntaje_total']);
     }
 
     public function test_manda_la_ultima_auditoria_finalizada_y_no_la_de_borrador(): void
