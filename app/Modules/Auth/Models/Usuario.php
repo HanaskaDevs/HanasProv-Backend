@@ -173,4 +173,15 @@ class Usuario extends Authenticatable
     {
         return $this->tieneRolEnEmpresa($idEmpresa, 'Guardia');
     }
+
+    /**
+     * Rol Catálogo (29-oct-2026): mantiene los datos de los productos
+     * (Catálogo de productos con sus códigos BC, Productos por proveedor y
+     * Productos por revisar). Edita datos de productos, no documentos, y no
+     * aprueba ni rechaza (ver ProductoService::proveedorDeTrabajo).
+     */
+    public function esCatalogo(int $idEmpresa): bool
+    {
+        return $this->tieneRolEnEmpresa($idEmpresa, 'Catálogo');
+    }
 }

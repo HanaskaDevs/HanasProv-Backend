@@ -6,6 +6,7 @@ use App\Modules\Auditorias\Models\Auditoria;
 use App\Modules\Auditorias\Models\CalificacionRecepcion;
 use App\Modules\Documentos_Proveedor\Models\DocumentoProveedor;
 use App\Modules\Documentos_Proveedor\Services\DocumentoProveedorService;
+use App\Modules\Ficha_Productos\Models\Producto;
 use App\Modules\Proveedores\Models\Proveedor;
 use App\Modules\Reclamos\Models\Reclamo;
 use Illuminate\Support\Facades\DB;
@@ -20,11 +21,20 @@ use Illuminate\Support\Facades\DB;
  *
  * Reparto de los 100 puntos:
  *
- *   Fill rate ................ 50   promedio del % de cada pedido cerrado
+ *   Fill rate ................ 35   promedio del % de cada pedido cerrado
  *   Auditoría de proveedor ... 15   última auditoría finalizada
  *   Documentos ............... 15   todo o nada
+ *   Productos aprobados ...... 15   todo o nada: al menos un producto aprobado
  *   Reclamos ................. 10   10 menos 1 por reclamo del último año
  *   Auditoría de recepción ... 10   última recepción calificada
+ *
+ * PRODUCTOS APROBADOS (29-oct-2026, pedido del usuario): antes fill rate,
+ * documentos y reclamos se repartían 75 puntos (50/15/10) y un proveedor sin
+ * ningún producto aprobado podía sacar 100 (ej. RUC 1792122465001: documentos
+ * completos, sin reclamos, sin pedidos). Ahora esos 75 se reparten entre
+ * cuatro: el fill rate cede 15 a "Productos aprobados". Ese componente SIEMPRE
+ * se mide (nunca queda "sin datos"): no tener productos aprobados es
+ * justamente lo que tiene que bajar la nota.
  *
  * DOS AVISOS SOBRE CÓMO ESTÁ DEFINIDO EL CÁLCULO, porque no son
  * accidentes sino decisiones del negocio que conviene tener a la vista:
@@ -32,8 +42,9 @@ use Illuminate\Support\Facades\DB;
  *  - LO QUE NO SE MIDIÓ NO PUNTÚA NI SE MUESTRA. Si a un proveedor no se le
  *    hizo la auditoría, ese componente no aparece y su peso se reparte entre
  *    los demás (ver calcular()). La nota sigue siendo sobre 100, pero
- *    calculada solo sobre lo medible: un proveedor con la documentación
- *    completa y nada más medido saca 100.
+ *    calculada solo sobre lo medible. Excepción: "Productos aprobados" se
+ *    mide siempre (ver componenteProductos), así que un proveedor con la
+ *    documentación completa pero sin productos aprobados ya no saca 100.
  *
  *  - El fill rate es el promedio SIMPLE de los porcentajes por pedido, no
  *    la razón entre todo lo recibido y todo lo pedido. Un pedido de una
@@ -47,9 +58,10 @@ class CalificacionGlobalService
     public const PESO_TOTAL = 100;
 
     /** Peso de cada componente, en puntos sobre 100. Suman PESO_TOTAL. */
-    public const PESO_FILL_RATE = 50;
+    public const PESO_FILL_RATE = 35;
     public const PESO_AUDITORIA_PROVEEDOR = 15;
     public const PESO_DOCUMENTOS = 15;
+    public const PESO_PRODUCTOS = 15;
     public const PESO_RECLAMOS = 10;
     public const PESO_AUDITORIA_RECEPCION = 10;
 
@@ -68,7 +80,7 @@ class CalificacionGlobalService
     }
 
     /**
-     * Nota global del proveedor con el desglose de sus cinco componentes.
+     * Nota global del proveedor con el desglose de sus seis componentes.
      *
      * Todo se acota a la empresa del propio proveedor ($proveedor->Id_Empresa):
      * un Proveedor pertenece a UNA empresa, así que no hace falta recibir la
@@ -81,6 +93,7 @@ class CalificacionGlobalService
             $this->componenteFillRate($proveedor),
             $this->componenteAuditoriaProveedor($proveedor),
             $this->componenteDocumentos($proveedor),
+            $this->componenteProductos($proveedor),
             $this->componenteReclamos($proveedor),
             $this->componenteAuditoriaRecepcion($proveedor),
         ];
@@ -98,8 +111,9 @@ class CalificacionGlobalService
         // hizo (su nota se calcula solo sobre lo que sí se midió) y ninguna
         // fila inventada entra al reporte.
         //
-        // Efecto práctico: un proveedor al que solo se le midió la
-        // documentación, y la tiene completa, saca 100.
+        // Efecto práctico: un proveedor sin pedidos ni auditorías, con la
+        // documentación completa, sin reclamos y con al menos un producto
+        // aprobado saca 100; sin producto aprobado, 62,5 (25 de 40).
         $medidos = array_values(array_filter($todos, fn (array $c) => ! $c['sin_datos']));
         $sinDatos = array_values(array_filter($todos, fn (array $c) => $c['sin_datos']));
 
@@ -340,6 +354,46 @@ class CalificacionGlobalService
             detalle: $completa
                 ? "Los {$total} documentos obligatorios están aprobados y vigentes"
                 : $faltantes->count()." de {$total} sin aprobar o vencido(s): ".$faltantes->pluck('Nombre_Documento')->implode(', '),
+        );
+    }
+
+    /**
+     * Productos aprobados: todo o nada. Los 15 puntos se dan si el proveedor
+     * tiene AL MENOS UN producto activo aprobado (de 5 productos alcanza con
+     * que uno esté aprobado). Sin ninguno aprobado -o sin productos cargados-
+     * son 0.
+     *
+     * Es la misma regla que habilita las recepciones
+     * (AgendaRecepcionService::idsHabilitadosParaRecepcion): un proveedor sin
+     * producto aprobado todavía no puede venderle nada a la empresa, así que
+     * su nota no puede ser la de uno que sí.
+     *
+     * A diferencia de las auditorías, acá la falta de datos NO se excluye del
+     * cálculo: si se excluyera, el proveedor sin productos volvería a sacar
+     * 100, que es lo que se quiso corregir.
+     */
+    protected function componenteProductos(Proveedor $proveedor): array
+    {
+        $productos = Producto::where('Id_Proveedor', $proveedor->Id_Proveedor)
+            ->where('Activo', 1)
+            ->selectRaw("COUNT(*) AS total, SUM(CASE WHEN Estado_Calificacion = 'Aprobado' THEN 1 ELSE 0 END) AS aprobados")
+            ->first();
+
+        $total = (int) ($productos->total ?? 0);
+        $aprobados = (int) ($productos->aprobados ?? 0);
+
+        $detalle = match (true) {
+            $total === 0 => 'Todavía no tiene productos cargados',
+            $aprobados === 0 => "Ninguno de sus {$total} producto(s) está aprobado",
+            default => "{$aprobados} de {$total} producto(s) aprobado(s)",
+        };
+
+        return $this->componente(
+            'productos',
+            'Productos aprobados',
+            self::PESO_PRODUCTOS,
+            porcentaje: $aprobados > 0 ? 100.0 : 0.0,
+            detalle: $detalle,
         );
     }
 

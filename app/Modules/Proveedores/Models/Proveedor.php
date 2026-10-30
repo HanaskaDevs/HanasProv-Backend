@@ -54,6 +54,9 @@ class Proveedor extends BaseModel
         'Fecha_Calificacion_Ficha' => 'datetime',
         'Fecha_Postulacion' => 'datetime',
         'Fecha_Aprobacion' => 'datetime',
+        // Último recordatorio de documentación incompleta (29-oct-2026, ver
+        // RecordatorioDocumentacionService).
+        'Fecha_Aviso_Documentacion_Incompleta' => 'datetime',
         'Fecha_Creacion' => 'datetime',
         'Fecha_Modificacion' => 'datetime',
     ];

@@ -525,14 +525,17 @@ class AltaProveedorCompletaTest extends TestCase
         );
         $this->assertFalse($medidos->contains('fill_rate'));
 
-        // La documentación SÍ se mide (está completa y aprobada) y, al
-        // renormalizarse el peso de lo no medido, se lleva la nota entera.
+        // La documentación SÍ se mide (está completa y aprobada). Productos
+        // aprobados también se mide siempre (29-oct-2026) y este proveedor
+        // no tiene ninguno: documentos 15 + reclamos 10 + productos 0 sobre
+        // 40 evaluados = 62.5. Sin producto aprobado ya no llega a 100.
         $this->assertTrue($medidos->contains('documentos'));
+        $this->assertTrue($medidos->contains('productos'));
         $this->assertEqualsWithDelta(
-            100.0,
+            62.5,
             (float) $global['puntaje_total'],
             0.01,
-            'Lo único medible está al 100%, así que la nota es 100.'
+            'Sin producto aprobado, la nota es 25 de 40 evaluados.'
         );
     }
 

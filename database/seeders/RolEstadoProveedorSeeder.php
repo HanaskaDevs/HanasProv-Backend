@@ -13,7 +13,7 @@ use Illuminate\Support\Facades\DB;
  *     SUSPENDIDO = 4 (en el modelo App\Modules\Proveedores\Models\
  *     EstadoProveedor, único lugar donde viven estos IDs)
  *   - Roles referenciados por Nombre_Rol en varios lugares
- *     ('Admin', 'Calidad', 'Compras', 'Proveedor', 'Sistemas', 'Guardia')
+ *     ('Admin', 'Calidad', 'Compras', 'Proveedor', 'Sistemas', 'Guardia', 'Catálogo')
  *
  * Si alguien pudiera crear/borrar/reordenar estas filas desde una
  * pantalla, esas referencias se rompen en silencio. Por eso quedan acá,
@@ -44,6 +44,8 @@ class RolEstadoProveedorSeeder extends Seeder
             ['Nombre_Rol' => 'Proveedor', 'Descripcion' => 'Usuario proveedor'],
             ['Nombre_Rol' => 'Sistemas', 'Descripcion' => 'Acceso total a todos los módulos'],
             ['Nombre_Rol' => 'Guardia', 'Descripcion' => 'Guardia de recepción: marca la llegada de los proveedores'],
+            // En las bases existentes lo crea la migración 2026_10_29_090000_rol_catalogo.
+            ['Nombre_Rol' => 'Catálogo', 'Descripcion' => 'Mantiene los datos y los códigos BC de los productos'],
         ];
 
         foreach ($roles as $rol) {
