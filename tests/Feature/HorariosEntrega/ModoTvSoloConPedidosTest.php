@@ -6,6 +6,7 @@ use App\Models\Empresa;
 use App\Modules\Horarios_Entrega\Models\HorarioEntregaProveedor;
 use App\Modules\Pedidos\Models\PedidoCompra;
 use App\Modules\Proveedores\Models\Proveedor;
+use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 /**
@@ -49,6 +50,31 @@ class ModoTvSoloConPedidosTest extends TestCase
         ]);
     }
 
+    private function pedidoSoloEnBc(Empresa $empresa, Proveedor $proveedor, int $haceDias): void
+    {
+        $nroProveedor = 'PTV-'.random_int(100000, 999999);
+
+        DB::table('BC_Ficha_Proveedor')->insert([
+            'Empresa' => $empresa->Empresa_BC,
+            'Fecha_Registro' => now(),
+            'Nro_Proveedor' => $nroProveedor,
+            'Nombre' => 'PROVEEDOR TV DE PRUEBA',
+            'Nro_Identificacion' => $proveedor->Ruc,
+        ]);
+        DB::table('BC_Cab_Pedido_Compra')->insert([
+            'Empresa' => $empresa->Empresa_BC,
+            'Fecha_Registro' => now(),
+            'Tipo_Documento' => 'Pedido',
+            'Nro_Pedido' => 'PTV-'.random_int(100000, 999999),
+            'Nro_Proveedor' => $nroProveedor,
+            'Nombre_Proveedor' => 'PROVEEDOR TV DE PRUEBA',
+            'Fecha_Recepcion_Esperada' => now()->startOfDay(),
+            'Fecha_Registro_BC' => now()->subDays($haceDias)->startOfDay(),
+            'Estado_Pedido' => 'Lanzado',
+            'Cod_Almacen' => 'CD-0001',
+        ]);
+    }
+
     public function test_solo_aparecen_los_proveedores_con_pedidos_de_los_ultimos_7_dias(): void
     {
         $empresa = $this->crearEmpresa();
@@ -75,6 +101,22 @@ class ModoTvSoloConPedidosTest extends TestCase
         $this->assertContains($h7->Id_Horario_Entrega_Proveedor, $ids);
         $this->assertNotContains($hViejo->Id_Horario_Entrega_Proveedor, $ids);
         $this->assertNotContains($hSin->Id_Horario_Entrega_Proveedor, $ids);
+
+        // Fuente principal: el espejo de BC (Pedido_Compra dejó de llenarse el
+        // 27-oct). Un pedido de hace 3 días solo en BC_Cab_Pedido_Compra, con
+        // el proveedor enganchado por RUC en BC_Ficha_Proveedor.
+        [, $soloEnBc] = $this->crearProveedorConUsuario($empresa);
+        [, $soloEnBcViejo] = $this->crearProveedorConUsuario($empresa);
+        $hBc = $this->horarioDeHoy($empresa, $soloEnBc);
+        $hBcViejo = $this->horarioDeHoy($empresa, $soloEnBcViejo);
+        $this->pedidoSoloEnBc($empresa, $soloEnBc, 3);
+        $this->pedidoSoloEnBc($empresa, $soloEnBcViejo, 8);
+
+        $ids = collect($this->getJson('/api/horarios-entrega/hoy?incluir_recibidos=1&solo_con_pedidos=1', $cabeceras)
+            ->assertOk()->json())->pluck('id_horario_entrega_proveedor')->all();
+        $this->assertContains($hBc->Id_Horario_Entrega_Proveedor, $ids);
+        $this->assertNotContains($hBcViejo->Id_Horario_Entrega_Proveedor, $ids);
+        $this->assertContains($hHoy->Id_Horario_Entrega_Proveedor, $ids);
 
         // Seguimiento de hoy (sin el parámetro) sigue mostrando a todos.
         $todos = collect($this->getJson('/api/horarios-entrega/hoy', $cabeceras)
