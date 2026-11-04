@@ -151,7 +151,35 @@ class PedidoInternoService
         $nroPedidos = $filas->pluck('Nro_Pedido')->unique()->values()->all();
         $cantidadesRecibidas = $this->obtenerCantidadesRecibidas($empresaBc, $nroPedidos);
 
-        return $this->agruparPorBodega($filas, $cantidadesRecibidas, $bodegasPermitidas);
+        $porBodega = $this->agruparPorBodega($filas, $cantidadesRecibidas, $bodegasPermitidas);
+
+        return ! empty($filtros['ocultar_completos']) ? $this->sinCompletos($porBodega) : $porBodega;
+    }
+
+    /**
+     * Pedidos por bodega ya no muestra los entregados al 100% (04-nov-2026,
+     * pedido del usuario): esa pantalla es para seguir lo que falta recibir.
+     *
+     * Solo lo pide la PANTALLA (filtro 'ocultar_completos'). Hana usa este
+     * mismo listado sin el filtro, porque le preguntan justamente por los que
+     * están al 100%.
+     *
+     * El % de la bodega se deja calculado con TODOS sus pedidos (también los
+     * completos): si se recalculara solo con los que faltan, la bodega
+     * aparecería peor de lo que va. Se devuelve cuántos se ocultaron para que
+     * la pantalla lo diga.
+     */
+    protected function sinCompletos(array $porBodega): array
+    {
+        foreach ($porBodega as $bodega => $datos) {
+            $pedidos = collect($datos['pedidos']);
+            $pendientes = $pedidos->filter(fn (array $p) => $p['porcentaje_entrega'] < 100)->values();
+
+            $porBodega[$bodega]['pedidos'] = $pendientes->all();
+            $porBodega[$bodega]['pedidos_completos_ocultos'] = $pedidos->count() - $pendientes->count();
+        }
+
+        return $porBodega;
     }
 
     /**
