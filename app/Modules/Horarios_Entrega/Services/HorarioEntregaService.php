@@ -409,20 +409,50 @@ class HorarioEntregaService
     }
 
     /**
-     * Subconsulta: proveedores de la empresa con algún pedido activo registrado
-     * en BC desde hace DIAS_PEDIDOS_MODO_TV días hasta hoy (ambos inclusive).
-     * Se compara por FECHA (CONVERT(date, ...)) para que la hora del registro no
-     * deje afuera un pedido de hoy o del primer día del rango.
+     * Ids de los proveedores de la empresa con algún pedido registrado en BC
+     * desde hace DIAS_PEDIDOS_MODO_TV días hasta hoy (ambos inclusive), por
+     * FECHA (CONVERT(date, ...)) para que la hora no deje afuera un pedido de
+     * hoy o del primer día del rango.
+     *
+     * La fuente es el ESPEJO de BC (BC_Cab_Pedido_Compra, que se carga varias
+     * veces al día), enganchado al proveedor del portal por RUC
+     * (BC_Ficha_Proveedor.Nro_Identificacion = Proveedor.Ruc), cualquier estado.
+     * La primera versión (04-nov 11:58) leía Pedido_Compra, la copia del portal,
+     * que dejó de llenarse el 27-oct: el Modo TV quedó vacío. Pedido_Compra se
+     * sigue sumando por si un pedido existe solo ahí.
      */
-    private function idsConPedidosRecientes(int $idEmpresa, Carbon $hoy)
+    private function idsConPedidosRecientes(int $idEmpresa, Carbon $hoy): array
     {
-        return PedidoCompra::where('Id_Empresa', $idEmpresa)
+        $desde = $hoy->copy()->subDays(self::DIAS_PEDIDOS_MODO_TV)->toDateString();
+        $hasta = $hoy->toDateString();
+        $entreFechas = 'CONVERT(date, %s) BETWEEN CONVERT(date, ?) AND CONVERT(date, ?)';
+
+        $ids = PedidoCompra::where('Id_Empresa', $idEmpresa)
             ->where('Activo', 1)
-            ->whereRaw('CONVERT(date, Fecha_Registro_BC) BETWEEN CONVERT(date, ?) AND CONVERT(date, ?)', [
-                $hoy->copy()->subDays(self::DIAS_PEDIDOS_MODO_TV)->toDateString(),
-                $hoy->toDateString(),
-            ])
-            ->select('Id_Proveedor');
+            ->whereRaw(sprintf($entreFechas, 'Fecha_Registro_BC'), [$desde, $hasta])
+            ->distinct()
+            ->pluck('Id_Proveedor');
+
+        $empresaBc = trim((string) Empresa::whereKey($idEmpresa)->value('Empresa_BC'));
+
+        if ($empresaBc !== '') {
+            $rucs = DB::table('BC_Cab_Pedido_Compra as c')
+                ->join('BC_Ficha_Proveedor as p', function ($join) {
+                    $join->on('p.Nro_Proveedor', '=', 'c.Nro_Proveedor')
+                        ->on('p.Empresa', '=', 'c.Empresa');
+                })
+                ->where('c.Empresa', $empresaBc)
+                ->whereRaw(sprintf($entreFechas, 'c.Fecha_Registro_BC'), [$desde, $hasta])
+                ->selectRaw('LTRIM(RTRIM(p.Nro_Identificacion)) as ruc');
+
+            $ids = $ids->merge(
+                Proveedor::where('Id_Empresa', $idEmpresa)
+                    ->whereIn(DB::raw('LTRIM(RTRIM(Ruc))'), $rucs)
+                    ->pluck('Id_Proveedor')
+            );
+        }
+
+        return $ids->unique()->values()->all();
     }
 
     /**
