@@ -24,6 +24,12 @@ class PublicConfigController extends Controller
         return response()->json(['url' => $this->configuracionService->obtenerImagenLogin()]);
     }
 
+    /** Lo pide todo el portal (también el login) para decidir si se decora. */
+    public function modoNavideno(): JsonResponse
+    {
+        return response()->json(['activo' => $this->configuracionService->obtenerModoNavideno()]);
+    }
+
     public function guiaPasos(): JsonResponse
     {
         return response()->json(

@@ -802,6 +802,34 @@ class ConfiguracionService
         return $activa;
     }
 
+    // ---------- Modo navideño ----------
+
+    /**
+     * Decoración de temporada (04-nov-2026, pedido del usuario): gorro de
+     * Papá Noel sobre Hana, guirnalda de luces bajo la barra y nieve suave.
+     * Es solo visual: no cambia ningún dato ni permiso.
+     *
+     * Se LEE sin sesión (/public-config/modo-navideno) porque también decora
+     * el login y la portada; se ESCRIBE solo desde Configuraciones (Sistemas).
+     * Apagado por defecto: sin la fila en Configuracion, el portal se ve como
+     * siempre.
+     */
+    public const CLAVE_MODO_NAVIDENO = 'modo_navideno_activo';
+
+    public function obtenerModoNavideno(): bool
+    {
+        return Configuracion::obtener(self::CLAVE_MODO_NAVIDENO, '0') === '1';
+    }
+
+    public function definirModoNavideno(Usuario $usuario, bool $activo): bool
+    {
+        $this->verificarSistemas($usuario);
+
+        Configuracion::establecer(self::CLAVE_MODO_NAVIDENO, $activo ? '1' : '0', $usuario->Id_Usuario);
+
+        return $activo;
+    }
+
     // ---------- Helpers de archivo público ----------
 
     protected function guardarMediaPublica(UploadedFile $archivo, string $carpeta): array

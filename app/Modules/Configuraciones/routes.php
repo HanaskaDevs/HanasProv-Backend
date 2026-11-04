@@ -7,6 +7,7 @@ use App\Modules\Configuraciones\Http\Controllers\GuiaPasoController;
 use App\Modules\Configuraciones\Http\Controllers\HomeSlideController;
 use App\Modules\Configuraciones\Http\Controllers\LoginImagenController;
 use App\Modules\Configuraciones\Http\Controllers\MediaStreamController;
+use App\Modules\Configuraciones\Http\Controllers\ModoNavidenoController;
 use App\Modules\Configuraciones\Http\Controllers\PoliticaController;
 use App\Modules\Configuraciones\Http\Controllers\PublicConfigController;
 use App\Modules\Configuraciones\Http\Controllers\AnunciosVozController;
@@ -47,6 +48,8 @@ Route::prefix('public-config')->group(function () {
     Route::get('/home-slides', [PublicConfigController::class, 'homeSlides']);
     Route::get('/login-imagen', [PublicConfigController::class, 'loginImagen']);
     Route::get('/guia-pasos', [PublicConfigController::class, 'guiaPasos']);
+    // Decoración navideña: la lee todo el portal, también el login.
+    Route::get('/modo-navideno', [PublicConfigController::class, 'modoNavideno']);
 });
 
 // Sección "Políticas" dentro de la plataforma: cualquier usuario logueado
@@ -112,4 +115,8 @@ Route::prefix('configuraciones')
         // TV lee el valor por /horarios-entrega/config-anuncios.
         Route::get('/anuncios-voz', [AnunciosVozController::class, 'show']);
         Route::put('/anuncios-voz', [AnunciosVozController::class, 'update']);
+
+        // Modo navideño (04-nov-2026). Solo la ESCRITURA; la lectura es pública.
+        Route::get('/modo-navideno', [ModoNavidenoController::class, 'show']);
+        Route::put('/modo-navideno', [ModoNavidenoController::class, 'update']);
     });
