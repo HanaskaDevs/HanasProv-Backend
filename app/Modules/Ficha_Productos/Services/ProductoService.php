@@ -288,7 +288,8 @@ class ProductoService
 
     /**
      * Elimina un producto completo (borrado físico, ya que aún no ha sido
-     * enviado a calificación -> no requiere trazabilidad histórica). Solo
+     * enviado a calificación -> no requiere trazabilidad histórica; los que
+     * vienen de BC se desactivan, ver quitarProducto). Solo
      * permitido mientras el proveedor NO esté bloqueado (envío pendiente).
      */
     public function eliminar(Usuario $usuario, int $idEmpresaActiva, int $idProducto, ?int $idProveedorObjetivo = null): void
@@ -299,15 +300,45 @@ class ProductoService
             throw new AccessDeniedHttpException('No puede eliminar un producto mientras está en revisión.');
         }
 
-        DB::transaction(function () use ($producto) {
+        DB::transaction(function () use ($producto, $usuario) {
             foreach ($producto->documentos as $documento) {
                 $archivo = $documento->archivo;
                 $documento->delete();
                 $this->eliminarArchivoFisico($archivo);
             }
 
-            $producto->delete();
+            $this->quitarProducto($producto, $usuario);
         });
+    }
+
+    /**
+     * Saca el producto del catálogo del proveedor.
+     *
+     * Si vino de Business Central (tiene Bc_Nro_Producto) NO se borra la fila:
+     * se desactiva. Visto en producción el 04-nov-2026 con FROZENTROPIC: el
+     * borrado físico funcionaba, pero al recargar la lista
+     * sincronizarDesdeBC() no encontraba ese código BC y volvía a crear el
+     * producto en el mismo segundo, con otro id y sin categoría -> "lo elimino
+     * y vuelve a aparecer", y la categoría que se le había puesto "no se
+     * guardaba". La sincronización ya cuenta los inactivos como existentes,
+     * así que desactivado no vuelve. Mismo criterio que "Retirar" en la
+     * bandeja de Compras (RevisionComprasProductoService::eliminar).
+     *
+     * Los cargados a mano (sin código BC) se siguen borrando de verdad.
+     */
+    protected function quitarProducto(Producto $producto, Usuario $usuario): void
+    {
+        if ($producto->Bc_Nro_Producto === null || trim((string) $producto->Bc_Nro_Producto) === '') {
+            $producto->delete();
+
+            return;
+        }
+
+        $producto->forceFill([
+            'Activo' => 0,
+            'Modificado_Por' => $usuario->Id_Usuario,
+            'Fecha_Modificacion' => now(),
+        ])->save();
     }
 
     /**
@@ -329,14 +360,15 @@ class ProductoService
 
         $total = 0;
 
-        DB::transaction(function () use ($productos, &$total) {
+        DB::transaction(function () use ($productos, $usuario, &$total) {
             foreach ($productos as $producto) {
                 foreach ($producto->documentos as $documento) {
                     $archivo = $documento->archivo;
                     $documento->delete();
                     $this->eliminarArchivoFisico($archivo);
                 }
-                $producto->delete();
+                // Los de BC se desactivan, no se borran (ver quitarProducto).
+                $this->quitarProducto($producto, $usuario);
                 $total++;
             }
         });
