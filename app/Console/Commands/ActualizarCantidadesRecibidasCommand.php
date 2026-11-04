@@ -17,15 +17,19 @@ use Illuminate\Support\Facades\Log;
  *
  * Corre sobre pedidos Abiertos y Cerrados por igual (el estado del pedido no
  * filtra nada aquí), limitado a los últimos 5 días por Fecha_Registro_BC.
+ *
+ * --dias (04-nov-2026): solo para ponerse al día a mano después de un corte
+ * (el cron estuvo parado del 27-oct al 04-nov); lo programado sigue con 5.
  */
 class ActualizarCantidadesRecibidasCommand extends Command
 {
-    protected $signature = 'pedidos:actualizar-cantidades-recibidas';
+    protected $signature = 'pedidos:actualizar-cantidades-recibidas {--dias=5 : días hacia atrás por Fecha_Registro_BC}';
     protected $description = 'Actualiza la cantidad recibida de las líneas de pedido desde BC_Pedido_Compra_Fill_Rate.';
 
     public function handle(): int
     {
-        $fechaDesde = now()->subDays(5)->startOfDay()->format('Y-m-d\TH:i:s');
+        $dias = max(1, (int) $this->option('dias'));
+        $fechaDesde = now()->subDays($dias)->startOfDay()->format('Y-m-d\TH:i:s');
 
         $pedidos = PedidoCompra::where('Activo', 1)
             ->where('Fecha_Registro_BC', '>=', $fechaDesde)

@@ -11,7 +11,7 @@ use Tests\TestCase;
 
 /**
  * Modo TV (04-nov-2026): con solo_con_pedidos=1 aparecen solo los proveedores
- * con algún pedido registrado en BC entre hace 7 días y hoy. Sin el parámetro
+ * con algún pedido registrado en BC en los últimos 7 días contando hoy (hoy y los 6 anteriores). Sin el parámetro
  * (Seguimiento de hoy) se siguen viendo todos los que tienen horario hoy.
  */
 class ModoTvSoloConPedidosTest extends TestCase
@@ -89,8 +89,8 @@ class ModoTvSoloConPedidosTest extends TestCase
         $hSin = $this->horarioDeHoy($empresa, $sinPedidos);
 
         $this->pedido($empresa, $conPedidoHoy, 0);
-        $this->pedido($empresa, $conPedidoHace7, 7);   // el límite entra
-        $this->pedido($empresa, $conPedidoViejo, 8);   // un día de más: no entra
+        $this->pedido($empresa, $conPedidoHace7, 6);   // el límite (7.º día contando hoy) entra
+        $this->pedido($empresa, $conPedidoViejo, 7);   // hace 7 = 8.º día: no entra
 
         $cabeceras = $this->cabecerasComo($this->crearUsuarioInterno($empresa, 'Sistemas'), $empresa);
 
@@ -110,7 +110,7 @@ class ModoTvSoloConPedidosTest extends TestCase
         $hBc = $this->horarioDeHoy($empresa, $soloEnBc);
         $hBcViejo = $this->horarioDeHoy($empresa, $soloEnBcViejo);
         $this->pedidoSoloEnBc($empresa, $soloEnBc, 3);
-        $this->pedidoSoloEnBc($empresa, $soloEnBcViejo, 8);
+        $this->pedidoSoloEnBc($empresa, $soloEnBcViejo, 7);
 
         $ids = collect($this->getJson('/api/horarios-entrega/hoy?incluir_recibidos=1&solo_con_pedidos=1', $cabeceras)
             ->assertOk()->json())->pluck('id_horario_entrega_proveedor')->all();
