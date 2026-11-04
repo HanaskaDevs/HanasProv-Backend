@@ -81,7 +81,7 @@ class HorarioEntregaService
     public const ESTADO_EN_RECEPCION = 'En_Recepcion';
     public const ESTADO_RECIBIDO = 'Recibido';
 
-    /** Modo TV: cuántos días hacia atrás mira la fecha de registro del pedido (04-nov-2026). */
+    /** Modo TV: cuántos días mira la fecha de registro del pedido, CONTANDO HOY (04-nov-2026: 7 = hoy y los 6 anteriores). */
     public const DIAS_PEDIDOS_MODO_TV = 7;
 
     /**
@@ -341,7 +341,7 @@ class HorarioEntregaService
      * $soloConPedidosRecientes lo usa SOLO el Modo TV (04-nov-2026, pedido del
      * usuario): un proveedor sin pedidos no tiene nada que entregar, así que no
      * se lo muestra. Entra si tiene al menos un pedido activo REGISTRADO en BC
-     * entre hace DIAS_PEDIDOS_MODO_TV días y hoy (Fecha_Registro_BC, contado
+     * en los últimos DIAS_PEDIDOS_MODO_TV días contando hoy (Fecha_Registro_BC, contado
      * desde la fecha de cada día). Seguimiento de hoy sigue mostrando a todos.
      */
     public function listarDeHoy(
@@ -410,7 +410,7 @@ class HorarioEntregaService
 
     /**
      * Ids de los proveedores de la empresa con algún pedido registrado en BC
-     * desde hace DIAS_PEDIDOS_MODO_TV días hasta hoy (ambos inclusive), por
+     * en los últimos DIAS_PEDIDOS_MODO_TV días CONTANDO HOY (con 7: hoy y los 6 anteriores), por
      * FECHA (CONVERT(date, ...)) para que la hora no deje afuera un pedido de
      * hoy o del primer día del rango.
      *
@@ -423,7 +423,7 @@ class HorarioEntregaService
      */
     private function idsConPedidosRecientes(int $idEmpresa, Carbon $hoy): array
     {
-        $desde = $hoy->copy()->subDays(self::DIAS_PEDIDOS_MODO_TV)->toDateString();
+        $desde = $hoy->copy()->subDays(self::DIAS_PEDIDOS_MODO_TV - 1)->toDateString();
         $hasta = $hoy->toDateString();
         $entreFechas = 'CONVERT(date, %s) BETWEEN CONVERT(date, ?) AND CONVERT(date, ?)';
 
