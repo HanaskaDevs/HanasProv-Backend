@@ -81,6 +81,9 @@ class HorarioEntregaService
     public const ESTADO_EN_RECEPCION = 'En_Recepcion';
     public const ESTADO_RECIBIDO = 'Recibido';
 
+    /** Modo TV: cuántos días hacia atrás mira la fecha de registro del pedido (04-nov-2026). */
+    public const DIAS_PEDIDOS_MODO_TV = 7;
+
     /**
      * Interruptor de los anuncios por voz del Modo TV. Vive acá, en el
      * módulo que consume la configuración, por el mismo criterio que
@@ -334,8 +337,20 @@ class HorarioEntregaService
      * el estado real, el cambio Arribo/En_Recepcion -> Recibido es un
      * cambio de estado normal y se anuncia como cualquier otro.
      */
-    public function listarDeHoy(Usuario $usuario, int $idEmpresa, ?string $clasificacion = null, bool $incluirRecibidos = false): Collection
-    {
+    /**
+     * $soloConPedidosRecientes lo usa SOLO el Modo TV (04-nov-2026, pedido del
+     * usuario): un proveedor sin pedidos no tiene nada que entregar, así que no
+     * se lo muestra. Entra si tiene al menos un pedido activo REGISTRADO en BC
+     * entre hace DIAS_PEDIDOS_MODO_TV días y hoy (Fecha_Registro_BC, contado
+     * desde la fecha de cada día). Seguimiento de hoy sigue mostrando a todos.
+     */
+    public function listarDeHoy(
+        Usuario $usuario,
+        int $idEmpresa,
+        ?string $clasificacion = null,
+        bool $incluirRecibidos = false,
+        bool $soloConPedidosRecientes = false
+    ): Collection {
         $this->verificarAccesoOperativo($usuario, $idEmpresa);
 
         $hoy = now();
@@ -348,6 +363,10 @@ class HorarioEntregaService
 
         if ($clasificacion) {
             $query->where('Clasificacion', $clasificacion);
+        }
+
+        if ($soloConPedidosRecientes) {
+            $query->whereIn('Id_Proveedor', $this->idsConPedidosRecientes($idEmpresa, $hoy));
         }
 
         $horarios = $query->get();
@@ -387,6 +406,23 @@ class HorarioEntregaService
             ->filter(fn (array $fila) => $incluirRecibidos || $fila['estado'] !== self::ESTADO_RECIBIDO)
             ->sort(fn ($a, $b) => strcmp($a['hora_llegada'] ?? '', $b['hora_llegada'] ?? ''))
             ->values();
+    }
+
+    /**
+     * Subconsulta: proveedores de la empresa con algún pedido activo registrado
+     * en BC desde hace DIAS_PEDIDOS_MODO_TV días hasta hoy (ambos inclusive).
+     * Se compara por FECHA (CONVERT(date, ...)) para que la hora del registro no
+     * deje afuera un pedido de hoy o del primer día del rango.
+     */
+    private function idsConPedidosRecientes(int $idEmpresa, Carbon $hoy)
+    {
+        return PedidoCompra::where('Id_Empresa', $idEmpresa)
+            ->where('Activo', 1)
+            ->whereRaw('CONVERT(date, Fecha_Registro_BC) BETWEEN CONVERT(date, ?) AND CONVERT(date, ?)', [
+                $hoy->copy()->subDays(self::DIAS_PEDIDOS_MODO_TV)->toDateString(),
+                $hoy->toDateString(),
+            ])
+            ->select('Id_Proveedor');
     }
 
     /**

@@ -61,6 +61,8 @@ class PedidoController extends Controller
             'fecha_hasta' => ['nullable', 'date'],
             'proveedor' => ['nullable', 'string', 'max:150'],
             'producto' => ['nullable', 'string', 'max:150'],
+            // La pantalla lo manda siempre (04-nov-2026): sin los entregados al 100%.
+            'ocultar_completos' => ['nullable', 'boolean'],
         ]);
 
         $pedidosPorBodega = $this->pedidoInternoService->listarPorBodega(
