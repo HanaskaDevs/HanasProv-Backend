@@ -106,8 +106,18 @@ class HorarioEntregaController extends Controller
         // hoy no lo manda y sigue recibiendo la lista sin los recibidos.
         $incluirRecibidos = $request->boolean('incluir_recibidos');
 
+        // También solo el Modo TV (04-nov-2026): deja afuera a los proveedores
+        // sin pedidos registrados en los últimos 7 días.
+        $soloConPedidos = $request->boolean('solo_con_pedidos');
+
         return response()->json(
-            $this->servicio->listarDeHoy($request->user(), $this->idEmpresa($request), $clasificacion, $incluirRecibidos)
+            $this->servicio->listarDeHoy(
+                $request->user(),
+                $this->idEmpresa($request),
+                $clasificacion,
+                $incluirRecibidos,
+                $soloConPedidos
+            )
         );
     }
 
