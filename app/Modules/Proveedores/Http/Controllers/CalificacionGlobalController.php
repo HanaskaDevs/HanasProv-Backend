@@ -27,6 +27,9 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
  */
 class CalificacionGlobalController extends Controller
 {
+    /** Reporte de fill rate: hasta cuántos días atrás se puede filtrar por fecha de recepción. */
+    public const DIAS_ATRAS_FILTRO_FILL_RATE = 5;
+
     public function __construct(protected CalificacionGlobalService $calificacionService)
     {
     }
@@ -153,6 +156,100 @@ class CalificacionGlobalController extends Controller
                 ...$this->calificacionService->calcular($proveedor),
             ])->values()
         );
+    }
+
+    /**
+     * Reporte de Cumplimiento de entregas con filtros (05-nov-2026):
+     * fecha de recepción desde/hasta (la semana la arma el frontend como un
+     * rango lunes-domingo) y proveedor. Devuelve el fill rate de cada
+     * proveedor = promedio del % de sus pedidos cerrados en el rango (la
+     * misma cuenta que la nota) y, si se pidió un proveedor, el detalle de
+     * sus pedidos para el seguimiento.
+     *
+     * Una sola consulta agrupada, no la nota completa por proveedor: acá
+     * solo hace falta el fill rate.
+     */
+    public function reporteFillRate(Request $request): JsonResponse
+    {
+        $idEmpresa = (int) $request->attributes->get('id_empresa_activa');
+
+        $this->verificarPuedeVer($request->user(), $idEmpresa);
+
+        // Las fechas solo pueden ir hasta DIAS_ATRAS_FILTRO_FILL_RATE días
+        // atrás (05-nov-2026, pedido del usuario); el frontend tiene el mismo tope.
+        $minimo = now()->subDays(self::DIAS_ATRAS_FILTRO_FILL_RATE)->toDateString();
+        $hoy = now()->toDateString();
+        $mensajeRango = 'Solo se puede filtrar por fecha de recepción hasta '
+            .self::DIAS_ATRAS_FILTRO_FILL_RATE.' días atrás.';
+
+        $filtros = $request->validate([
+            'desde' => ['nullable', 'date_format:Y-m-d', 'after_or_equal:'.$minimo, 'before_or_equal:'.$hoy],
+            // 'after_or_equal:desde' solo si vino "desde": sin él, Laravel compara
+            // contra la palabra 'desde' como fecha y rechaza un "hasta" válido.
+            'hasta' => array_merge(
+                ['nullable', 'date_format:Y-m-d', 'after_or_equal:'.$minimo, 'before_or_equal:'.$hoy],
+                $request->filled('desde') ? ['after_or_equal:desde'] : [],
+            ),
+            'id_proveedor' => ['nullable', 'integer'],
+        ], [
+            'desde.after_or_equal' => $mensajeRango,
+            'desde.before_or_equal' => 'La fecha "desde" no puede ser posterior a hoy.',
+            'hasta.before_or_equal' => 'La fecha "hasta" no puede ser posterior a hoy.',
+            'hasta.after_or_equal' => 'La fecha "hasta" no puede ser anterior a "desde" ni de hace más de '
+                .self::DIAS_ATRAS_FILTRO_FILL_RATE.' días.',
+        ]);
+
+        $idProveedor = isset($filtros['id_proveedor']) ? (int) $filtros['id_proveedor'] : null;
+
+        $proveedores = Proveedor::where('Id_Empresa', $idEmpresa)
+            ->where('Activo', 1)
+            ->orderBy('Razon_Social')
+            ->get(['Id_Proveedor', 'Razon_Social', 'Nombre_Comercial', 'Ruc']);
+
+        if ($idProveedor !== null && ! $proveedores->contains('Id_Proveedor', $idProveedor)) {
+            throw new NotFoundHttpException('Proveedor no encontrado en esta empresa.');
+        }
+
+        $pedidos = $this->calificacionService->fillRatePedidosParaReporte(
+            $idEmpresa,
+            $filtros['desde'] ?? null,
+            $filtros['hasta'] ?? null,
+            $idProveedor,
+        );
+
+        $nombres = $proveedores->keyBy('Id_Proveedor');
+        // Solo proveedores activos de la empresa, igual que la nota.
+        $porProveedor = $pedidos->filter(fn ($p) => $nombres->has($p->id_proveedor))->groupBy('id_proveedor');
+
+        $resumen = $porProveedor->map(fn ($suyos, $id) => [
+            'id_proveedor' => (int) $id,
+            'razon_social' => $nombres[$id]->Razon_Social,
+            'pedidos' => $suyos->count(),
+            'porcentaje' => round($suyos->avg('porcentaje'), 2),
+        ])->values();
+
+        // Los que no tienen pedidos cerrados en el rango: se listan aparte en
+        // la pantalla (no es un 0, es que no hay nada que medir). Si se
+        // filtró un proveedor, solo importa ese.
+        $sinPedidos = $proveedores
+            ->when($idProveedor !== null, fn ($c) => $c->where('Id_Proveedor', $idProveedor))
+            ->reject(fn (Proveedor $p) => $porProveedor->has($p->Id_Proveedor))
+            ->map(fn (Proveedor $p) => $p->Razon_Social ?? 'Sin razón social')
+            ->values();
+
+        return response()->json([
+            'desde' => $filtros['desde'] ?? null,
+            'hasta' => $filtros['hasta'] ?? null,
+            'proveedores' => $resumen,
+            'sin_pedidos' => $sinPedidos,
+            // Lista para el filtro de proveedor de la pantalla.
+            'opciones_proveedor' => $proveedores->map(fn (Proveedor $p) => [
+                'id_proveedor' => $p->Id_Proveedor,
+                'razon_social' => $p->Razon_Social,
+                'ruc' => $p->Ruc,
+            ])->values(),
+            'detalle' => $idProveedor !== null ? $pedidos->values() : [],
+        ]);
     }
 
     /**

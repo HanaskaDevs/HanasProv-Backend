@@ -5,6 +5,7 @@ namespace App\Modules\Auth\Http\Requests;
 use App\Modules\Auth\Services\TurnstileService;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Support\Facades\Log;
 
 class LoginRequest extends FormRequest
 {
@@ -50,6 +51,31 @@ class LoginRequest extends FormRequest
             }
 
             if ($turnstile->esValido($this->input('cf-turnstile-response'), $this->ip())) {
+                return;
+            }
+
+            // Sin token (05-nov-2026): el navegador no consiguió el captcha.
+            // Antes se rechazaba sin dejar rastro y no había cómo saber a
+            // quién le pasaba ni por qué (a Calidad no la dejaba entrar). El
+            // frontend manda el motivo; se deja en el log con el correo y el
+            // navegador, y se muestra un mensaje que dice qué hacer.
+            if (blank($this->input('cf-turnstile-response'))) {
+                $motivo = substr(preg_replace('/[^A-Za-z0-9_-]/', '', (string) $this->input('cf-turnstile-motivo', 'sin-token')) ?: 'sin-token', 0, 40);
+
+                Log::warning('Turnstile: el navegador no envió token.', [
+                    'motivo' => $motivo,
+                    'email' => $this->input('email'),
+                    'ip' => $this->ip(),
+                    'navegador' => substr((string) $this->userAgent(), 0, 200),
+                ]);
+
+                $validator->errors()->add(
+                    'email',
+                    'Tu navegador no pudo cargar la verificación de seguridad (Cloudflare). Recarga la página e '
+                    .'intenta de nuevo; si sigue, prueba con otro navegador o avisa a Sistemas con el código '
+                    .$motivo.'.'
+                );
+
                 return;
             }
 
