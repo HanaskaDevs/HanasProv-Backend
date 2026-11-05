@@ -18,6 +18,9 @@ Route::prefix('proveedores')
         // de una sola vez. Va antes de /{proveedor} para que el comodín no
         // se coma 'calificaciones-globales' tratándolo como un id.
         Route::get('/calificaciones-globales', [CalificacionGlobalController::class, 'lote']);
+        // Reporte de Cumplimiento de entregas con filtros de fecha de
+        // recepción y proveedor (05-nov-2026). También antes de /{proveedor}.
+        Route::get('/reporte-fill-rate', [CalificacionGlobalController::class, 'reporteFillRate']);
 
         // Calificación global (desempeño) de un proveedor, para el
         // personal interno.
