@@ -13,8 +13,8 @@ use Illuminate\Support\Facades\Notification;
 /**
  * Avisa por correo de los documentos que están por vencer (30 días antes) y
  * reitera el aviso cada semana mientras no se reemplacen. Van los tres
- * destinatarios que pidió el negocio: el proveedor, y los usuarios internos
- * de Calidad y Admin de esa empresa.
+ * destinatarios: el proveedor y los usuarios internos de Calidad de esa
+ * empresa (Admin dejó de recibirlo el 05/11/2026).
  *
  * Corre todos los días, pero cada documento recibe a lo sumo un aviso por
  * semana (ver VencimientoDocumentosService::documentosParaAvisar).
@@ -27,7 +27,7 @@ class AvisarVencimientoDocumentosCommand extends Command
 {
     protected $signature = 'documentos:avisar-vencimientos';
 
-    protected $description = 'Avisa al proveedor, Calidad y Admin de los documentos por vencer (30 días antes y luego cada semana).';
+    protected $description = 'Avisa al proveedor y a Calidad de los documentos por vencer (30 días antes y luego cada semana).';
 
     public function __construct(protected VencimientoDocumentosService $servicio)
     {
@@ -79,8 +79,11 @@ class AvisarVencimientoDocumentosCommand extends Command
                     ->notify($armarNotificacion($proveedor->Email));
             }
 
-            // A Calidad y Admin de esa empresa.
-            $internos = $this->servicio->internosANotificar($proveedor->Id_Empresa);
+            // A Calidad de esa empresa (Admin ya no, desde el 05/11/2026).
+            $internos = $this->servicio->internosANotificar(
+                $proveedor->Id_Empresa,
+                VencimientoDocumentosService::ROLES_AVISO_VENCIMIENTO,
+            );
 
             if ($internos->isNotEmpty()) {
                 Notification::send($internos, $armarNotificacion());
