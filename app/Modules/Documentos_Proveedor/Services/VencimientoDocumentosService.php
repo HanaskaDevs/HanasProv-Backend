@@ -261,19 +261,31 @@ class VencimientoDocumentosService
     }
 
     /**
-     * Usuarios internos de una empresa que deben enterarse (Calidad y
-     * Admin, según el pedido). Mismo criterio que
-     * SolicitudCambioPrecioService::notificarAdminsYCalidad.
+     * Roles internos que reciben el aviso de documento por vencer/vencido.
+     * Desde el 05/11/2026 solo Calidad: Admin pidió dejar de recibirlo
+     * (eran 4 copias por aviso en CATERFOOD, con un texto pensado para el
+     * proveedor). La suspensión sigue yendo a Calidad y Admin, porque es
+     * Admin quien reactiva al proveedor.
+     */
+    public const ROLES_AVISO_VENCIMIENTO = ['Calidad'];
+
+    /** Roles internos que reciben el aviso de proveedor suspendido. */
+    public const ROLES_AVISO_SUSPENSION = ['Calidad', 'Admin'];
+
+    /**
+     * Usuarios internos activos de una empresa con alguno de esos roles.
+     * Mismo criterio que SolicitudCambioPrecioService::notificarAdminsYCalidad.
      *
+     * @param  array<int, string>  $roles
      * @return Collection<int, Usuario>
      */
-    public function internosANotificar(int $idEmpresa): Collection
+    public function internosANotificar(int $idEmpresa, array $roles = self::ROLES_AVISO_SUSPENSION): Collection
     {
         return Usuario::where('Activo', 1)
-            ->whereHas('usuarioEmpresas', function ($q) use ($idEmpresa) {
+            ->whereHas('usuarioEmpresas', function ($q) use ($idEmpresa, $roles) {
                 $q->where('Id_Empresa', $idEmpresa)
                     ->where('Activo', true)
-                    ->whereHas('rol', fn ($r) => $r->whereIn('Nombre_Rol', ['Calidad', 'Admin']));
+                    ->whereHas('rol', fn ($r) => $r->whereIn('Nombre_Rol', $roles));
             })
             ->get();
     }

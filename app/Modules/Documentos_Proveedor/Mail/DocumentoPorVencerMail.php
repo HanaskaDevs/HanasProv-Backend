@@ -11,7 +11,7 @@ use Illuminate\Queue\SerializesModels;
 
 /**
  * Aviso de documento por vencer / vencido. El mismo correo va al proveedor
- * y a los internos (Calidad y Admin); solo cambia el destinatario, no el
+ * y a los internos de Calidad; solo cambia el destinatario, no el
  * contenido, así todos ven exactamente la misma información y el mismo
  * plazo.
  */
