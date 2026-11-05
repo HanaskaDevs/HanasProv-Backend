@@ -238,20 +238,77 @@ class CalificacionGlobalService
      */
     protected function fillRatePorPedidoQuery(int $idProveedor, int $idEmpresa)
     {
+        return $this->fillRatePedidosCerradosQuery($idEmpresa)
+            ->where('pc.Id_Proveedor', $idProveedor)
+            ->groupBy('pc.Id_Pedido_Compra')
+            ->selectRaw('pc.Id_Pedido_Compra AS id_pedido');
+    }
+
+    /**
+     * Base común del cálculo: pedidos cerrados de la empresa, sin agrupar ni
+     * filtrar por proveedor. El % de cada pedido es lo recibido (sin pasar
+     * de lo pedido, línea por línea) sobre lo pedido. La usan la nota, la
+     * lista de Pedidos y el reporte de Cumplimiento de entregas, para que
+     * los tres den siempre el mismo número.
+     */
+    private function fillRatePedidosCerradosQuery(int $idEmpresa)
+    {
         return DB::table('Detalle_Pedido_Compra as d')
             ->join('Pedido_Compra as pc', 'pc.Id_Pedido_Compra', '=', 'd.Id_Pedido_Compra')
-            ->where('pc.Id_Proveedor', $idProveedor)
             ->where('pc.Id_Empresa', $idEmpresa)
             ->where('pc.Activo', 1)
             ->where('pc.Estado', self::ESTADO_PEDIDO_COMPUTABLE)
-            ->groupBy('pc.Id_Pedido_Compra')
             ->havingRaw('SUM(d.Cantidad) > 0')
-            ->selectRaw('pc.Id_Pedido_Compra AS id_pedido')
             ->selectRaw(
                 'SUM(CASE WHEN ISNULL(d.Cantidad_Recibida, 0) > d.Cantidad'
                 .' THEN d.Cantidad ELSE ISNULL(d.Cantidad_Recibida, 0) END)'
                 .' / SUM(d.Cantidad) * 100 AS porcentaje'
             );
+    }
+
+    /**
+     * Reporte de Cumplimiento de entregas con filtros (05-nov-2026, pedido de
+     * Calidad): un fill rate por pedido cerrado, con su proveedor y su fecha
+     * de recepción. "Fecha de recepción" es la Fecha_Recepcion_Esperada del
+     * pedido (la que trae BC): el portal no guarda la fecha real de la
+     * recepción. Sin fechas ni proveedor devuelve todos los pedidos cerrados,
+     * que es exactamente lo que promedia la nota.
+     *
+     * @return \Illuminate\Support\Collection<int, object{id_pedido:int, nro_pedido:string, id_proveedor:int, fecha_recepcion:?string, cantidad:float, recibida:float, porcentaje:float}>
+     */
+    public function fillRatePedidosParaReporte(int $idEmpresa, ?string $desde, ?string $hasta, ?int $idProveedor)
+    {
+        $query = $this->fillRatePedidosCerradosQuery($idEmpresa)
+            ->groupBy('pc.Id_Pedido_Compra', 'pc.Nro_Pedido', 'pc.Id_Proveedor', 'pc.Fecha_Recepcion_Esperada')
+            ->selectRaw('pc.Id_Pedido_Compra AS id_pedido, pc.Nro_Pedido AS nro_pedido, pc.Id_Proveedor AS id_proveedor')
+            ->selectRaw('CONVERT(varchar(10), pc.Fecha_Recepcion_Esperada, 23) AS fecha_recepcion')
+            ->selectRaw('SUM(d.Cantidad) AS cantidad')
+            ->selectRaw(
+                'SUM(CASE WHEN ISNULL(d.Cantidad_Recibida, 0) > d.Cantidad'
+                .' THEN d.Cantidad ELSE ISNULL(d.Cantidad_Recibida, 0) END) AS recibida'
+            )
+            ->orderBy('pc.Fecha_Recepcion_Esperada')
+            ->orderBy('pc.Nro_Pedido');
+
+        if ($desde) {
+            $query->whereRaw('pc.Fecha_Recepcion_Esperada >= CONVERT(date, ?)', [$desde]);
+        }
+        if ($hasta) {
+            $query->whereRaw('pc.Fecha_Recepcion_Esperada <= CONVERT(date, ?)', [$hasta]);
+        }
+        if ($idProveedor) {
+            $query->where('pc.Id_Proveedor', $idProveedor);
+        }
+
+        return $query->get()->map(fn ($fila) => (object) [
+            'id_pedido' => (int) $fila->id_pedido,
+            'nro_pedido' => (string) $fila->nro_pedido,
+            'id_proveedor' => (int) $fila->id_proveedor,
+            'fecha_recepcion' => $fila->fecha_recepcion,
+            'cantidad' => round((float) $fila->cantidad, 2),
+            'recibida' => round((float) $fila->recibida, 2),
+            'porcentaje' => round((float) $fila->porcentaje, 2),
+        ]);
     }
 
     /**

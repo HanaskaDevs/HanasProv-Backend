@@ -223,7 +223,7 @@ class VencimientoDocumentosTest extends TestCase
         $this->assertNotContains($lejano->Id_Documento_Proveedor, $paraAvisar, 'Uno a 90 días todavía no.');
     }
 
-    public function test_el_aviso_va_al_proveedor_y_a_calidad_y_admin(): void
+    public function test_el_aviso_va_al_proveedor_y_a_calidad_pero_no_a_admin(): void
     {
         Notification::fake();
 
@@ -244,9 +244,9 @@ class VencimientoDocumentosTest extends TestCase
             fn ($notificacion, $canales, $notifiable) => ($notifiable->routes['mail'] ?? null) === $proveedor->Email
         );
 
-        // A los internos de Calidad y Admin de esa empresa, y a Compras NO.
-        Notification::assertSentTo($admin, DocumentoPorVencerNotification::class);
+        // A Calidad de esa empresa; ni Admin (desde 05/11/2026) ni Compras.
         Notification::assertSentTo($calidad, DocumentoPorVencerNotification::class);
+        Notification::assertNotSentTo($admin, DocumentoPorVencerNotification::class);
         Notification::assertNotSentTo($compras, DocumentoPorVencerNotification::class);
     }
 

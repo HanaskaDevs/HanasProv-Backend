@@ -4,6 +4,7 @@ namespace Tests\Feature\Seguridad;
 
 use App\Modules\Auth\Services\TurnstileService;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Tests\TestCase;
 
 /**
@@ -82,6 +83,30 @@ class CaptchaLoginTest extends TestCase
         // Lo importante: sin token ni siquiera se consulta a Cloudflare, y
         // el intento muere antes del Hash::check, que es lo caro y lo que
         // un bot busca agotar.
+        Http::assertNothingSent();
+    }
+
+    public function test_sin_token_queda_en_el_log_con_el_motivo_que_manda_el_navegador(): void
+    {
+        // 05-nov-2026: a Calidad no la dejaba entrar y el log no decía nada.
+        $this->encender();
+        Http::fake();
+        Log::spy();
+
+        $respuesta = $this->postJson('/api/auth/login', [
+            'email' => 'calidad'.uniqid().'@test.local',
+            'password' => 'lo-que-sea',
+            'cf-turnstile-motivo' => 'script-no-cargo<script>',
+        ]);
+
+        $respuesta->assertStatus(422);
+        // El código va limpio (sin caracteres raros) en el mensaje.
+        $this->assertStringContainsString('script-no-cargoscript', (string) $respuesta->json('message'));
+        Log::shouldHaveReceived('warning')->withArgs(
+            fn ($mensaje, $contexto = []) => str_contains($mensaje, 'no envió token')
+                && ($contexto['motivo'] ?? null) === 'script-no-cargoscript'
+                && str_starts_with((string) ($contexto['email'] ?? ''), 'calidad')
+        )->once();
         Http::assertNothingSent();
     }
 
