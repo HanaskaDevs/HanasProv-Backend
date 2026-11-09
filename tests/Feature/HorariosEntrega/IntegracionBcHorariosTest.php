@@ -173,4 +173,48 @@ class IntegracionBcHorariosTest extends TestCase
 
         $this->assertFalse(HorarioEntregaProveedor::where('Id_Empresa', $empresa->Id_Empresa)->exists());
     }
+
+    /**
+     * Caso real del 09-nov: un proveedor que no existe en BC (EQPEZ RIVERA,
+     * Aspirante sin código BC) tiene un horario en el portal. BC no lo puede
+     * mandar; con conservar_ids el portal no lo da de baja, y el resto de la
+     * clasificación se sigue reemplazando como siempre.
+     */
+    public function test_conservar_ids_no_da_de_baja_lo_que_bc_no_conoce(): void
+    {
+        $empresa = $this->empresaBc();
+        $this->habilitar($empresa);
+        [, $deBc] = $this->crearProveedorConUsuario($empresa);
+        [, $sinBc] = $this->crearProveedorConUsuario($empresa);
+        [, $otro] = $this->crearProveedorConUsuario($empresa);
+
+        $nuevo = fn (Proveedor $p, string $dia) => HorarioEntregaProveedor::create([
+            'Id_Empresa' => $empresa->Id_Empresa,
+            'Id_Proveedor' => $p->Id_Proveedor,
+            'Clasificacion' => HorarioEntregaProveedor::FRUVER,
+            'Dia_Entrega' => $dia,
+            'Hora_Llegada' => '07:30',
+            'Activo' => true,
+            'Fecha_Creacion' => now(),
+        ]);
+        $hDeBc = $nuevo($deBc, 'Martes');
+        $hSinBc = $nuevo($sinBc, 'Lunes');
+        $hOtro = $nuevo($otro, 'Jueves');
+
+        $this->postJson(self::URL.'/carga-masiva', [
+            'empresa_bc' => trim($empresa->Empresa_BC),
+            'identificador' => 'ruc',
+            'confirmar' => true,
+            'filas' => [$this->fila($deBc->Ruc)],
+            'conservar_ids' => [$hSinBc->Id_Horario_Entrega_Proveedor],
+        ], $this->cabeceras())
+            ->assertOk()
+            ->assertJsonPath('resumen.actualizar', 1)
+            ->assertJsonPath('resumen.conservados', 1)
+            ->assertJsonPath('resumen.dar_de_baja', 1);
+
+        $this->assertTrue((bool) $hDeBc->fresh()->Activo);
+        $this->assertTrue((bool) $hSinBc->fresh()->Activo, 'El horario conservado no se debe dar de baja.');
+        $this->assertFalse((bool) $hOtro->fresh()->Activo, 'Lo que no viene ni se conserva se sigue dando de baja.');
+    }
 }

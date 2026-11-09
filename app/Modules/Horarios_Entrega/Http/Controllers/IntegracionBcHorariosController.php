@@ -66,6 +66,11 @@ class IntegracionBcHorariosController extends Controller
     /**
      * Mismo cuerpo que POST /horarios-entrega/carga-masiva más empresa_bc.
      * Con confirmar = false es vista previa (no escribe); con true aplica.
+     *
+     * conservar_ids (opcional, 09-nov-2026): ids de horarios del portal que no
+     * se dan de baja aunque no vengan en filas. BC manda ahí los horarios de
+     * proveedores que no existen en BC (los ve en el GET de arriba), para que
+     * sincronizar no se los lleve.
      */
     public function cargaMasiva(Request $request): JsonResponse
     {
@@ -75,6 +80,8 @@ class IntegracionBcHorariosController extends Controller
             'confirmar' => ['sometimes', 'boolean'],
             'filas' => ['present', 'array'],
             'filas.*' => ['array'],
+            'conservar_ids' => ['sometimes', 'array', 'max:1000'],
+            'conservar_ids.*' => ['integer'],
         ]);
 
         $empresa = $this->empresa($datos['empresa_bc']);
@@ -84,7 +91,8 @@ class IntegracionBcHorariosController extends Controller
             $empresa->Id_Empresa,
             $datos['identificador'],
             $datos['filas'],
-            $request->boolean('confirmar')
+            $request->boolean('confirmar'),
+            array_map('intval', $datos['conservar_ids'] ?? [])
         );
 
         return response()->json(['id_empresa' => $empresa->Id_Empresa, ...$resultado]);
