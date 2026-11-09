@@ -2,6 +2,8 @@
 
 use App\Modules\Auth\Http\Middleware\EmpresaActiva;
 use App\Modules\Horarios_Entrega\Http\Controllers\HorarioEntregaController;
+use App\Modules\Horarios_Entrega\Http\Controllers\IntegracionBcHorariosController;
+use App\Modules\Horarios_Entrega\Http\Middleware\TokenIntegracionBc;
 use Illuminate\Support\Facades\Route;
 
 /**
@@ -44,4 +46,17 @@ Route::prefix('horarios-entrega')
         Route::get('/{horario}/pedidos-del-dia', [HorarioEntregaController::class, 'pedidosDelDia']);
         Route::post('/{horario}/marcar-arribo', [HorarioEntregaController::class, 'marcarArribo']);
         Route::post('/{horario}/solicitar-aprobacion', [HorarioEntregaController::class, 'solicitarAprobacion']);
+    });
+
+/**
+ * Integración con Business Central (09-nov-2026): sin Sanctum ni empresa
+ * activa de sesión. Token compartido en la cabecera X-Integracion-Token y
+ * la empresa en el cuerpo/query (empresa_bc). Lo que escribe pasa por el
+ * mismo CargaMasivaHorariosService que el Excel de la pantalla.
+ */
+Route::prefix('integraciones/bc/horarios-entrega')
+    ->middleware([TokenIntegracionBc::class])
+    ->group(function () {
+        Route::get('/', [IntegracionBcHorariosController::class, 'index']);
+        Route::post('/carga-masiva', [IntegracionBcHorariosController::class, 'cargaMasiva']);
     });
