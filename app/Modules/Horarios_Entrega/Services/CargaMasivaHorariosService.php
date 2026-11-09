@@ -49,10 +49,18 @@ class CargaMasivaHorariosService
     ];
 
     /**
+     * $conservarIds (09-nov-2026, solo lo usa la integración con Business
+     * Central): ids de horarios que NO se dan de baja aunque no vengan en el
+     * envío. BC no puede mandar los horarios de proveedores que no existen en
+     * BC (p. ej. un Aspirante sin código BC) y, sin esto, cada sincronización
+     * se los llevaría. Solo protege horarios activos de las clasificaciones del
+     * envío; no crea ni modifica nada. La pantalla (Excel) no lo manda.
+     *
      * @param  array<int, array<string, mixed>>  $filas
+     * @param  array<int, int>  $conservarIds
      * @return array<string, mixed>
      */
-    public function procesar(Usuario $usuario, int $idEmpresa, string $identificador, array $filas, bool $confirmar): array
+    public function procesar(Usuario $usuario, int $idEmpresa, string $identificador, array $filas, bool $confirmar, array $conservarIds = []): array
     {
         if (! $usuario->esSistemas($idEmpresa) && ! $usuario->esAdmin($idEmpresa)) {
             throw new AccessDeniedHttpException('Solo Sistemas y Admin pueden hacer la carga masiva de horarios.');
@@ -109,7 +117,10 @@ class CargaMasivaHorariosService
         }
         unset($resultado);
 
-        $bajas = $existentes->reject(fn (HorarioEntregaProveedor $h) => isset($actualizados[$h->Id_Horario_Entrega_Proveedor]))->values();
+        $sinTocar = $existentes->reject(fn (HorarioEntregaProveedor $h) => isset($actualizados[$h->Id_Horario_Entrega_Proveedor]));
+        $conservar = array_flip(array_map('intval', $conservarIds));
+        $conservados = $sinTocar->filter(fn (HorarioEntregaProveedor $h) => isset($conservar[(int) $h->Id_Horario_Entrega_Proveedor]))->values();
+        $bajas = $sinTocar->reject(fn (HorarioEntregaProveedor $h) => isset($conservar[(int) $h->Id_Horario_Entrega_Proveedor]))->values();
 
         if ($confirmar) {
             $this->aplicar($usuario, $idEmpresa, $resultados, $bajas);
@@ -125,6 +136,7 @@ class CargaMasivaHorariosService
                 'actualizar' => collect($resultados)->where('estado', 'actualizar')->count(),
                 'errores' => collect($resultados)->where('estado', 'error')->count(),
                 'dar_de_baja' => $bajas->count(),
+                'conservados' => $conservados->count(),
             ],
             'filas' => collect($resultados)->map(fn ($r) => collect($r)->except(['id_horario_existente', 'datos'])->all())->all(),
             'bajas' => $bajas->map(fn (HorarioEntregaProveedor $h) => [
