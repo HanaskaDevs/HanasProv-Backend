@@ -59,6 +59,11 @@ class HorarioEntregaController extends Controller
      */
     public function cargaMasiva(Request $request): JsonResponse
     {
+        // Desde el 10-nov-2026 el calendario se administra desde BC: la carga
+        // masiva de la PANTALLA se corta aquí (la de la integración con BC va
+        // por IntegracionBcHorariosController y no pasa por este método).
+        $this->servicio->verificarEdicionDesdePortal();
+
         $datos = $request->validate([
             'identificador' => ['required', 'string'],
             'confirmar' => ['sometimes', 'boolean'],

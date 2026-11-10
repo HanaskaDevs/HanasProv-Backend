@@ -40,6 +40,11 @@
              lo encienda en su máquina (pasó el 23-sep-2026). El captcha
              tiene sus propios tests, que lo encienden a mano. -->
         <env name="TURNSTILE_HABILITADO" value="false"/>
+        <!-- En producción el calendario de horarios se edita solo desde BC
+             (PORTAL_HORARIOS_SOLO_BC, por defecto true). Los tests de la
+             pantalla siguen probando la edición con el interruptor apagado;
+             CalendarioSoloBcTest lo enciende a mano. -->
+        <env name="PORTAL_HORARIOS_SOLO_BC" value="false"/>
         <env name="MAIL_MAILER" value="array"/>
         <env name="QUEUE_CONNECTION" value="sync"/>
         <env name="SESSION_DRIVER" value="array"/>

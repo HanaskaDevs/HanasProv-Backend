@@ -553,8 +553,27 @@ class HorarioEntregaService
     // CRUD
     // ------------------------------------------------------------------
 
+    /** Mensaje cuando el calendario se administra desde Business Central (ver config portal.horarios_solo_bc). */
+    public const MENSAJE_SOLO_BC = 'El calendario de horarios se administra desde Business Central '
+        .'(pantalla "Calendario de horarios de entrega (portal de proveedores)"). Los cambios hechos allí llegan aquí solos.';
+
+    /**
+     * Corta la edición del calendario desde la pantalla del portal cuando se
+     * administra solo desde BC (10-nov-2026). Lo llaman crear/actualizar/
+     * eliminar y la carga masiva de la PANTALLA (HorarioEntregaController);
+     * la integración con BC escribe por CargaMasivaHorariosService sin pasar
+     * por aquí.
+     */
+    public function verificarEdicionDesdePortal(): void
+    {
+        if (config('portal.horarios_solo_bc')) {
+            throw new AccessDeniedHttpException(self::MENSAJE_SOLO_BC);
+        }
+    }
+
     public function crear(Usuario $usuario, int $idEmpresa, array $datos): HorarioEntregaProveedor
     {
+        $this->verificarEdicionDesdePortal();
         $this->verificarAccesoGestion($usuario, $idEmpresa);
         $validados = $this->validar($idEmpresa, $datos);
 
@@ -571,6 +590,7 @@ class HorarioEntregaService
 
     public function actualizar(Usuario $usuario, int $idEmpresa, HorarioEntregaProveedor $horario, array $datos): HorarioEntregaProveedor
     {
+        $this->verificarEdicionDesdePortal();
         $this->verificarAccesoGestion($usuario, $idEmpresa);
         $this->verificarPertenece($idEmpresa, $horario);
 
@@ -587,6 +607,7 @@ class HorarioEntregaService
 
     public function eliminar(Usuario $usuario, int $idEmpresa, HorarioEntregaProveedor $horario): void
     {
+        $this->verificarEdicionDesdePortal();
         $this->verificarAccesoGestion($usuario, $idEmpresa);
         $this->verificarPertenece($idEmpresa, $horario);
 

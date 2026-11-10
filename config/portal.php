@@ -256,4 +256,16 @@ return [
 
     'minutos_atrasado_a_rechazado' => (int) env('PORTAL_MINUTOS_ATRASADO_A_RECHAZADO', 30),
 
+    /*
+    | El calendario de horarios de entrega se administra SOLO desde Business
+    | Central (decisión del usuario, 10-nov-2026; extensión
+    | Calendario_Portal_Proveedores). Con esto en true la pantalla del portal
+    | no puede crear, editar, dar de baja ni cargar por Excel: lo que se
+    | cambiara aquí lo pisaría la siguiente sincronización de BC. La
+    | integración con BC (/api/integraciones/bc/...) NO se ve afectada.
+    | Para volver a editar desde el portal: PORTAL_HORARIOS_SOLO_BC=false en
+    | el .env + config:clear (el frontend tiene además los botones ocultos).
+    */
+    'horarios_solo_bc' => (bool) env('PORTAL_HORARIOS_SOLO_BC', true),
+
 ];
