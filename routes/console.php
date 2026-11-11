@@ -50,6 +50,19 @@ Schedule::command('queue:work --stop-when-empty --tries=3 --max-time=50')
 Schedule::command('sanctum:prune-expired --hours=24')->daily();
 
 /*
+| Audios de los anuncios del Modo TV (config/anuncios_voz.php): se borran
+| las frases que nadie pidió en los últimos 30 días.
+*/
+Schedule::call(function () {
+    $limite = now()->subDays((int) config('anuncios_voz.dias_cache', 30))->getTimestamp();
+    foreach (glob(config('anuncios_voz.carpeta').'/*.wav') ?: [] as $archivo) {
+        if (@filemtime($archivo) < $limite) {
+            @unlink($archivo);
+        }
+    }
+})->name('limpiar-audios-anuncios')->daily();
+
+/*
 | PEDIDOS: CUATRO CORRIDAS AL DÍA (02-oct-2026), no una.
 |
 | La tabla espejo BC_Cab_Pedido_Compra la refresca un proceso externo cada

@@ -4,10 +4,12 @@ namespace App\Modules\Horarios_Entrega\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Modules\Horarios_Entrega\Models\HorarioEntregaProveedor;
+use App\Modules\Horarios_Entrega\Services\AnuncioVozAudioService;
 use App\Modules\Horarios_Entrega\Services\CargaMasivaHorariosService;
 use App\Modules\Horarios_Entrega\Services\HorarioEntregaService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 /**
  * Calendario de Horarios de Entrega de Proveedores. Los permisos
@@ -139,6 +141,26 @@ class HorarioEntregaController extends Controller
         $this->servicio->verificarAccesoOperativo($request->user(), $this->idEmpresa($request));
 
         return response()->json(['voz_activa' => $this->servicio->anunciosVozActivos()]);
+    }
+
+    /**
+     * Audio (WAV) de una frase de anuncio, para los navegadores sin voz
+     * propia: el de las Smart TV (ver config/anuncios_voz.php). Lo pide quien
+     * puede abrir el Modo TV.
+     */
+    public function anuncioAudio(Request $request, AnuncioVozAudioService $voz): BinaryFileResponse
+    {
+        $this->servicio->verificarAccesoOperativo($request->user(), $this->idEmpresa($request));
+
+        $datos = $request->validate([
+            'texto' => ['required', 'string', 'max:'.config('anuncios_voz.max_caracteres')],
+        ]);
+
+        return response()->file($voz->rutaAudio($datos['texto']), [
+            'Content-Type' => 'audio/wav',
+            // Es siempre el mismo audio para el mismo texto.
+            'Cache-Control' => 'private, max-age=86400',
+        ]);
     }
 
     /** Pedidos que ese proveedor debe entregar HOY (modal de seguimiento). */

@@ -35,6 +35,10 @@ Route::prefix('horarios-entrega')
         // Segmento fijo: va antes de cualquier comodín, si no 'config-anuncios'
         // entraría por el {horario} y buscaría un horario con ese id.
         Route::get('/config-anuncios', [HorarioEntregaController::class, 'configAnuncios']);
+        // Audio de un anuncio (voz generada en el servidor, para las TVs).
+        // Con límite propio: cada frase nueva hace trabajar a Piper.
+        Route::get('/anuncio-audio', [HorarioEntregaController::class, 'anuncioAudio'])
+            ->middleware('throttle:60,1');
         Route::get('/aprobaciones', [HorarioEntregaController::class, 'solicitudesPendientes']);
         Route::post('/aprobaciones/{solicitud}/aprobar', [HorarioEntregaController::class, 'aprobarSolicitud']);
         Route::post('/aprobaciones/{solicitud}/rechazar', [HorarioEntregaController::class, 'rechazarSolicitud']);
