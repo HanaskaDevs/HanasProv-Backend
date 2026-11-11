@@ -50,7 +50,14 @@ return [
     |
     */
 
-    'expiration' => (int) env('SANCTUM_EXPIRATION', 1440), // 1440 min = 24 h
+    /*
+    | null (11-nov-2026): el vencimiento va EN CADA TOKEN (expires_at), no acá.
+    | Este valor global se aplica a todos los tokens por su fecha de creación
+    | y no deja tener uno que no venza, que es lo que necesita el usuario de
+    | las pantallas de TV (rol Modo TV). AuthService::login le pone 24 h a
+    | todos los demás (HORAS_VIGENCIA_SESION), igual que antes.
+    */
+    'expiration' => env('SANCTUM_EXPIRATION') !== null ? (int) env('SANCTUM_EXPIRATION') : null,
 
     /*
     |--------------------------------------------------------------------------

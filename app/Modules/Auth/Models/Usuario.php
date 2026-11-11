@@ -184,4 +184,30 @@ class Usuario extends Authenticatable
     {
         return $this->tieneRolEnEmpresa($idEmpresa, 'Catálogo');
     }
+
+    /**
+     * Rol Modo TV (11-nov-2026): la cuenta de las pantallas de TV. Solo ve
+     * el calendario en Modo TV (ver HorarioEntregaService::
+     * verificarAccesoOperativo) y su sesión no vence (ver esPantallaTv).
+     */
+    public function esModoTv(int $idEmpresa): bool
+    {
+        return $this->tieneRolEnEmpresa($idEmpresa, 'Modo TV');
+    }
+
+    /**
+     * ¿Es una cuenta de pantalla de TV? Lo es si tiene el rol Modo TV en
+     * TODAS sus empresas activas: una persona con otro rol en alguna empresa
+     * no recibe una sesión eterna aunque además tenga Modo TV en otra.
+     */
+    public function esPantallaTv(): bool
+    {
+        $roles = $this->usuarioEmpresas()
+            ->where('Activo', true)
+            ->with('rol')
+            ->get()
+            ->map(fn ($ue) => $ue->rol?->Nombre_Rol);
+
+        return $roles->isNotEmpty() && $roles->every(fn ($rol) => $rol === 'Modo TV');
+    }
 }
