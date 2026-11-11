@@ -50,6 +50,12 @@ class LoginRequest extends FormRequest
                 return;
             }
 
+            // La app Android entra sin captcha: ver 'origenes_sin_captcha'
+            // en config/turnstile.php.
+            if (in_array($this->header('Origin'), config('turnstile.origenes_sin_captcha', []), true)) {
+                return;
+            }
+
             if ($turnstile->esValido($this->input('cf-turnstile-response'), $this->ip())) {
                 return;
             }

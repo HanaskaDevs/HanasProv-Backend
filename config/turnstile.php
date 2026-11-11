@@ -98,4 +98,26 @@ return [
     */
     'enviar_ip' => env('TURNSTILE_ENVIAR_IP', false),
 
+    /*
+    | ORÍGENES QUE NO PASAN POR EL CAPTCHA (11-nov-2026).
+    |
+    | La app Android (origen https://app.portal-proveedores.hanaska.com, ver
+    | server.hostname en el capacitor.config.ts del frontend) no siempre
+    | consigue el token: en la tablet Lenovo TB-X6C6X de Calidad el desafío
+    | nunca responde (motivo 'tiempo-agotado'), aun con la hora automática,
+    | otra red y el WebView actualizado. Se decidió que la app entre sin
+    | captcha.
+    |
+    | Lo que se resigna: el Origin lo manda el cliente, así que un bot que lo
+    | copie también se saltea el captcha. Sigue frenado por el bloqueo de
+    | cuentas e IPs de AuthService; lo que se pierde es la protección contra
+    | la inundación del endpoint.
+    |
+    | Lista separada por comas; vacía = todos pasan por el captcha.
+    */
+    'origenes_sin_captcha' => array_values(array_filter(array_map(
+        'trim',
+        explode(',', (string) env('TURNSTILE_ORIGENES_SIN_CAPTCHA', ''))
+    ))),
+
 ];

@@ -174,7 +174,9 @@ class HorarioEntregaService
             || $usuario->esAdmin($idEmpresa)
             || $usuario->esCompras($idEmpresa)
             || $usuario->esCalidad($idEmpresa)
-            || $usuario->esGuardia($idEmpresa);
+            || $usuario->esGuardia($idEmpresa)
+            // Cuenta de las pantallas de TV (11-nov-2026): solo lectura.
+            || $usuario->esModoTv($idEmpresa);
 
         if (! $tieneAcceso) {
             throw new AccessDeniedHttpException('No tiene permisos para ver el seguimiento de entregas de hoy.');

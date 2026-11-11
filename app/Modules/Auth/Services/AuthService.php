@@ -22,6 +22,14 @@ class AuthService
     protected const HORAS_VIGENCIA_SESION = 24;
 
     /**
+     * La sesión de las pantallas de TV (rol Modo TV) no vence: el token va
+     * sin expires_at y la Sesion con una fecha que no llega. Termina solo si
+     * alguien cierra sesión en esa TV, se bloquea la cuenta o se le quita el
+     * rol (al siguiente login ya vence como cualquier otra).
+     */
+    protected const AÑOS_VIGENCIA_SESION_TV = 100;
+
+    /**
      * Fallos seguidos contra UNA cuenta existente antes de bloquearla.
      * "Seguidos" = desde el último ingreso exitoso de ese usuario, sin
      * ventana de tiempo: 3 errores acumulados y queda bloqueado hasta que
@@ -163,7 +171,16 @@ class AuthService
 
         $usuario->forceFill(['Ultimo_Acceso' => now()])->save();
 
-        $tokenResult = $usuario->createToken('api');
+        $esPantallaTv = $usuario->esPantallaTv();
+        $venceSesion = $esPantallaTv
+            ? now()->addYears(self::AÑOS_VIGENCIA_SESION_TV)
+            : now()->addHours(self::HORAS_VIGENCIA_SESION);
+
+        $tokenResult = $usuario->createToken(
+            $esPantallaTv ? 'tv' : 'api',
+            ['*'],
+            $esPantallaTv ? null : $venceSesion,
+        );
         $token = $tokenResult->plainTextToken;
         $idTokenAccess = $tokenResult->accessToken->id;
 
@@ -176,7 +193,7 @@ class AuthService
             'Ip_Origen' => $ip,
             'Dispositivo' => $userAgent,
             'Fecha_Inicio' => now(),
-            'Fecha_Expiracion' => now()->addHours(self::HORAS_VIGENCIA_SESION),
+            'Fecha_Expiracion' => $venceSesion,
             'Activa' => true,
             'Id_Empresa_Activa' => $idEmpresaActiva,
         ]);
