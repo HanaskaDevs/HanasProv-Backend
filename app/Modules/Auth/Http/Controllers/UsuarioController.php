@@ -215,16 +215,16 @@ class UsuarioController extends Controller
     }
 
     /**
-     * "Entrar como proveedor" (solo Sistemas): devuelve un token de ESE
-     * proveedor, igual que el login, sin pedir su contraseña. Ver
-     * AuthService::suplantar.
+     * "Entrar como este usuario" (solo Sistemas), proveedor o interno:
+     * devuelve un token de ESE usuario, igual que el login, sin pedir su
+     * contraseña. Ver AuthService::suplantar.
      */
     public function suplantar(Request $request, Usuario $usuario, AuthService $authService): JsonResponse
     {
         $resultado = $authService->suplantar(
             admin: $request->user(),
             idEmpresa: (int) $request->attributes->get('id_empresa_activa'),
-            proveedor: $usuario,
+            objetivo: $usuario,
             ip: $request->ip(),
             userAgent: $request->userAgent(),
         );

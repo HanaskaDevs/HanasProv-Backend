@@ -60,6 +60,9 @@ Route::prefix('usuarios')
         Route::get('/internos', [UsuarioController::class, 'indexInternos']);
         Route::post('/internos', [UsuarioController::class, 'storeInterno']);
         Route::get('/internos/{usuario}', [UsuarioController::class, 'showInterno']);
+        // "Entrar como este usuario": solo Sistemas (lo valida AuthService).
+        Route::post('/internos/{usuario}/suplantar', [UsuarioController::class, 'suplantar'])
+            ->middleware('throttle:10,1');
 
         // Usuarios externos (Proveedores): rol Sistemas o Admin pueden crear
         Route::get('/externos', [UsuarioController::class, 'indexExternos']);

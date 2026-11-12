@@ -217,46 +217,70 @@ class AuthService
     }
 
     /**
-     * Sistemas entra al portal como un usuario proveedor. No toca la
-     * contraseña ni el Ultimo_Acceso del proveedor, y queda en la bitácora
-     * (Tipo_Evento 'Suplantacion', Id_Usuario = el proveedor, Email_Intento
-     * = el correo de quien entró).
+     * Sistemas entra al portal como un usuario proveedor o interno (que no
+     * sea de Sistemas). No toca su contraseña ni su Ultimo_Acceso, y queda
+     * en la bitácora (Tipo_Evento 'Suplantacion', Id_Usuario = el usuario,
+     * Email_Intento = el correo de quien entró).
      */
-    public function suplantar(Usuario $admin, int $idEmpresa, Usuario $proveedor, ?string $ip = null, ?string $userAgent = null): array
+    public function suplantar(Usuario $admin, int $idEmpresa, Usuario $objetivo, ?string $ip = null, ?string $userAgent = null): array
     {
         if (! $admin->esSistemas($idEmpresa)) {
-            throw new AccessDeniedHttpException('Solo Sistemas puede entrar como un proveedor.');
+            throw new AccessDeniedHttpException('Solo Sistemas puede entrar con la cuenta de otro usuario.');
         }
 
         if ($this->idSuplantador($admin->currentAccessToken()) !== null) {
-            throw new AccessDeniedHttpException('Ya estás dentro de la cuenta de un proveedor. Vuelve a tu cuenta primero.');
+            throw new AccessDeniedHttpException('Ya estás dentro de la cuenta de otro usuario. Vuelve a tu cuenta primero.');
         }
 
-        if ($proveedor->Tipo_Usuario !== 'Proveedor') {
+        if ($objetivo->Id_Usuario === $admin->Id_Usuario) {
             throw ValidationException::withMessages([
-                'usuario' => ['Solo se puede entrar como un usuario proveedor.'],
+                'usuario' => ['Esa ya es tu cuenta.'],
             ]);
         }
 
-        if (! $proveedor->Activo) {
+        // Proveedores e internos (12-nov-2026). Nunca otro usuario de
+        // Sistemas: ya tiene los mismos permisos, y solo serviría para
+        // actuar a su nombre.
+        if (! in_array($objetivo->Tipo_Usuario, ['Proveedor', 'Interno'], true)) {
+            throw ValidationException::withMessages([
+                'usuario' => ['Solo se puede entrar como un usuario proveedor o interno.'],
+            ]);
+        }
+
+        // La cuenta de las TVs abre directo el Modo TV, que es pantalla
+        // completa sin menú ni la franja de "Volver a mi cuenta": esa pestaña
+        // quedaría atrapada. Para ver el Modo TV, Sistemas lo abre con la suya.
+        if ($objetivo->esPantallaTv()) {
+            throw ValidationException::withMessages([
+                'usuario' => ['Es la cuenta de las pantallas de TV: abre el Modo TV desde tu propia cuenta.'],
+            ]);
+        }
+
+        if ($objetivo->esSistemasGlobal()) {
+            throw ValidationException::withMessages([
+                'usuario' => ['No se puede entrar con la cuenta de otro usuario de Sistemas.'],
+            ]);
+        }
+
+        if (! $objetivo->Activo) {
             throw ValidationException::withMessages([
                 'usuario' => ['Este usuario está inactivo. Reactívalo primero para poder entrar con su cuenta.'],
             ]);
         }
 
-        $empresasActivas = $proveedor->empresas()->wherePivot('Activo', true)->get();
+        $empresasActivas = $objetivo->empresas()->wherePivot('Activo', true)->get();
 
         if (! $empresasActivas->contains(fn ($e) => (int) $e->Id_Empresa === $idEmpresa)) {
             throw ValidationException::withMessages([
-                'usuario' => ['Este proveedor no tiene acceso activo a la empresa en la que estás.'],
+                'usuario' => ['Este usuario no tiene acceso activo a la empresa en la que estás.'],
             ]);
         }
 
         $vence = now()->addHours(self::HORAS_VIGENCIA_SUPLANTACION);
-        $tokenResult = $proveedor->createToken(self::PREFIJO_TOKEN_SUPLANTACION . $admin->Id_Usuario, ['*'], $vence);
+        $tokenResult = $objetivo->createToken(self::PREFIJO_TOKEN_SUPLANTACION . $admin->Id_Usuario, ['*'], $vence);
 
         Sesion::create([
-            'Id_Usuario' => $proveedor->Id_Usuario,
+            'Id_Usuario' => $objetivo->Id_Usuario,
             'Token' => (string) $tokenResult->accessToken->id,
             'Ip_Origen' => $ip,
             'Dispositivo' => mb_substr('Sistemas (' . $admin->Email . '): ' . $userAgent, 0, 200),
@@ -267,7 +291,7 @@ class AuthService
         ]);
 
         BitacoraAcceso::create([
-            'Id_Usuario' => $proveedor->Id_Usuario,
+            'Id_Usuario' => $objetivo->Id_Usuario,
             'Email_Intento' => mb_substr((string) $admin->Email, 0, 150),
             'Tipo_Evento' => self::EVENTO_SUPLANTACION,
             'Ip_Origen' => $ip,
@@ -276,7 +300,7 @@ class AuthService
         ]);
 
         return [
-            'usuario' => $proveedor->load(['empresas' => fn ($q) => $q->wherePivot('Activo', true)]),
+            'usuario' => $objetivo->load(['empresas' => fn ($q) => $q->wherePivot('Activo', true)]),
             'token' => $tokenResult->plainTextToken,
             'id_empresa_activa' => $idEmpresa,
         ];

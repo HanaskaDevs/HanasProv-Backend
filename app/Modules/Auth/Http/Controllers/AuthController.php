@@ -84,9 +84,9 @@ class AuthController extends Controller
 
     public function cambiarPassword(CambiarPasswordRequest $request): JsonResponse
     {
-        // Sistemas dentro de la cuenta de un proveedor no le cambia la clave.
+        // Sistemas dentro de la cuenta de otro usuario no le cambia la clave.
         if ($this->authService->idSuplantador($request->user()->currentAccessToken()) !== null) {
-            abort(403, 'No se puede cambiar la contraseña de un proveedor desde "Entrar como proveedor".');
+            abort(403, 'No se puede cambiar la contraseña de otro usuario desde "Entrar como este usuario".');
         }
 
         $this->usuarioService->cambiarPassword(
