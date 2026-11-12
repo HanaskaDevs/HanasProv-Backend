@@ -5,8 +5,10 @@ namespace App\Modules\Auditorias\Http\Controllers;
 use App\Http\Controllers\Controller;
 use App\Modules\Auditorias\Models\Auditoria;
 use App\Modules\Auditorias\Services\AuditoriaService;
+use App\Modules\Auditorias\Services\ImagenObservacionService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 class AuditoriaController extends Controller
 {
@@ -106,6 +108,49 @@ class AuditoriaController extends Controller
         );
 
         return response()->json($this->auditoriaService->obtenerDetalle($request->user(), $auditoria));
+    }
+
+    /**
+     * Sube UNA foto a la observación de una pregunta (12-nov-2026).
+     *
+     * Una por llamada y no un arreglo: el formulario sube la foto apenas
+     * se elige, así la persona ve enseguida si entró o si el servidor la
+     * rechazó, en vez de descubrirlo al final junto con las demás.
+     */
+    public function subirImagen(Request $request, Auditoria $auditoria): JsonResponse
+    {
+        $data = $request->validate([
+            'id_auditoria_pregunta' => ['required', 'integer'],
+            'imagen' => ['required', 'image', 'mimes:jpg,jpeg,png,webp', 'max:' . ImagenObservacionService::MAX_KB],
+        ]);
+
+        return response()->json($this->auditoriaService->subirImagenObservacion(
+            $request->user(),
+            $auditoria,
+            $data['id_auditoria_pregunta'],
+            $request->file('imagen')
+        ), 201);
+    }
+
+    public function eliminarImagen(Request $request, int $imagen): JsonResponse
+    {
+        $this->auditoriaService->eliminarImagenObservacion($request->user(), $imagen);
+
+        return response()->json(['eliminada' => true]);
+    }
+
+    /**
+     * La foto en sí. Autenticada: el repositorio no es público.
+     *
+     * Recibe el id como `int` y NO como modelo tipado: el binding implícito
+     * de rutas corre ANTES del middleware de autenticación, así que con un
+     * modelo el endpoint contestaba 404 (en vez de 401) a quien no tenía
+     * sesión. Es además como resuelve esto el resto del proyecto
+     * (ReclamoController::verImagen).
+     */
+    public function verImagen(Request $request, int $imagen): BinaryFileResponse
+    {
+        return response()->file($this->auditoriaService->rutaImagenObservacion($request->user(), $imagen));
     }
 
     public function finalizar(Request $request, Auditoria $auditoria): JsonResponse

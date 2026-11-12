@@ -4,8 +4,10 @@ namespace App\Modules\Auditorias\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Modules\Auditorias\Services\CalificacionRecepcionService;
+use App\Modules\Auditorias\Services\ImagenObservacionService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 /**
  * Calificación de Recepciones (FGH04.15.05-1). Los permisos (Sistemas /
@@ -136,6 +138,48 @@ class CalificacionRecepcionController extends Controller
         );
 
         return response()->json($this->servicio->obtenerDetalle($request->user(), $idEmpresa, $calificacion));
+    }
+
+    /**
+     * Sube UNA foto a la observación de un parámetro (12-nov-2026).
+     *
+     * El parámetro ya tiene que estar respondido (Sí/No): la foto cuelga
+     * de la fila de respuesta, y esa fila no admite "sin responder"
+     * (ver ImagenObservacionService::subirEnRecepcion).
+     */
+    public function subirImagen(Request $request, int $calificacion): JsonResponse
+    {
+        $datos = $request->validate([
+            'id_recepcion_parametro' => ['required', 'integer'],
+            'imagen' => ['required', 'image', 'mimes:jpg,jpeg,png,webp', 'max:' . ImagenObservacionService::MAX_KB],
+        ]);
+
+        return response()->json($this->servicio->subirImagenObservacion(
+            $request->user(),
+            $this->idEmpresa($request),
+            $calificacion,
+            $datos['id_recepcion_parametro'],
+            $request->file('imagen'),
+        ), 201);
+    }
+
+    public function eliminarImagen(Request $request, int $imagen): JsonResponse
+    {
+        $this->servicio->eliminarImagenObservacion($request->user(), $this->idEmpresa($request), $imagen);
+
+        return response()->json(['eliminada' => true]);
+    }
+
+    /**
+     * La foto en sí. Autenticada: el repositorio no es público. El id llega
+     * como `int` y no como modelo tipado, por lo mismo que en
+     * AuditoriaController::verImagen.
+     */
+    public function verImagen(Request $request, int $imagen): BinaryFileResponse
+    {
+        return response()->file(
+            $this->servicio->rutaImagenObservacion($request->user(), $this->idEmpresa($request), $imagen)
+        );
     }
 
     public function finalizar(Request $request, int $calificacion): JsonResponse

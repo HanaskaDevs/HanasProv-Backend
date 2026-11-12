@@ -4,6 +4,7 @@ namespace App\Modules\Auditorias\Models;
 
 use App\Models\BaseModel;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class CalificacionRecepcionRespuesta extends BaseModel
 {
@@ -30,5 +31,12 @@ class CalificacionRecepcionRespuesta extends BaseModel
     public function parametro(): BelongsTo
     {
         return $this->belongsTo(RecepcionParametro::class, 'Id_Recepcion_Parametro');
+    }
+
+    /** Fotos de la observación (hasta 2, ver ImagenObservacionService). */
+    public function imagenes(): HasMany
+    {
+        return $this->hasMany(CalificacionRecepcionRespuestaImagen::class, 'Id_Calificacion_Recepcion_Respuesta')
+            ->where('Activo', true);
     }
 }
