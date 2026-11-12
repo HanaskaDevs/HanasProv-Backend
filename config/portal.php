@@ -252,7 +252,11 @@ return [
     | producción, este es el ÚNICO lugar que hay que cambiar (variable de
     | entorno, sin tocar código).
     */
-    'email_aprobacion_arribo' => env('PORTAL_EMAIL_APROBACION_ARRIBO', 'iflores@hanaska.com'),
+    // 12-nov-2026: además de recibir el correo, este es el usuario al que
+    // el portal le muestra el ítem "Aprobaciones de arribo" en el menú
+    // (ver UsuarioResource::resuelve_aprobaciones_arribo). Cambiar la
+    // variable de entorno mueve las dos cosas a la vez.
+    'email_aprobacion_arribo' => env('PORTAL_EMAIL_APROBACION_ARRIBO', 'vacurio@hanaska.com'),
 
     'minutos_atrasado_a_rechazado' => (int) env('PORTAL_MINUTOS_ATRASADO_A_RECHAZADO', 30),
 
