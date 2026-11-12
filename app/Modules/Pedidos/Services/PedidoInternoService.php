@@ -58,6 +58,16 @@ class PedidoInternoService
      */
     public const BODEGAS = ['CD-0001', 'CD-0002', 'CD-0003', 'CD-0006'];
 
+    /**
+     * Cuántos valores entran en un whereIn de esta vista.
+     *
+     * SQL Server admite 2100 parámetros POR CONSULTA y los valores de un
+     * whereIn viajan como parámetros. 1000 deja margen para el resto de
+     * los filtros de la misma consulta (empresa, bodegas, fechas, texto) y
+     * es el mismo número que ya usa SincronizacionPedidosService.
+     */
+    protected const MAX_VALORES_POR_CONSULTA = 1000;
+
     public function listarPorBodega(Usuario $usuario, int $idEmpresaActiva, array $filtros): array
     {
         $bodegasPermitidas = $this->obtenerBodegasPermitidas($usuario, $idEmpresaActiva);
@@ -196,10 +206,21 @@ class PedidoInternoService
             return;
         }
 
-        $delPortal = Proveedor::where('Id_Empresa', $idEmpresaActiva)
-            ->whereIn('Ruc', $rucs)
-            ->whereNotNull('Razon_Social')
-            ->pluck('Razon_Social', 'Ruc');
+        // De a 1000 RUC, por el mismo tope de parámetros que explica
+        // obtenerCantidadesRecibidas(): sin filtros esta pantalla puede
+        // llegar con miles de proveedores distintos.
+        $delPortal = [];
+
+        foreach (array_chunk($rucs->all(), self::MAX_VALORES_POR_CONSULTA) as $tanda) {
+            $razones = Proveedor::where('Id_Empresa', $idEmpresaActiva)
+                ->whereIn('Ruc', $tanda)
+                ->whereNotNull('Razon_Social')
+                ->pluck('Razon_Social', 'Ruc');
+
+            foreach ($razones as $ruc => $razonSocial) {
+                $delPortal[$ruc] = $razonSocial;
+            }
+        }
 
         foreach ($filas as $fila) {
             $ruc = trim((string) $fila->Ruc_Proveedor);
@@ -211,10 +232,23 @@ class PedidoInternoService
     }
 
     /**
-     * Trae, en una sola consulta, la cantidad recibida MÁS RECIENTE (por
-     * Fecha_Registro) de BC_Pedido_Compra_Fill_Rate para cada combinación
-     * (Nro_Documento, Nro_Linea) de los pedidos dados. Devuelve un mapa
+     * Trae la cantidad recibida MÁS RECIENTE (por Fecha_Registro) de
+     * BC_Pedido_Compra_Fill_Rate para cada combinación (Nro_Documento,
+     * Nro_Linea) de los pedidos dados. Devuelve un mapa
      * "Nro_Pedido|Nro_Linea" => cantidad_recibida.
+     *
+     * SE CONSULTA DE A 1000 PEDIDOS, no todos de una vez: un whereIn viaja
+     * como parámetros y SQL Server admite 2100 por consulta (mismo troceo
+     * que SincronizacionPedidosService::lineasDe). Esta pantalla, abierta
+     * sin filtros, pide el histórico completo del espejo: el 12-nov-2026
+     * eran 2843 pedidos y la consulta moría con "Tried to bind parameter
+     * number 2101". Como el frontend no distingue el error, la pantalla
+     * decía "Todavía no tienes ninguna bodega asignada" y mandaba a buscar
+     * un problema de permisos que no existía.
+     *
+     * Trocear no cambia el resultado: el ROW_NUMBER particiona por
+     * (Nro_Documento, Nro_Linea) y el filtro es por documento, así que
+     * todas las filas de un pedido caen siempre en la misma tanda.
      */
     protected function obtenerCantidadesRecibidas(string $empresaBc, array $nroPedidos): array
     {
@@ -222,24 +256,27 @@ class PedidoInternoService
             return [];
         }
 
-        $ultimoPorLinea = DB::table('BC_Pedido_Compra_Fill_Rate')
-            ->select(
-                'Nro_Documento',
-                'Nro_Linea',
-                'Cantidad_Recibida',
-                DB::raw('ROW_NUMBER() OVER (PARTITION BY Nro_Documento, Nro_Linea ORDER BY Fecha_Registro DESC) as rn')
-            )
-            ->where('Empresa', $empresaBc)
-            ->whereIn('Nro_Documento', $nroPedidos);
-
-        $filas = DB::query()
-            ->fromSub($ultimoPorLinea, 't')
-            ->where('rn', 1)
-            ->get(['Nro_Documento', 'Nro_Linea', 'Cantidad_Recibida']);
-
         $mapa = [];
-        foreach ($filas as $fila) {
-            $mapa[$fila->Nro_Documento . '|' . $fila->Nro_Linea] = (float) $fila->Cantidad_Recibida;
+
+        foreach (array_chunk($nroPedidos, self::MAX_VALORES_POR_CONSULTA) as $tanda) {
+            $ultimoPorLinea = DB::table('BC_Pedido_Compra_Fill_Rate')
+                ->select(
+                    'Nro_Documento',
+                    'Nro_Linea',
+                    'Cantidad_Recibida',
+                    DB::raw('ROW_NUMBER() OVER (PARTITION BY Nro_Documento, Nro_Linea ORDER BY Fecha_Registro DESC) as rn')
+                )
+                ->where('Empresa', $empresaBc)
+                ->whereIn('Nro_Documento', $tanda);
+
+            $filas = DB::query()
+                ->fromSub($ultimoPorLinea, 't')
+                ->where('rn', 1)
+                ->get(['Nro_Documento', 'Nro_Linea', 'Cantidad_Recibida']);
+
+            foreach ($filas as $fila) {
+                $mapa[$fila->Nro_Documento . '|' . $fila->Nro_Linea] = (float) $fila->Cantidad_Recibida;
+            }
         }
 
         return $mapa;
