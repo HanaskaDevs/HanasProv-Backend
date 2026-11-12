@@ -28,12 +28,14 @@ use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
  *  - `Hora_Arribo_Real` la escribe el Guardia al marcar el arribo, así que
  *    es la hora real en que llegó el camión. Sobre ella se calculan la
  *    puntualidad y el atraso, que es lo que se pidió medir.
- *  - `Hora_Recepcion_Real` y `Hora_Entregado_Real`: hasta el 12-nov el
- *    job las guardaba con `now()` (la hora en que corría) y por eso el
- *    12-nov todas salieron a las 11:38. Desde ese día se guarda la hora
- *    REAL del ingreso en SIGH y el histórico se corrigió con
- *    horarios-entrega:corregir-horas-sigh, así que ya se puede medir la
- *    espera entre la llegada y la recepción.
+ *  - `Hora_Recepcion_Real` = primer producto escaneado en WMS ese día
+ *    (inicio de la recepción) y `Hora_Entregado_Real` = cierre de la
+ *    recepción en SIGH (del último pedido, si trajo varios). Así desde el
+ *    12-nov; antes el job guardaba la hora en que corría y después el
+ *    cierre en las dos columnas (todas a las 11:38 el 12-nov, o recepción
+ *    = recibido). El histórico se recalculó con
+ *    horarios-entrega:corregir-horas-sigh. Detalle del proceso en
+ *    SincronizacionSighService::recepcionesEnWms.
  */
 class HistorialEntregasService
 {
@@ -157,14 +159,13 @@ class HistorialEntregasService
             // Modo TV). El portal no registra la hora real en que se va el
             // camión: nadie la marca.
             'hora_salida' => $horario->Hora_Salida ? substr((string) $horario->Hora_Salida, 0, 5) : null,
-            // Hora real del ingreso a bodega en SIGH (desde el 12-nov el job
-            // la toma de SIGH; lo anterior se corrigió con
-            // horarios-entrega:corregir-horas-sigh). En SIGH el ingreso y el
-            // cierre del pedido son el mismo acto, así que la entrega
-            // coincide con la recepción.
+            // Recepción = primer producto escaneado en WMS; recibido =
+            // cierre de la recepción en SIGH (ver la cabecera). Si lo marcó
+            // Compras a mano, recibido es la hora de esa marca.
             'hora_recepcion' => $estado->Hora_Recepcion_Real?->format('H:i'),
             'hora_entregado' => $estado->Hora_Entregado_Real?->format('H:i'),
-            // Cuánto esperó desde que llegó hasta que lo recibieron.
+            // Cuánto esperó desde que llegó hasta que empezaron a recibirlo
+            // (primer escaneo). Negativo = el Guardia marcó el arribo tarde.
             'minutos_espera' => ($arribo && $estado->Hora_Recepcion_Real)
                 ? (int) round($arribo->diffInSeconds($estado->Hora_Recepcion_Real, false) / 60)
                 : null,
