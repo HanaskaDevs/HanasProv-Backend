@@ -67,15 +67,33 @@ class SincronizacionSighService
     }
 
     /**
-     * Para los NroDocumentoBC que quedaron pendientes de recepción, trae
-     * de SIGH.DocumentoInv el primer registro cuyo ItemPedido matchea el
-     * Item del Documento con ese NroDocumentoBC -> ahí "ya entró en
-     * recepción".
+     * Para los NroDocumentoBC que quedaron pendientes de recepción, trae de
+     * SIGH.DocumentoInv el ingreso a bodega de ese pedido y LA HORA REAL en
+     * que se registró.
+     *
+     * DOS CORRECCIONES DEL 12-nov-2026 (verificadas contra los datos de ese
+     * día en SIGH):
+     *
+     * 1. SOLO CUENTA UN INGRESO POSTERIOR A LA CREACIÓN DEL PEDIDO. El
+     *    vínculo es DocumentoInv.ItemPedido = Documento.Item, y ese número
+     *    se repite con movimientos viejos de OTROS pedidos (EX/IX de marzo
+     *    2026, IB de noviembre 2025...). Sin este filtro, un pedido que
+     *    todavía no se recibía (Documento.EstadoPedido = 'S') aparecía "en
+     *    recepción" por un movimiento de meses atrás. Con él, en los 21
+     *    documentos del 12-nov quedó exactamente el ingreso correcto.
+     *
+     * 2. DEVUELVE LA HORA, NO SOLO "SÍ/NO". Antes el portal anotaba la hora
+     *    en que corría el job (now()), así que si SIGH estaba caído, al
+     *    volver marcaba todo en el mismo minuto: el 12-nov, todas las
+     *    entregas quedaron a las 11:38 aunque se habían recibido entre las
+     *    05:40 y las 11:33. DocumentoInv.FechaCreacion no cambia nunca
+     *    después de creada la fila, así que es la hora fiable del ingreso.
      *
      * @param  array<string>  $nrosDocumentoBc
-     * @return array<string, true> NroDocumentoBC -> ya tiene registro en DocumentoInv
+     * @param  bool  $lanzarSiFalla  true = si SIGH falla, relanza en vez de devolver [] (ver el catch)
+     * @return array<string, string> NroDocumentoBC -> fecha y hora del primer ingreso real ('Y-m-d H:i:s')
      */
-    public function documentosConIngresoEnDocumentoInv(array $nrosDocumentoBc): array
+    public function documentosConIngresoEnDocumentoInv(array $nrosDocumentoBc, bool $lanzarSiFalla = false): array
     {
         if (empty($nrosDocumentoBc)) {
             return [];
@@ -86,18 +104,29 @@ class SincronizacionSighService
                 ->table('Documento as d')
                 ->join('DocumentoInv as di', 'di.ItemPedido', '=', DB::raw('CAST(d.Item AS VARCHAR(10))'))
                 ->whereIn('d.NroDocumentoBC', $nrosDocumentoBc)
-                ->select('d.NroDocumentoBC')
-                ->distinct()
+                ->whereColumn('di.FechaCreacion', '>=', 'd.FechaCreacion')
+                ->groupBy('d.NroDocumentoBC')
+                ->select('d.NroDocumentoBC', DB::raw('MIN(di.FechaCreacion) AS Fecha_Ingreso'))
                 ->get();
         } catch (\Throwable $e) {
             Log::error('SincronizacionSighService: fallo al consultar Documento/DocumentoInv en SIGH.', [
                 'error' => $e->getMessage(),
             ]);
 
+            // Para el job de cada minuto, "sin datos" está bien: reintenta
+            // solo. Para corregir el histórico NO: un vacío se leería como
+            // "no hubo ingreso" y se borrarían horas buenas.
+            if ($lanzarSiFalla) {
+                throw $e;
+            }
+
             return [];
         }
 
-        return $filas->pluck('NroDocumentoBC')->mapWithKeys(fn ($n) => [$n => true])->all();
+        return $filas
+            ->filter(fn ($f) => $f->Fecha_Ingreso !== null)
+            ->mapWithKeys(fn ($f) => [$f->NroDocumentoBC => substr((string) $f->Fecha_Ingreso, 0, 19)])
+            ->all();
     }
 
     /**
@@ -107,7 +136,7 @@ class SincronizacionSighService
      * @param  array<string>  $nrosDocumentoBc
      * @return array<string, true> NroDocumentoBC -> EstadoPedido = 'N'
      */
-    public function documentosRecibidos(array $nrosDocumentoBc): array
+    public function documentosRecibidos(array $nrosDocumentoBc, bool $lanzarSiFalla = false): array
     {
         if (empty($nrosDocumentoBc)) {
             return [];
@@ -125,6 +154,13 @@ class SincronizacionSighService
             Log::error('SincronizacionSighService: fallo al consultar EstadoPedido en SIGH.', [
                 'error' => $e->getMessage(),
             ]);
+
+            // Para el job de cada minuto, "sin datos" está bien: reintenta
+            // solo. Para corregir el histórico NO: un vacío se leería como
+            // "no hubo ingreso" y se borrarían horas buenas.
+            if ($lanzarSiFalla) {
+                throw $e;
+            }
 
             return [];
         }

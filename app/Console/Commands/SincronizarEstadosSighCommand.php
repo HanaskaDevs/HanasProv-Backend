@@ -4,7 +4,9 @@ namespace App\Console\Commands;
 
 use App\Modules\Horarios_Entrega\Services\HorarioEntregaService;
 use App\Modules\Horarios_Entrega\Services\SincronizacionSighService;
+use Carbon\CarbonInterface;
 use Illuminate\Console\Command;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -12,11 +14,13 @@ use Illuminate\Support\Facades\Log;
  * horarios de entrega lo que YA pasó en SIGH (servidor 192.168.1.135,
  * conexión 'sqlsrv_sigh', solo lectura):
  *
- *   - Arribo -> En_Recepcion: apenas aparece un registro en
- *     SIGH.DocumentoInv cuyo ItemPedido matchea el Item del Documento con
- *     el NroDocumentoBC de un pedido abierto de ese proveedor.
+ *   - Arribo -> En_Recepcion: cuando aparece en SIGH.DocumentoInv el
+ *     ingreso de un pedido abierto de ese proveedor, POSTERIOR a la creación
+ *     del pedido y DEL MISMO DÍA de la entrega. Se guarda la hora real de
+ *     ese ingreso, no la hora en que corre el job (12-nov-2026: ver
+ *     SincronizacionSighService::documentosConIngresoEnDocumentoInv).
  *   - En_Recepcion -> Recibido: cuando ese mismo Documento.EstadoPedido
- *     pasa a 'N'.
+ *     pasa a 'N', con la misma hora del ingreso (en SIGH es el mismo acto).
  *
  * SIGH y Portal_Proveedores son servidores DISTINTOS -> por eso esto es un
  * job programado en Laravel y no un trigger SQL nativo cruzado entre
@@ -90,17 +94,10 @@ class SincronizarEstadosSighCommand extends Command
 
         foreach ($pendientes as $estadoDiario) {
             $docs = $documentosPorHorario[$estadoDiario->Id_Horario_Entrega_Estado_Diario] ?? [];
-            $documentoEncontrado = null;
-
-            foreach ($docs as $doc) {
-                if (isset($conRecepcion[$doc])) {
-                    $documentoEncontrado = $doc;
-                    break;
-                }
-            }
+            [$documentoEncontrado, $horaIngreso] = $this->ingresoDelDia($docs, $conRecepcion, $estadoDiario->Fecha);
 
             if ($documentoEncontrado) {
-                $horarios->marcarRecepcionAutomatica($estadoDiario, $documentoEncontrado);
+                $horarios->marcarRecepcionAutomatica($estadoDiario, $documentoEncontrado, $horaIngreso);
                 $marcados++;
             }
         }
@@ -141,11 +138,54 @@ class SincronizarEstadosSighCommand extends Command
 
         foreach ($pendientes as $estadoDiario) {
             if ($estadoDiario->Nro_Documento_Bc && isset($recibidos[$estadoDiario->Nro_Documento_Bc])) {
-                $horarios->marcarRecibidoAutomatico($estadoDiario);
+                // La hora del ingreso, no la de ahora: en SIGH el pedido se
+                // cierra en el mismo acto en que se registra el ingreso (ver
+                // HorarioEntregaService::marcarRecibidoAutomatico).
+                $horarios->marcarRecibidoAutomatico($estadoDiario, $estadoDiario->Hora_Recepcion_Real);
                 $marcados++;
             }
         }
 
         $this->info("Recibido: {$marcados} horario(s) actualizado(s).");
+    }
+
+    /**
+     * Entre los pedidos abiertos del proveedor, el que tuvo su ingreso en
+     * SIGH EL MISMO DÍA de la entrega, con su hora. Si hay más de uno, el
+     * primero del día.
+     *
+     * Lo del mismo día no es un detalle (12-nov-2026): sin ese filtro, un
+     * pedido del proveedor que se había recibido días antes marcaba como
+     * recibida la entrega de hoy. Pasó con dos entregas del 12-nov cuyo
+     * "ingreso" era del 6 y del 10 de noviembre.
+     *
+     * @param  array<int, string>  $docs
+     * @param  array<string, string>  $ingresos  NroDocumentoBC -> 'Y-m-d H:i:s'
+     * @return array{0: ?string, 1: ?Carbon}
+     */
+    private function ingresoDelDia(array $docs, array $ingresos, ?CarbonInterface $fecha): array
+    {
+        if (! $fecha) {
+            return [null, null];
+        }
+
+        $dia = $fecha->toDateString();
+        $elegido = null;
+        $horaElegida = null;
+
+        foreach ($docs as $doc) {
+            if (! isset($ingresos[$doc]) || substr($ingresos[$doc], 0, 10) !== $dia) {
+                continue;
+            }
+
+            $hora = Carbon::parse($ingresos[$doc]);
+
+            if (! $horaElegida || $hora->lessThan($horaElegida)) {
+                $elegido = $doc;
+                $horaElegida = $hora;
+            }
+        }
+
+        return [$elegido, $horaElegida];
     }
 }

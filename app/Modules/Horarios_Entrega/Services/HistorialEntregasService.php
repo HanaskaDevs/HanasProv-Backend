@@ -28,13 +28,12 @@ use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
  *  - `Hora_Arribo_Real` la escribe el Guardia al marcar el arribo, así que
  *    es la hora real en que llegó el camión. Sobre ella se calculan la
  *    puntualidad y el atraso, que es lo que se pidió medir.
- *  - `Hora_Recepcion_Real` y `Hora_Entregado_Real` las escribe el
- *    sincronizador de SIGH con `now()` (ver
- *    HorarioEntregaService::marcarRecepcionAutomatica), o sea con la hora
- *    en que corrió el job, NO con la hora del evento en SIGH. Si el job se
- *    atrasa -pasó: estuvo caído del 27-oct al 4-nov-, varias entregas
- *    quedan con el mismo minuto. Por eso el reporte los muestra como
- *    informativos y NO calcula con ellos la nota de nadie.
+ *  - `Hora_Recepcion_Real` y `Hora_Entregado_Real`: hasta el 12-nov el
+ *    job las guardaba con `now()` (la hora en que corría) y por eso el
+ *    12-nov todas salieron a las 11:38. Desde ese día se guarda la hora
+ *    REAL del ingreso en SIGH y el histórico se corrigió con
+ *    horarios-entrega:corregir-horas-sigh, así que ya se puede medir la
+ *    espera entre la llegada y la recepción.
  */
 class HistorialEntregasService
 {
@@ -45,13 +44,14 @@ class HistorialEntregasService
     public const DIAS_POR_DEFECTO = 30;
 
     /**
-     * Mismos roles que el resto de los reportes de Calidad: Calidad, Admin
-     * y Sistemas (ver ReporteCaducidadService::verificarAcceso).
+     * Sistemas, Admin y Compras (pedido del usuario, 12-nov-2026). Calidad
+     * lo tuvo unas horas ese mismo día y salió a propósito: el reporte mide
+     * la puntualidad de las entregas, que es seguimiento de Compras.
      */
     public function verificarAcceso(Usuario $usuario, int $idEmpresa): void
     {
         $tieneAcceso = $usuario->Tipo_Usuario === 'Interno'
-            && ($usuario->esSistemas($idEmpresa) || $usuario->esAdmin($idEmpresa) || $usuario->esCalidad($idEmpresa));
+            && ($usuario->esSistemas($idEmpresa) || $usuario->esAdmin($idEmpresa) || $usuario->esCompras($idEmpresa));
 
         if (! $tieneAcceso) {
             throw new AccessDeniedHttpException('No tiene permisos para ver el historial de proveedores.');
@@ -153,9 +153,21 @@ class HistorialEntregasService
             'hora_programada' => $horario->Hora_Llegada ? substr((string) $horario->Hora_Llegada, 0, 5) : null,
             'hora_arribo' => $arribo?->format('H:i'),
             'minutos_atraso' => ($programada && $arribo) ? (int) round($programada->diffInSeconds($arribo, false) / 60) : null,
-            // Informativos: los escribe el job de SIGH con su propia hora.
+            // Salida PROGRAMADA del calendario (la misma que muestra el
+            // Modo TV). El portal no registra la hora real en que se va el
+            // camión: nadie la marca.
+            'hora_salida' => $horario->Hora_Salida ? substr((string) $horario->Hora_Salida, 0, 5) : null,
+            // Hora real del ingreso a bodega en SIGH (desde el 12-nov el job
+            // la toma de SIGH; lo anterior se corrigió con
+            // horarios-entrega:corregir-horas-sigh). En SIGH el ingreso y el
+            // cierre del pedido son el mismo acto, así que la entrega
+            // coincide con la recepción.
             'hora_recepcion' => $estado->Hora_Recepcion_Real?->format('H:i'),
             'hora_entregado' => $estado->Hora_Entregado_Real?->format('H:i'),
+            // Cuánto esperó desde que llegó hasta que lo recibieron.
+            'minutos_espera' => ($arribo && $estado->Hora_Recepcion_Real)
+                ? (int) round($arribo->diffInSeconds($estado->Hora_Recepcion_Real, false) / 60)
+                : null,
             'nro_documento_bc' => $estado->Nro_Documento_Bc,
             'estado_final' => $this->estadoFinal($estado),
         ];
@@ -218,6 +230,12 @@ class HistorialEntregasService
                     'atraso_promedio' => $atrasos->isEmpty() ? null : (int) round($atrasos->avg()),
                     'atraso_maximo' => $atrasos->isEmpty() ? null : (int) $atrasos->max(),
                     'recibidas' => $delProveedor->where('estado_final', 'Recibido')->count(),
+                    // Solo esperas >= 0: si el Guardia marcó el arribo después
+                    // de que SIGH ya lo había recibido (pasa), la diferencia
+                    // sale negativa y no es una espera.
+                    'espera_promedio' => ($esperas = $delProveedor->pluck('minutos_espera')->filter(fn ($m) => $m !== null && $m >= 0))->isEmpty()
+                        ? null
+                        : (int) round($esperas->avg()),
                 ];
             })
             ->sortByDesc(fn (array $p) => $p['atraso_promedio'] ?? -9999)
