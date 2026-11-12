@@ -4,6 +4,7 @@ namespace App\Modules\Auditorias\Models;
 
 use App\Models\BaseModel;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class AuditoriaRespuesta extends BaseModel
 {
@@ -26,5 +27,12 @@ class AuditoriaRespuesta extends BaseModel
     public function auditoria(): BelongsTo
     {
         return $this->belongsTo(Auditoria::class, 'Id_Auditoria');
+    }
+
+    /** Fotos de la observación (hasta 2, ver ImagenObservacionService). */
+    public function imagenes(): HasMany
+    {
+        return $this->hasMany(AuditoriaRespuestaImagen::class, 'Id_Auditoria_Respuesta')
+            ->where('Activo', true);
     }
 }

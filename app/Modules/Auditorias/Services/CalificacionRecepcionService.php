@@ -4,11 +4,13 @@ namespace App\Modules\Auditorias\Services;
 
 use App\Modules\Auditorias\Models\CalificacionRecepcion;
 use App\Modules\Auditorias\Models\CalificacionRecepcionRespuesta;
+use App\Modules\Auditorias\Models\CalificacionRecepcionRespuestaImagen;
 use App\Modules\Auditorias\Models\RecepcionParametro;
 use App\Modules\Auth\Models\Usuario;
 use App\Modules\Documentos_Proveedor\Services\DocumentoProveedorService;
 use App\Modules\Proveedores\Models\Proveedor;
 use Carbon\CarbonInterface;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Validation\ValidationException;
@@ -38,7 +40,8 @@ class CalificacionRecepcionService
 
     public function __construct(
         protected AgendaRecepcionService $agenda,
-        protected DocumentoProveedorService $documentos
+        protected DocumentoProveedorService $documentos,
+        protected ImagenObservacionService $imagenes,
     ) {
     }
 
@@ -215,7 +218,7 @@ class CalificacionRecepcionService
         $this->verificarAcceso($usuario, $idEmpresaActiva);
         $calificacion = $this->calificacionDeLaEmpresa($idEmpresaActiva, $idCalificacion);
 
-        $calificacion->load(['proveedor.estado', 'auditor', 'respuestas.parametro']);
+        $calificacion->load(['proveedor.estado', 'auditor', 'respuestas.parametro', 'respuestas.imagenes.archivo']);
         $respuestas = $calificacion->respuestas->keyBy('Id_Recepcion_Parametro');
 
         // En una calificación FINALIZADA los parámetros salen de sus propias
@@ -253,6 +256,9 @@ class CalificacionRecepcionService
                     // null = todavía sin responder (distinto de "No").
                     'cumple' => $respuesta ? (bool) $respuesta->Cumple : null,
                     'observacion' => $respuesta?->Observacion,
+                    'imagenes' => $respuesta
+                        ? $this->imagenes->serializarVarias($respuesta->imagenes, '/api/calificacion-recepciones/imagenes')
+                        : [],
                 ];
             })->values(),
             'resumen' => $this->calcularResumen($calificacion),
@@ -530,6 +536,79 @@ class CalificacionRecepcionService
                 ],
             ]);
         }
+    }
+
+    // ------------------------------------------------------------------
+    // Fotos de la observación (12-nov-2026)
+    // ------------------------------------------------------------------
+
+    /**
+     * Adjunta una foto a la observación de un parámetro. Mismas puertas
+     * que guardarRespuesta: acceso al módulo y calificación sin finalizar.
+     */
+    public function subirImagenObservacion(Usuario $usuario, int $idEmpresaActiva, int $idCalificacion, int $idParametro, UploadedFile $imagen): array
+    {
+        $this->verificarAcceso($usuario, $idEmpresaActiva);
+        $calificacion = $this->calificacionDeLaEmpresa($idEmpresaActiva, $idCalificacion);
+        $this->verificarEditable($calificacion);
+
+        return $this->imagenes->subirEnRecepcion($usuario, $calificacion, $idParametro, $imagen);
+    }
+
+    public function eliminarImagenObservacion(Usuario $usuario, int $idEmpresaActiva, int $idImagen): void
+    {
+        $imagen = $this->imagenPorId($idImagen);
+        $calificacion = $this->calificacionDeLaImagen($idEmpresaActiva, $imagen);
+        $this->verificarAcceso($usuario, $idEmpresaActiva);
+        $this->verificarEditable($calificacion);
+
+        $this->imagenes->eliminarEnRecepcion($imagen);
+    }
+
+    /**
+     * Ruta del binario para mostrarlo. Una calificación finalizada ya no
+     * se edita, pero sus fotos se siguen viendo: son la evidencia.
+     */
+    public function rutaImagenObservacion(Usuario $usuario, int $idEmpresaActiva, int $idImagen): string
+    {
+        $imagen = $this->imagenPorId($idImagen);
+        $this->verificarAcceso($usuario, $idEmpresaActiva);
+        $this->calificacionDeLaImagen($idEmpresaActiva, $imagen);
+
+        return $this->imagenes->rutaFisica($imagen);
+    }
+
+    /**
+     * La fila de la foto, o 404. Igual que en AuditoriaService: se
+     * resuelve acá y no con el binding implícito de rutas, que es lo que
+     * dejaba este endpoint devolviendo 404 incluso sin sesión (el binding
+     * corre antes del middleware de autenticación) y que además no se usa
+     * en ningún otro endpoint del proyecto.
+     */
+    protected function imagenPorId(int $idImagen): CalificacionRecepcionRespuestaImagen
+    {
+        return CalificacionRecepcionRespuestaImagen::findOrFail($idImagen);
+    }
+
+    /**
+     * La calificación de la que cuelga la foto, comprobando que sea de la
+     * empresa activa -> el id de la imagen lo manda el cliente, así que no
+     * alcanza con que exista: tiene que ser suya.
+     */
+    protected function calificacionDeLaImagen(int $idEmpresaActiva, CalificacionRecepcionRespuestaImagen $imagen): CalificacionRecepcion
+    {
+        $calificacion = $imagen->respuesta?->calificacion;
+
+        // (int) EN LOS DOS LADOS: el driver de SQL Server puede devolver los
+        // enteros como string, así que la comparación estricta contra un int
+        // daba SIEMPRE distinto y este endpoint abortaba con 404 aunque la
+        // imagen fuera de la empresa correcta. Es el mismo cast que ya usan
+        // HorarioEntregaService y ReclamoService.
+        if (! $calificacion || (int) $calificacion->Id_Empresa !== $idEmpresaActiva) {
+            abort(404, 'La imagen no pertenece a una calificación de esta empresa.');
+        }
+
+        return $calificacion;
     }
 
     protected function verificarEditable(CalificacionRecepcion $calificacion): void

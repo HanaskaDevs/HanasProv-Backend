@@ -14,7 +14,15 @@ Route::prefix('auditorias')
         // Segmento fijo: antes de /{auditoria}.
         Route::get('/reporte', [AuditoriaController::class, 'reporte']);
         Route::post('/iniciar', [AuditoriaController::class, 'iniciar']);
+
+        // Fotos de la observación (12-nov-2026). Van ANTES de /{auditoria}
+        // por el mismo motivo que /reporte: "imagenes" entraría por el
+        // comodín y terminaría buscando una auditoría con ese id.
+        Route::get('/imagenes/{imagen}/ver', [AuditoriaController::class, 'verImagen']);
+        Route::delete('/imagenes/{imagen}', [AuditoriaController::class, 'eliminarImagen']);
+
         Route::get('/{auditoria}', [AuditoriaController::class, 'mostrar']);
+        Route::post('/{auditoria}/imagenes', [AuditoriaController::class, 'subirImagen']);
         Route::post('/{auditoria}/respuestas', [AuditoriaController::class, 'guardarRespuesta']);
         Route::post('/{auditoria}/finalizar', [AuditoriaController::class, 'finalizar']);
     });
@@ -37,7 +45,12 @@ Route::prefix('calificacion-recepciones')
         Route::get('/reporte', [CalificacionRecepcionController::class, 'reporte']);
         Route::post('/iniciar', [CalificacionRecepcionController::class, 'iniciar']);
 
+        // Fotos de la observación (12-nov-2026), también con segmento fijo.
+        Route::get('/imagenes/{imagen}/ver', [CalificacionRecepcionController::class, 'verImagen']);
+        Route::delete('/imagenes/{imagen}', [CalificacionRecepcionController::class, 'eliminarImagen']);
+
         Route::get('/{calificacion}', [CalificacionRecepcionController::class, 'mostrar']);
+        Route::post('/{calificacion}/imagenes', [CalificacionRecepcionController::class, 'subirImagen']);
         Route::put('/{calificacion}/cabecera', [CalificacionRecepcionController::class, 'actualizarCabecera']);
         Route::post('/{calificacion}/respuestas', [CalificacionRecepcionController::class, 'guardarRespuesta']);
         Route::post('/{calificacion}/finalizar', [CalificacionRecepcionController::class, 'finalizar']);
