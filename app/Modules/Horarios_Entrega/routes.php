@@ -1,6 +1,7 @@
 <?php
 
 use App\Modules\Auth\Http\Middleware\EmpresaActiva;
+use App\Modules\Horarios_Entrega\Http\Controllers\HistorialEntregasController;
 use App\Modules\Horarios_Entrega\Http\Controllers\HorarioEntregaController;
 use App\Modules\Horarios_Entrega\Http\Controllers\IntegracionBcHorariosController;
 use App\Modules\Horarios_Entrega\Http\Middleware\TokenIntegracionBc;
@@ -63,4 +64,19 @@ Route::prefix('integraciones/bc/horarios-entrega')
     ->group(function () {
         Route::get('/', [IntegracionBcHorariosController::class, 'index']);
         Route::post('/carga-masiva', [IntegracionBcHorariosController::class, 'cargaMasiva']);
+    });
+
+/**
+ * Reporte "Historial de proveedores" (12-nov-2026): historia de entregas
+ * con la hora citada, la hora real de arribo y el atraso, hasta 3 meses.
+ * Solo lectura, para Calidad, Admin y Sistemas (lo verifica
+ * HistorialEntregasService::verificarAcceso).
+ *
+ * Cuelga de /reportes, como el historial de reclamos: en el portal se
+ * entra desde el área Reportes, aunque el código viva en este módulo.
+ */
+Route::prefix('reportes/historial-proveedores')
+    ->middleware(['auth:sanctum', EmpresaActiva::class])
+    ->group(function () {
+        Route::get('/', [HistorialEntregasController::class, 'index']);
     });
