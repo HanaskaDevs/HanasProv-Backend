@@ -9,35 +9,36 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 /**
- * Corrige las horas de recepción y entrega YA GUARDADAS con la hora real de
- * SIGH (12-nov-2026, decisión del usuario).
+ * Recalcula las horas de recepción y recibido YA GUARDADAS con la misma
+ * regla que usa el job de cada minuto (12-nov-2026, decisión del usuario).
  *
- * POR QUÉ HACE FALTA: hasta el 12-nov el sincronizador guardaba la hora en
- * que corría (now()) y además aceptaba como "ingreso" movimientos viejos de
- * otros pedidos que comparten número de ítem (ver
- * SincronizacionSighService::documentosConIngresoEnDocumentoInv). El
- * resultado en el historial: horas que no son las de la recepción (todas
- * las del 12-nov a las 11:38) y entregas marcadas "en recepción" o
- * "recibidas" que en SIGH no se habían recibido.
+ * POR QUÉ HACE FALTA: el sincronizador tuvo tres versiones el mismo día.
+ * Primero guardaba la hora en que corría (todo el 12-nov quedó a las 11:38
+ * porque SIGH estuvo caído), después el cierre de la recepción en SIGH como
+ * "recepción" (Recepción y Recibido salían iguales). La versión final (ver
+ * SincronizacionSighService::recepcionesEnWms y ::resumirEntrega) toma:
  *
- * QUÉ HACE, fila por fila (solo las que llenó el job: con Nro_Documento_Bc
- * y sin marca manual en Marcado_Entregado_Por):
+ *  - Recepción = primer producto escaneado en WMS ese día, de cualquiera de
+ *    los pedidos del proveedor;
+ *  - Recibido  = cierre del último de esos pedidos (ingreso en
+ *    SIGH.DocumentoInv), solo si todos están cerrados.
  *
- *  - Si en SIGH hay un ingreso real de ese pedido EL MISMO DÍA de la
- *    entrega: pone esa hora en la recepción, y también en la entrega si el
- *    pedido ya está cerrado (EstadoPedido = 'N'; en SIGH se cierra en el
- *    mismo acto del ingreso).
- *  - Si no lo hay: la marca era falsa, así que deja la fila como estaba
- *    antes de que el job la tocara (sin recepción, sin entrega, sin
- *    documento). Si es de hoy, el job la vuelve a evaluar con la regla
- *    nueva.
+ * QUÉ HACE, fila por fila (solo las que no tienen marca manual en
+ * Marcado_Entregado_Por):
+ *
+ *  - Si ese día hubo recepción de pedidos del proveedor: deja las horas y
+ *    el documento que corresponden ("corregir hora", o "completar" si la
+ *    entrega tenía arribo y todavía no tenía nada).
+ *  - Si no la hubo y la fila tenía marcas: eran falsas, se borran ("quitar
+ *    marca falsa").
  *
  * SEGURIDAD:
  *  - Por defecto SOLO MUESTRA lo que cambiaría. Escribe recién con --aplicar.
  *  - Antes de escribir guarda un respaldo JSON con los valores anteriores
  *    de cada fila que cambia, y se puede volver atrás con --restaurar.
- *  - Si SIGH falla, aborta sin tocar nada (consultas en modo estricto: un
- *    "vacío" por error se leería como "no hubo ingreso" y borraría horas).
+ *  - Si SIGH/WMS falla, aborta sin tocar nada (consulta en modo estricto:
+ *    un "vacío" por error se leería como "no hubo recepción" y borraría
+ *    horas buenas).
  */
 class CorregirHorasSighCommand extends Command
 {
@@ -46,10 +47,7 @@ class CorregirHorasSighCommand extends Command
         {--aplicar : Escribe los cambios. Sin esto solo muestra qué cambiaría}
         {--restaurar= : Ruta de un respaldo JSON para volver a los valores anteriores}';
 
-    protected $description = 'Corrige con la hora real de SIGH las horas de recepción/entrega ya guardadas (simula por defecto).';
-
-    /** Mismo tope que el resto del proyecto: SQL Server admite 2100 parámetros. */
-    private const TANDA = 1000;
+    protected $description = 'Recalcula con SIGH/WMS las horas de recepción y recibido ya guardadas (simula por defecto).';
 
     public function handle(SincronizacionSighService $sigh): int
     {
@@ -58,32 +56,34 @@ class CorregirHorasSighCommand extends Command
         }
 
         $estados = HorarioEntregaEstadoDiario::whereDate('Fecha', '>=', $this->option('desde'))
-            ->whereNotNull('Nro_Documento_Bc')
             ->whereNull('Marcado_Entregado_Por')
+            ->where(function ($q) {
+                $q->whereNotNull('Hora_Arribo_Real')
+                    ->orWhereNotNull('Hora_Recepcion_Real')
+                    ->orWhereNotNull('Hora_Entregado_Real')
+                    ->orWhereNotNull('Nro_Documento_Bc');
+            })
             ->with('horario.proveedor')
             ->orderBy('Fecha')
             ->get();
 
         if ($estados->isEmpty()) {
-            $this->info('No hay filas llenadas por el sincronizador desde ' . $this->option('desde') . '.');
+            $this->info('No hay entregas para revisar desde ' . $this->option('desde') . '.');
 
             return self::SUCCESS;
         }
 
-        $documentos = $estados->pluck('Nro_Documento_Bc')->unique()->values()->all();
-
         try {
-            [$ingresos, $recibidos] = $this->consultarSigh($sigh, $documentos);
+            $cambios = $estados
+                ->groupBy(fn (HorarioEntregaEstadoDiario $e) => $e->Fecha->toDateString())
+                ->flatMap(fn (Collection $delDia) => $this->calcularDia($sigh, $delDia))
+                ->filter(fn (array $c) => $c['accion'] !== 'sin cambio')
+                ->values();
         } catch (\Throwable $e) {
-            $this->error('ABORTA: SIGH no respondió (' . $e->getMessage() . '). No se tocó nada.');
+            $this->error('ABORTA: SIGH/WMS no respondió (' . $e->getMessage() . '). No se tocó nada.');
 
             return self::FAILURE;
         }
-
-        $cambios = $estados
-            ->map(fn (HorarioEntregaEstadoDiario $e) => $this->calcular($e, $ingresos, $recibidos))
-            ->filter(fn (array $c) => $c['accion'] !== 'sin cambio')
-            ->values();
 
         $this->mostrar($estados->count(), $cambios);
 
@@ -118,58 +118,74 @@ class CorregirHorasSighCommand extends Command
     }
 
     /**
-     * @return array{0: array<string, string>, 1: array<string, true>}
+     * Las entregas de UN día: sus pedidos candidatos (con la ventana de ese
+     * día) y una sola consulta estricta a SIGH/WMS.
      */
-    private function consultarSigh(SincronizacionSighService $sigh, array $documentos): array
+    private function calcularDia(SincronizacionSighService $sigh, Collection $delDia): array
     {
-        $ingresos = [];
-        $recibidos = [];
+        $fecha = $delDia->first()->Fecha;
+        $docsPorFila = [];
 
-        foreach (array_chunk($documentos, self::TANDA) as $tanda) {
-            $ingresos += $sigh->documentosConIngresoEnDocumentoInv($tanda, true);
-            $recibidos += $sigh->documentosRecibidos($tanda, true);
+        foreach ($delDia as $e) {
+            $h = $e->horario;
+            $docsPorFila[$e->Id_Horario_Entrega_Estado_Diario] = $h
+                ? $sigh->documentosBcDelProveedor($h->Id_Empresa, $h->Id_Proveedor, $fecha)
+                : [];
         }
 
-        return [$ingresos, $recibidos];
+        $todos = array_merge(...array_values($docsPorFila ?: [[]]));
+        $recepciones = $todos ? $sigh->recepcionesEnWms($todos, $fecha, lanzarSiFalla: true) : [];
+
+        return $delDia->map(function (HorarioEntregaEstadoDiario $e) use ($sigh, $docsPorFila, $recepciones) {
+            $resumen = $sigh->resumirEntrega($docsPorFila[$e->Id_Horario_Entrega_Estado_Diario] ?? [], $recepciones);
+
+            return $this->calcular($e, $resumen);
+        })->all();
     }
 
     /** Qué tendría que quedar en una fila, comparado con lo que tiene. */
-    private function calcular(HorarioEntregaEstadoDiario $e, array $ingresos, array $recibidos): array
+    private function calcular(HorarioEntregaEstadoDiario $e, ?array $resumen): array
     {
-        $doc = $e->Nro_Documento_Bc;
-        $dia = $e->Fecha?->toDateString();
-        $ingreso = $ingresos[$doc] ?? null;
-
-        if ($ingreso && $dia && substr($ingreso, 0, 10) === $dia) {
-            $despues = [
-                'recepcion' => $ingreso,
-                'entregado' => isset($recibidos[$doc]) ? $ingreso : null,
-                'documento' => $doc,
-            ];
-        } else {
-            // Sin ingreso real ese día: la marca era falsa.
-            $despues = ['recepcion' => null, 'entregado' => null, 'documento' => null];
-        }
-
         $antes = [
             'recepcion' => $e->Hora_Recepcion_Real?->format('Y-m-d H:i:s'),
             'entregado' => $e->Hora_Entregado_Real?->format('Y-m-d H:i:s'),
-            'documento' => $doc,
+            'documento' => $e->Nro_Documento_Bc ? trim($e->Nro_Documento_Bc) : null,
         ];
+        $teniaMarcas = $antes['recepcion'] || $antes['entregado'] || $antes['documento'];
+
+        if ($resumen && ($e->Hora_Arribo_Real || $teniaMarcas)) {
+            $despues = [
+                'recepcion' => $resumen['recepcion']->format('Y-m-d H:i:s'),
+                'entregado' => $resumen['recibido']?->format('Y-m-d H:i:s'),
+                'documento' => $resumen['documento'],
+            ];
+            $accion = $teniaMarcas ? 'corregir hora' : 'completar';
+        } elseif ($teniaMarcas) {
+            // Sin recepción de ningún pedido del proveedor ese día: la marca
+            // era falsa.
+            $despues = ['recepcion' => null, 'entregado' => null, 'documento' => null];
+            $accion = 'quitar marca falsa';
+        } else {
+            $despues = $antes;
+            $accion = 'sin cambio';
+        }
 
         // Se compara al minuto: es la precisión con la que se muestra.
         $igual = fn ($a, $b) => substr((string) $a, 0, 16) === substr((string) $b, 0, 16);
-        $sinCambio = $igual($antes['recepcion'], $despues['recepcion'])
+        if ($igual($antes['recepcion'], $despues['recepcion'])
             && $igual($antes['entregado'], $despues['entregado'])
-            && $antes['documento'] === $despues['documento'];
+            && $antes['documento'] === $despues['documento']) {
+            $accion = 'sin cambio';
+        }
 
         return [
             'id' => $e->Id_Horario_Entrega_Estado_Diario,
-            'fecha' => $dia,
+            'fecha' => $e->Fecha?->toDateString(),
             'proveedor' => $e->horario?->proveedor?->nombreVisible() ?? '?',
+            'arribo' => $e->Hora_Arribo_Real?->format('H:i'),
             'antes' => $antes,
             'despues' => $despues,
-            'accion' => $sinCambio ? 'sin cambio' : ($despues['recepcion'] ? 'corregir hora' : 'quitar marca falsa'),
+            'accion' => $accion,
         ];
     }
 
@@ -178,11 +194,12 @@ class CorregirHorasSighCommand extends Command
         $hora = fn ($v) => $v ? substr($v, 11, 5) : '-';
 
         $this->table(
-            ['Fecha', 'Proveedor', 'Documento', 'Recepción', 'Entrega', 'Acción'],
+            ['Fecha', 'Proveedor', 'Llegó', 'Documento', 'Recepción', 'Recibido', 'Acción'],
             $cambios->map(fn ($c) => [
                 $c['fecha'],
                 mb_substr($c['proveedor'], 0, 28),
-                $c['antes']['documento'],
+                $c['arribo'] ?? '-',
+                ($c['antes']['documento'] ?? '-') . ($c['antes']['documento'] !== $c['despues']['documento'] ? ' -> ' . ($c['despues']['documento'] ?? '-') : ''),
                 $hora($c['antes']['recepcion']) . ' -> ' . $hora($c['despues']['recepcion']),
                 $hora($c['antes']['entregado']) . ' -> ' . $hora($c['despues']['entregado']),
                 $c['accion'],
@@ -191,9 +208,10 @@ class CorregirHorasSighCommand extends Command
 
         $porAccion = $cambios->countBy('accion');
         $this->info(sprintf(
-            'Revisadas: %d · a corregir la hora: %d · marcas falsas a quitar: %d · sin cambio: %d',
+            'Revisadas: %d · a corregir: %d · a completar: %d · marcas falsas a quitar: %d · sin cambio: %d',
             $revisadas,
             $porAccion['corregir hora'] ?? 0,
+            $porAccion['completar'] ?? 0,
             $porAccion['quitar marca falsa'] ?? 0,
             $revisadas - $cambios->count()
         ));

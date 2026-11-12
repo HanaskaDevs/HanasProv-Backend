@@ -54,10 +54,13 @@ use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
  *       mano (antes lo hacía Compras) -> los dispara en automático
  *       SincronizarEstadosSighCommand, leyendo SIGH (servidor 192.168.1.135,
  *       conexión sqlsrv_sigh, solo lectura):
- *         - En_Recepcion: apenas aparece un SIGH.DocumentoInv.ItemPedido que
- *           matchea un SIGH.Documento.Item cuyo NroDocumentoBC resuelve al
- *           pedido de este proveedor.
- *         - Recibido: cuando ese mismo SIGH.Documento.EstadoPedido = 'N'.
+ *         - En_Recepcion: con el PRIMER producto escaneado en WMS
+ *           (WMS.dbo.tmpRecepcion) de un pedido del proveedor ese día.
+ *         - Recibido: cuando WMS cierra la recepción (ingreso en
+ *           SIGH.DocumentoInv, EstadoPedido = 'N') de TODOS los pedidos
+ *           que empezaron a recibirse ese día; la hora es la del último.
+ *         (12-nov-2026; antes las dos horas eran la del cierre. Ver
+ *         SincronizacionSighService::recepcionesEnWms.)
  *       Se reusan Hora_Entregado_Real/Marcado_Entregado_Por para "Recibido"
  *       (Marcado_Entregado_Por queda NULL: lo puso el job, no una persona).
  */
@@ -850,61 +853,55 @@ class HorarioEntregaService
     // sistema, no de una persona).
     // ------------------------------------------------------------------
 
-    /** Horarios de HOY que ya arribaron pero todavía no entraron en recepción. */
-    public function estadosEnEsperaDeRecepcion(): Collection
+    /**
+     * Entregas de HOY que el job tiene que mirar: ya arribaron y no tienen
+     * una marca MANUAL de recibido (Marcado_Entregado_Por con un usuario).
+     *
+     * Incluye las que ya están En_Recepcion o Recibido por el job: si el
+     * proveedor trae otro pedido más tarde, la entrega vuelve a "En
+     * recepción" y el Recibido pasa a ser el cierre del último (decisión
+     * del usuario, 12-nov-2026). Son pocas filas por día.
+     */
+    public function estadosParaSincronizarSigh(): Collection
     {
-        $hoy = now()->toDateString();
-
-        return HorarioEntregaEstadoDiario::whereDate('Fecha', $hoy)
+        return HorarioEntregaEstadoDiario::whereDate('Fecha', now()->toDateString())
             ->whereNotNull('Hora_Arribo_Real')
-            ->whereNull('Hora_Recepcion_Real')
-            ->with('horario.proveedor')
-            ->get();
-    }
-
-    /** Horarios de HOY ya en recepción, esperando el cierre (Recibido). */
-    public function estadosEnEsperaDeRecibido(): Collection
-    {
-        $hoy = now()->toDateString();
-
-        return HorarioEntregaEstadoDiario::whereDate('Fecha', $hoy)
-            ->whereNotNull('Hora_Recepcion_Real')
-            ->whereNull('Hora_Entregado_Real')
+            ->whereNull('Marcado_Entregado_Por')
             ->with('horario.proveedor')
             ->get();
     }
 
     /**
-     * $hora es la hora REAL del ingreso en SIGH (12-nov-2026). Antes se
-     * guardaba now(), la hora en que corría el job: si SIGH estaba caído,
-     * al volver marcaba todo en el mismo minuto y el historial quedaba sin
-     * sentido. Sin $hora (algún llamador viejo), se sigue usando now().
+     * Deja la entrega como dice SIGH/WMS (salida de
+     * SincronizacionSighService::resumirEntrega). Solo escribe si algo
+     * cambió, y devuelve si escribió.
+     *
+     * Hora_Entregado_Real puede VOLVER a NULL: si después del cierre de un
+     * pedido el proveedor empieza a entregar otro, la entrega está otra vez
+     * en recepción. Marcado_Entregado_Por queda NULL: lo pone el sistema,
+     * no una persona.
+     *
+     * @param  array{documento: string, recepcion: CarbonInterface, recibido: ?CarbonInterface}  $resumen
      */
-    public function marcarRecepcionAutomatica(HorarioEntregaEstadoDiario $estadoDiario, ?string $nroDocumentoBc, ?CarbonInterface $hora = null): void
+    public function aplicarRecepcionSigh(HorarioEntregaEstadoDiario $estadoDiario, array $resumen): bool
     {
-        $estadoDiario->forceFill([
-            'Hora_Recepcion_Real' => $hora ?? now(),
-            'Nro_Documento_Bc' => $nroDocumentoBc,
-            'Fecha_Modificacion' => now(),
-        ])->save();
-    }
+        $mismo = fn (?CarbonInterface $a, ?CarbonInterface $b) => $a?->format('Y-m-d H:i:s') === $b?->format('Y-m-d H:i:s');
 
-    /**
-     * $hora: ver marcarRecepcionAutomatica. En SIGH el pedido pasa a
-     * EstadoPedido = 'N' en el mismo acto en que se registra el ingreso a
-     * bodega (en los datos del 12-nov, Documento.FechaModif coincide al
-     * minuto con DocumentoInv.FechaCreacion), así que el llamador pasa la
-     * misma hora del ingreso.
-     */
-    public function marcarRecibidoAutomatico(HorarioEntregaEstadoDiario $estadoDiario, ?CarbonInterface $hora = null): void
-    {
+        if ($mismo($estadoDiario->Hora_Recepcion_Real, $resumen['recepcion'])
+            && $mismo($estadoDiario->Hora_Entregado_Real, $resumen['recibido'])
+            && trim((string) $estadoDiario->Nro_Documento_Bc) === $resumen['documento']) {
+            return false;
+        }
+
         $estadoDiario->forceFill([
-            'Hora_Entregado_Real' => $hora ?? now(),
-            // NULL a propósito: distingue "lo puso el job" de una marca
-            // manual vieja (Marcado_Entregado_Por con un Id_Usuario).
+            'Hora_Recepcion_Real' => $resumen['recepcion'],
+            'Hora_Entregado_Real' => $resumen['recibido'],
+            'Nro_Documento_Bc' => $resumen['documento'],
             'Marcado_Entregado_Por' => null,
             'Fecha_Modificacion' => now(),
         ])->save();
+
+        return true;
     }
 
     private function verificarPertenece(int $idEmpresa, HorarioEntregaProveedor $horario): void
