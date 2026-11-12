@@ -22,30 +22,15 @@ class UsuarioResource extends JsonResource
              * vacurio@hanaska.com que le salga el apartado aprobaciones
              * de arribo").
              *
-             * Sale de comparar su correo con el que ya recibe esos
-             * avisos (portal.email_aprobacion_arribo) en vez de
-             * escribir el correo en el frontend: así el día que cambie
-             * la persona, se cambia UNA variable de entorno y se mueven
-             * juntos el correo y el ítem del menú.
-             *
-             * Es solo para DIBUJAR el menú. Quién puede aprobar de
-             * verdad lo sigue decidiendo el backend por rol (ver
-             * HorarioEntregaService::verificarAccesoResolverAprobacion).
+             * La regla vive en el modelo (Usuario::
+             * resuelveAprobacionesArribo: su correo es el de
+             * portal.email_aprobacion_arribo) porque la comparten el
+             * menú y el permiso del backend
+             * (HorarioEntregaService::verificarAccesoResolverAprobacion).
+             * Acá solo se expone al frontend para DIBUJAR el ítem.
              */
-            'resuelve_aprobaciones_arribo' => $this->resuelveAprobacionesArribo(),
+            'resuelve_aprobaciones_arribo' => $this->resource->resuelveAprobacionesArribo(),
             'empresas' => EmpresaAccesoResource::collection($this->whenLoaded('empresas')),
         ];
-    }
-
-    /** Comparación sin distinguir mayúsculas ni espacios de más. */
-    protected function resuelveAprobacionesArribo(): bool
-    {
-        $configurado = trim((string) config('portal.email_aprobacion_arribo'));
-
-        if ($configurado === '') {
-            return false;
-        }
-
-        return strcasecmp(trim((string) $this->Email), $configurado) === 0;
     }
 }

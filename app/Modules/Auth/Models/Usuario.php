@@ -165,6 +165,38 @@ class Usuario extends Authenticatable
     }
 
     /**
+     * ¿Es la persona designada para resolver las solicitudes de arribo
+     * tardío? Lo es quien tenga el correo de
+     * portal.email_aprobacion_arribo, o sea el MISMO que recibe los avisos
+     * (12-nov-2026, pedido del usuario: "al usuario vacurio@hanaska.com
+     * que le salga el apartado aprobaciones de arribo").
+     *
+     * Es una designación por PERSONA, no por rol: esa responsabilidad es
+     * de alguien en concreto y hoy esa persona tiene rol Admin, que a
+     * propósito no resuelve arribos. Por eso no alcanzaba con el rol.
+     *
+     * Vive en el modelo y no en el Resource ni en el Service porque la
+     * usan los dos: dibujar el ítem del menú (UsuarioResource) y dejar
+     * entrar a la bandeja (HorarioEntregaService::
+     * verificarAccesoResolverAprobacion). Así el día que esa
+     * responsabilidad cambie de persona se cambia UNA variable de
+     * entorno y se mueven juntos el correo, el menú y el permiso.
+     */
+    public function resuelveAprobacionesArribo(): bool
+    {
+        $configurado = trim((string) config('portal.email_aprobacion_arribo'));
+
+        // Sin correo configurado no se le muestra ni se le permite a
+        // nadie; y un proveedor nunca resuelve arribos, aunque alguien se
+        // equivoque al escribir la variable de entorno.
+        if ($configurado === '' || $this->Tipo_Usuario !== 'Interno') {
+            return false;
+        }
+
+        return strcasecmp(trim((string) $this->Email), $configurado) === 0;
+    }
+
+    /**
      * Rol nuevo para el guardia de recepción: solo marca "el proveedor
      * arribó" en la pantalla de seguimiento del calendario de horarios
      * (ver HorarioEntregaService) -> no tiene acceso a nada más del portal.
