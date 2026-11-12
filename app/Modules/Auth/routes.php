@@ -101,6 +101,10 @@ Route::prefix('usuarios')
 
         Route::get('/externos/{usuario}', [UsuarioController::class, 'showExterno']);
 
+        // "Entrar como proveedor": solo Sistemas (lo valida AuthService).
+        Route::post('/externos/{usuario}/suplantar', [UsuarioController::class, 'suplantar'])
+            ->middleware('throttle:10,1');
+
         // Común a ambos
         Route::patch('/{usuario}/inactivar', [UsuarioController::class, 'inactivar']);
         // Borrado definitivo: solo Sistemas y solo cuentas sin activar.

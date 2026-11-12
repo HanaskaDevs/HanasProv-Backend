@@ -57,6 +57,17 @@ class AuthService
     public const EVENTO_USUARIO_INEXISTENTE = 'Login_Inexistente';
     public const EVENTO_USUARIO_BLOQUEADO = 'Usuario_Bloqueado';
     public const EVENTO_IP_BLOQUEADA = 'Ip_Bloqueada';
+    public const EVENTO_SUPLANTACION = 'Suplantacion';
+
+    /**
+     * "Entrar como proveedor" (12-nov-2026): Sistemas abre una sesión del
+     * proveedor sin conocer su contraseña, para ver lo que él ve. El token
+     * lleva en el nombre quién lo pidió ('suplantacion:<Id_Usuario>'), así
+     * /auth/me lo puede avisar y cambiar-password lo puede frenar, sin
+     * columnas nuevas. Vence en 2 horas: es para revisar algo puntual.
+     */
+    public const PREFIJO_TOKEN_SUPLANTACION = 'suplantacion:';
+    protected const HORAS_VIGENCIA_SUPLANTACION = 2;
 
     /**
      * Único mensaje para "tu cuenta existe y la contraseña es correcta, pero
@@ -203,6 +214,82 @@ class AuthService
             'token' => $token,
             'id_empresa_activa' => $idEmpresaActiva,
         ];
+    }
+
+    /**
+     * Sistemas entra al portal como un usuario proveedor. No toca la
+     * contraseña ni el Ultimo_Acceso del proveedor, y queda en la bitácora
+     * (Tipo_Evento 'Suplantacion', Id_Usuario = el proveedor, Email_Intento
+     * = el correo de quien entró).
+     */
+    public function suplantar(Usuario $admin, int $idEmpresa, Usuario $proveedor, ?string $ip = null, ?string $userAgent = null): array
+    {
+        if (! $admin->esSistemas($idEmpresa)) {
+            throw new AccessDeniedHttpException('Solo Sistemas puede entrar como un proveedor.');
+        }
+
+        if ($this->idSuplantador($admin->currentAccessToken()) !== null) {
+            throw new AccessDeniedHttpException('Ya estás dentro de la cuenta de un proveedor. Vuelve a tu cuenta primero.');
+        }
+
+        if ($proveedor->Tipo_Usuario !== 'Proveedor') {
+            throw ValidationException::withMessages([
+                'usuario' => ['Solo se puede entrar como un usuario proveedor.'],
+            ]);
+        }
+
+        if (! $proveedor->Activo) {
+            throw ValidationException::withMessages([
+                'usuario' => ['Este usuario está inactivo. Reactívalo primero para poder entrar con su cuenta.'],
+            ]);
+        }
+
+        $empresasActivas = $proveedor->empresas()->wherePivot('Activo', true)->get();
+
+        if (! $empresasActivas->contains(fn ($e) => (int) $e->Id_Empresa === $idEmpresa)) {
+            throw ValidationException::withMessages([
+                'usuario' => ['Este proveedor no tiene acceso activo a la empresa en la que estás.'],
+            ]);
+        }
+
+        $vence = now()->addHours(self::HORAS_VIGENCIA_SUPLANTACION);
+        $tokenResult = $proveedor->createToken(self::PREFIJO_TOKEN_SUPLANTACION . $admin->Id_Usuario, ['*'], $vence);
+
+        Sesion::create([
+            'Id_Usuario' => $proveedor->Id_Usuario,
+            'Token' => (string) $tokenResult->accessToken->id,
+            'Ip_Origen' => $ip,
+            'Dispositivo' => mb_substr('Sistemas (' . $admin->Email . '): ' . $userAgent, 0, 200),
+            'Fecha_Inicio' => now(),
+            'Fecha_Expiracion' => $vence,
+            'Activa' => true,
+            'Id_Empresa_Activa' => $idEmpresa,
+        ]);
+
+        BitacoraAcceso::create([
+            'Id_Usuario' => $proveedor->Id_Usuario,
+            'Email_Intento' => mb_substr((string) $admin->Email, 0, 150),
+            'Tipo_Evento' => self::EVENTO_SUPLANTACION,
+            'Ip_Origen' => $ip,
+            'User_Agent' => $userAgent ? mb_substr($userAgent, 0, 300) : null,
+            'Fecha_Evento' => now(),
+        ]);
+
+        return [
+            'usuario' => $proveedor->load(['empresas' => fn ($q) => $q->wherePivot('Activo', true)]),
+            'token' => $tokenResult->plainTextToken,
+            'id_empresa_activa' => $idEmpresa,
+        ];
+    }
+
+    /** Id_Usuario de Sistemas si este token es de "entrar como proveedor"; null si es una sesión normal. */
+    public function idSuplantador(mixed $token): ?int
+    {
+        $nombre = (string) ($token?->name ?? '');
+
+        return str_starts_with($nombre, self::PREFIJO_TOKEN_SUPLANTACION)
+            ? (int) substr($nombre, strlen(self::PREFIJO_TOKEN_SUPLANTACION))
+            : null;
     }
 
     /**

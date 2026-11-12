@@ -9,6 +9,8 @@ use App\Modules\Auth\Http\Requests\CrearUsuariosProveedorLoteRequest;
 use App\Modules\Auth\Http\Resources\UsuarioExternoResource;
 use App\Modules\Auth\Http\Resources\UsuarioInternoResource;
 use App\Modules\Auth\Models\Usuario;
+use App\Modules\Auth\Http\Resources\UsuarioResource;
+use App\Modules\Auth\Services\AuthService;
 use App\Modules\Auth\Services\UsuarioService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -210,6 +212,28 @@ class UsuarioController extends Controller
         $this->usuarioService->eliminarDefinitivamente($usuario, $request->user());
 
         return response()->json(['message' => 'Cuenta eliminada definitivamente.']);
+    }
+
+    /**
+     * "Entrar como proveedor" (solo Sistemas): devuelve un token de ESE
+     * proveedor, igual que el login, sin pedir su contraseña. Ver
+     * AuthService::suplantar.
+     */
+    public function suplantar(Request $request, Usuario $usuario, AuthService $authService): JsonResponse
+    {
+        $resultado = $authService->suplantar(
+            admin: $request->user(),
+            idEmpresa: (int) $request->attributes->get('id_empresa_activa'),
+            proveedor: $usuario,
+            ip: $request->ip(),
+            userAgent: $request->userAgent(),
+        );
+
+        return response()->json([
+            'usuario' => new UsuarioResource($resultado['usuario']),
+            'token' => $resultado['token'],
+            'id_empresa_activa' => $resultado['id_empresa_activa'],
+        ]);
     }
 
     public function inactivar(Request $request, Usuario $usuario): JsonResponse

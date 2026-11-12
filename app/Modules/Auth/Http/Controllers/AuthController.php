@@ -9,6 +9,7 @@ use App\Modules\Auth\Http\Requests\CambiarPasswordRequest;
 use App\Modules\Auth\Http\Requests\LoginRequest;
 use App\Modules\Auth\Http\Requests\OlvidePasswordRequest;
 use App\Modules\Auth\Http\Resources\UsuarioResource;
+use App\Modules\Auth\Models\Usuario;
 use App\Modules\Auth\Services\AuthService;
 use App\Modules\Auth\Services\UsuarioService;
 use Illuminate\Http\JsonResponse;
@@ -50,9 +51,18 @@ class AuthController extends Controller
         $usuario = $request->user();
         $sesion = $this->authService->sesionActual($usuario, $usuario->currentAccessToken());
 
+        // "Entrar como proveedor": quién de Sistemas está dentro de esta
+        // sesión, para que la pantalla muestre el aviso y "Volver a mi cuenta".
+        $idSuplantador = $this->authService->idSuplantador($usuario->currentAccessToken());
+        $suplantador = $idSuplantador ? Usuario::find($idSuplantador) : null;
+
         return response()->json([
             'usuario' => new UsuarioResource($usuario->load(['empresas' => fn ($q) => $q->wherePivot('Activo', true)])),
             'id_empresa_activa' => $sesion?->Id_Empresa_Activa,
+            'suplantado_por' => $idSuplantador ? [
+                'nombre' => $suplantador?->Nombre_Completo,
+                'email' => $suplantador?->Email,
+            ] : null,
         ]);
     }
 
@@ -74,6 +84,11 @@ class AuthController extends Controller
 
     public function cambiarPassword(CambiarPasswordRequest $request): JsonResponse
     {
+        // Sistemas dentro de la cuenta de un proveedor no le cambia la clave.
+        if ($this->authService->idSuplantador($request->user()->currentAccessToken()) !== null) {
+            abort(403, 'No se puede cambiar la contraseña de un proveedor desde "Entrar como proveedor".');
+        }
+
         $this->usuarioService->cambiarPassword(
             usuario: $request->user(),
             passwordActual: $request->validated('password_actual'),
