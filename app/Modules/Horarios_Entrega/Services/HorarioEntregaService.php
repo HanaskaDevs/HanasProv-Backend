@@ -6,6 +6,7 @@ use App\Models\Empresa;
 use App\Modules\Auth\Models\Usuario;
 use App\Modules\Configuraciones\Models\Configuracion;
 use App\Modules\Horarios_Entrega\Mail\SolicitudAprobacionArriboMail;
+use App\Modules\Horarios_Entrega\Notifications\ArriboProveedorNotification;
 use App\Modules\Horarios_Entrega\Models\HorarioEntregaEstadoDiario;
 use App\Modules\Horarios_Entrega\Models\HorarioEntregaProveedor;
 use App\Modules\Horarios_Entrega\Models\SolicitudAprobacionArribo;
@@ -14,7 +15,9 @@ use App\Modules\Proveedores\Models\Proveedor;
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Notification;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
@@ -663,6 +666,8 @@ class HorarioEntregaService
             'Fecha_Modificacion' => $hoy,
         ])->save();
 
+        $this->notificarArriboACalidad($horario, $usuario, $hoy);
+
         return $this->serializarEstadoDiario($horario, $estadoDiario, $hoy);
     }
 
@@ -715,6 +720,67 @@ class HorarioEntregaService
         return $solicitud;
     }
 
+    /**
+     * Avisa a Calidad que el proveedor ya llegó (12-nov-2026, pedido del
+     * usuario). Va a TODOS los usuarios con rol Calidad de la empresa y no
+     * a una casilla fija: el aviso es para quien esté de turno para
+     * recibir, que no siempre es la misma persona.
+     *
+     * No corta el marcado de arribo si falla: lo importante es que el
+     * estado quede registrado en pantalla -el guardia tiene al proveedor
+     * esperando-, así que un problema de correo se loguea y sigue. El
+     * envío en sí es encolado (ver ArriboProveedorNotification).
+     */
+    private function notificarArriboACalidad(HorarioEntregaProveedor $horario, Usuario $quienMarco, Carbon $horaArribo): void
+    {
+        try {
+            $destinatarios = $this->usuariosDeCalidad($horario->Id_Empresa);
+
+            if ($destinatarios->isEmpty()) {
+                Log::warning('Arribo sin avisar: la empresa no tiene usuarios de Calidad', [
+                    'id_empresa' => $horario->Id_Empresa,
+                    'id_horario_entrega_proveedor' => $horario->Id_Horario_Entrega_Proveedor,
+                ]);
+
+                return;
+            }
+
+            Notification::send($destinatarios, new ArriboProveedorNotification(
+                $horario->proveedor?->nombreVisible() ?? 'Proveedor',
+                substr((string) $horario->Hora_Llegada, 0, 5),
+                $horaArribo->format('H:i'),
+                $quienMarco->Nombre_Completo,
+                $horario->Anden_Puerta,
+            ));
+        } catch (\Throwable $e) {
+            Log::error('No se pudo avisar a Calidad del arribo', [
+                'id_horario_entrega_proveedor' => $horario->Id_Horario_Entrega_Proveedor,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * Usuarios activos con rol Calidad en esa empresa.
+     *
+     * Mismo criterio que AvisarRecepcionesDelDiaCommand::destinatarios(),
+     * pero SIN caer a Admin/Sistemas: este aviso es operativo (hay alguien
+     * esperando en la puerta) y mandárselo a todo el equipo administrativo
+     * varias veces al día sería ruido.
+     *
+     * @return \Illuminate\Database\Eloquent\Collection<int, Usuario>
+     */
+    private function usuariosDeCalidad(int $idEmpresa): \Illuminate\Database\Eloquent\Collection
+    {
+        return Usuario::where('Activo', 1)
+            ->whereHas('usuarioEmpresas', function ($q) use ($idEmpresa) {
+                $q->where('Id_Empresa', $idEmpresa)
+                    ->where('Activo', true)
+                    ->whereHas('rol', fn ($r) => $r->where('Nombre_Rol', 'Calidad'));
+            })
+            ->get();
+    }
+
     private function notificarSolicitudAprobacion(HorarioEntregaProveedor $horario, Usuario $solicitante, SolicitudAprobacionArribo $solicitud): void
     {
         $destinatario = config('portal.email_aprobacion_arribo');
@@ -745,6 +811,13 @@ class HorarioEntregaService
             fn ($q) => $q->where('Id_Empresa', $idEmpresa)
         )
             ->where('Estado', 'Pendiente')
+            // SOLO LAS DE HOY (12-nov-2026, pedido del usuario): una
+            // solicitud de arribo pide permiso para registrar una entrega
+            // que está ocurriendo AHORA. La de ayer ya no se puede
+            // resolver -el camión se fue- y lo único que hacía era
+            // ensuciar la bandeja. Las viejas quedan en la tabla con su
+            // estado Pendiente; no se tocan.
+            ->whereDate('Fecha', now()->toDateString())
             ->with(['horario.proveedor', 'solicitante'])
             ->orderBy('Fecha_Solicitud')
             ->get()

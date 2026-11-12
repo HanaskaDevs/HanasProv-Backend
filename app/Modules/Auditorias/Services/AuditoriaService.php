@@ -7,15 +7,19 @@ use App\Modules\Auditorias\Models\AuditoriaPregunta;
 use App\Modules\Auditorias\Models\AuditoriaRespuesta;
 use App\Modules\Auditorias\Models\TipoAuditoria;
 use App\Modules\Auth\Models\Usuario;
+use App\Modules\Auditorias\Models\AuditoriaRespuestaImagen;
 use App\Modules\Proveedores\Models\Proveedor;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Collection;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 
 class AuditoriaService
 {
-    public function __construct(protected AgendaRecepcionService $agenda)
-    {
+    public function __construct(
+        protected AgendaRecepcionService $agenda,
+        protected ImagenObservacionService $imagenes,
+    ) {
     }
 
     public function listarTiposAuditoria(Usuario $usuario, int $idEmpresa): Collection
@@ -137,7 +141,13 @@ class AuditoriaService
             ->with(['preguntas' => fn($q) => $q->where('Activo', true)])
             ->get();
 
-        $respuestasPorPregunta = $auditoria->respuestas()->get()->keyBy('Id_Auditoria_Pregunta');
+        // Las fotos de la observación vienen en el mismo viaje (12-nov-2026):
+        // sin el with(), dibujar un formulario de 60 preguntas dispararía una
+        // consulta por pregunta solo para saber si tiene imágenes.
+        $respuestasPorPregunta = $auditoria->respuestas()
+            ->with('imagenes.archivo')
+            ->get()
+            ->keyBy('Id_Auditoria_Pregunta');
 
         $seccionesConRespuesta = $secciones->map(function ($seccion) use ($respuestasPorPregunta) {
             return [
@@ -155,6 +165,9 @@ class AuditoriaService
                         'puntaje_obtenido' => $respuesta?->Puntaje_Obtenido !== null ? (float) $respuesta->Puntaje_Obtenido : null,
                         'no_aplica' => (bool) ($respuesta?->No_Aplica ?? false),
                         'observacion' => $respuesta?->Observacion,
+                        'imagenes' => $respuesta
+                            ? $this->imagenes->serializarVarias($respuesta->imagenes, '/api/auditorias/imagenes')
+                            : [],
                     ];
                 })->values(),
             ];
@@ -225,6 +238,72 @@ class AuditoriaService
                 'Fecha_Modificacion' => now(),
             ]
         );
+    }
+
+    // ------------------------------------------------------------------
+    // Fotos de la observación (12-nov-2026)
+    // ------------------------------------------------------------------
+
+    /**
+     * Adjunta una foto a la observación de una pregunta.
+     *
+     * Mismas dos puertas que guardarRespuesta -acceso al módulo y
+     * auditoría todavía en Borrador-: una auditoría finalizada es un
+     * histórico y no se toca, ni con puntajes ni con fotos.
+     */
+    public function subirImagenObservacion(Usuario $usuario, Auditoria $auditoria, int $idPregunta, UploadedFile $imagen): array
+    {
+        $this->verificarAcceso($usuario, $auditoria->Id_Empresa);
+        $this->verificarEditable($auditoria);
+
+        return $this->imagenes->subirEnAuditoria($usuario, $auditoria, $idPregunta, $imagen);
+    }
+
+    public function eliminarImagenObservacion(Usuario $usuario, AuditoriaRespuestaImagen $imagen): void
+    {
+        $auditoria = $this->auditoriaDeLaImagen($imagen);
+
+        $this->verificarAcceso($usuario, $auditoria->Id_Empresa);
+        $this->verificarEditable($auditoria);
+
+        $this->imagenes->eliminarEnAuditoria($imagen);
+    }
+
+    /**
+     * Ruta del binario para mostrarlo. Acá NO se exige Borrador: las fotos
+     * de una auditoría finalizada se siguen pudiendo ver (son la evidencia
+     * de lo que se calificó), solo no se pueden cambiar.
+     */
+    public function rutaImagenObservacion(Usuario $usuario, AuditoriaRespuestaImagen $imagen): string
+    {
+        $this->verificarAcceso($usuario, $this->auditoriaDeLaImagen($imagen)->Id_Empresa);
+
+        return $this->imagenes->rutaFisica($imagen);
+    }
+
+    /**
+     * La auditoría de la que cuelga la foto. Se resuelve por la relación y
+     * no por un id que mande el cliente: así el permiso se comprueba
+     * SIEMPRE contra la empresa dueña del dato real.
+     */
+    protected function auditoriaDeLaImagen(AuditoriaRespuestaImagen $imagen): Auditoria
+    {
+        $auditoria = $imagen->respuesta?->auditoria;
+
+        if (! $auditoria) {
+            abort(404, 'La imagen no pertenece a ninguna auditoría.');
+        }
+
+        return $auditoria;
+    }
+
+    protected function verificarEditable(Auditoria $auditoria): void
+    {
+        if ($auditoria->Estado === 'Finalizada') {
+            throw ValidationException::withMessages([
+                'estado' => ['Esta auditoría ya fue finalizada, no se puede modificar.'],
+            ]);
+        }
     }
 
    public function finalizar(Usuario $usuario, Auditoria $auditoria): void

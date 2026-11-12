@@ -107,6 +107,21 @@ return [
 
         // Imágenes adjuntas de Reclamos. Privado: solo se ven vía endpoint
         // autenticado (ReclamoController::verImagen / ReclamoProveedorController::verImagen).
+        /*
+         * Fotos que Calidad adjunta a las observaciones de las auditorías
+         * y de las calificaciones de recepción (12-nov-2026). Carpeta
+         * propia dentro del repositorio, por el mismo criterio que
+         * 'reclamos': así se sabe de un vistazo a qué módulo pertenece
+         * cada archivo del disco y se puede respaldar por separado.
+         */
+        'auditorias' => [
+            'driver' => 'local',
+            'root' => env('REPOSITORIO_BASE_PATH', storage_path('app/repositorio')).'/auditorias',
+            'visibility' => 'private',
+            'throw' => false,
+            'report' => false,
+        ],
+
         'reclamos' => [
             'driver' => 'local',
             'root' => env('REPOSITORIO_BASE_PATH', storage_path('app/repositorio')).'/reclamos',
