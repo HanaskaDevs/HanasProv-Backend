@@ -98,4 +98,77 @@ class AprobacionesArriboTest extends TestCase
         $this->getJson('/api/horarios-entrega/aprobaciones', $this->cabecerasComo($compras, $empresa))
             ->assertForbidden();
     }
+
+    /**
+     * 12-nov-2026: la persona designada tiene rol Admin. Recibía el aviso
+     * por correo pero el ítem no le salía y la bandeja le daba 403. La
+     * designación es por PERSONA (su correo), así que ahora entra, lista y
+     * resuelve, sin abrirle la puerta al resto de Admin.
+     */
+    public function test_la_persona_designada_con_rol_admin_entra_y_resuelve(): void
+    {
+        $empresa = $this->crearEmpresa();
+        $designada = $this->crearUsuarioInterno($empresa, 'Admin');
+        $guardia = $this->crearUsuarioInterno($empresa, 'Guardia');
+        [, $proveedor] = $this->crearProveedorConUsuario($empresa);
+        $this->crearEntrega($empresa, $proveedor);
+        $horario = $this->horarioDeHoy($empresa->Id_Empresa, $proveedor->Id_Proveedor);
+
+        config(['portal.email_aprobacion_arribo' => '  '.strtoupper($designada->Email).' ']);
+
+        $solicitud = SolicitudAprobacionArribo::create([
+            'Id_Horario_Entrega_Proveedor' => $horario->Id_Horario_Entrega_Proveedor,
+            'Fecha' => now()->toDateString(),
+            'Solicitado_Por' => $guardia->Id_Usuario,
+            'Fecha_Solicitud' => now(),
+            'Estado' => 'Pendiente',
+        ]);
+
+        $cabeceras = $this->cabecerasComo($designada, $empresa);
+
+        $this->getJson('/api/auth/me', $cabeceras)
+            ->assertSuccessful()
+            ->assertJsonPath('usuario.resuelve_aprobaciones_arribo', true);
+
+        $ids = array_column(
+            $this->getJson('/api/horarios-entrega/aprobaciones', $cabeceras)->assertSuccessful()->json(),
+            'id_solicitud_aprobacion_arribo'
+        );
+        $this->assertContains($solicitud->Id_Solicitud_Aprobacion_Arribo, $ids);
+
+        $this->postJson("/api/horarios-entrega/aprobaciones/{$solicitud->Id_Solicitud_Aprobacion_Arribo}/aprobar", [], $cabeceras)
+            ->assertSuccessful();
+
+        $this->assertSame('Aprobada', $solicitud->fresh()->Estado);
+        $this->assertSame($designada->Id_Usuario, (int) $solicitud->fresh()->Resuelto_Por);
+    }
+
+    public function test_otro_admin_sigue_sin_entrar_a_la_bandeja(): void
+    {
+        $empresa = $this->crearEmpresa();
+        $designada = $this->crearUsuarioInterno($empresa, 'Admin');
+        $otroAdmin = $this->crearUsuarioInterno($empresa, 'Admin');
+
+        config(['portal.email_aprobacion_arribo' => $designada->Email]);
+
+        $cabeceras = $this->cabecerasComo($otroAdmin, $empresa);
+
+        $this->getJson('/api/auth/me', $cabeceras)
+            ->assertSuccessful()
+            ->assertJsonPath('usuario.resuelve_aprobaciones_arribo', false);
+
+        $this->getJson('/api/horarios-entrega/aprobaciones', $cabeceras)
+            ->assertForbidden();
+    }
+
+    public function test_sin_correo_configurado_admin_no_entra(): void
+    {
+        $empresa = $this->crearEmpresa();
+        $admin = $this->crearUsuarioInterno($empresa, 'Admin');
+
+        config(['portal.email_aprobacion_arribo' => '']);
+
+        $this->getJson('/api/horarios-entrega/aprobaciones', $this->cabecerasComo($admin, $empresa))
+            ->assertForbidden();
+    }
 }

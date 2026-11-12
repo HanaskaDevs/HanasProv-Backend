@@ -200,14 +200,24 @@ class HorarioEntregaService
     }
 
     /**
-     * Aprobar/rechazar una solicitud de arribo tardío: SOLO Calidad
-     * (Valeria) o Sistemas como respaldo -> pedido explícito del usuario,
-     * "solo ella va a tener ese control de aprobación". Admin queda
-     * afuera a propósito.
+     * Aprobar/rechazar una solicitud de arribo tardío: Calidad (el equipo
+     * que lo resuelve), Sistemas como respaldo y LA PERSONA DESIGNADA,
+     * sea cual sea su rol.
+     *
+     * Lo tercero se agregó el 12-nov-2026: el correo configurado
+     * (portal.email_aprobacion_arribo) es el de alguien con rol Admin, y
+     * Admin está afuera a propósito -> recibía el aviso por correo pero
+     * la bandeja le respondía 403, incluso entrando por el enlace de ese
+     * mismo correo. Ahora la designación por persona vale también acá, y
+     * es la MISMA regla con la que se dibuja el ítem del menú
+     * (Usuario::resuelveAprobacionesArribo). Sigue sin abrirse a todo el
+     * rol Admin: es un solo correo.
      */
     private function verificarAccesoResolverAprobacion(Usuario $usuario, int $idEmpresa): void
     {
-        $tieneAcceso = $usuario->esSistemas($idEmpresa) || $usuario->esCalidad($idEmpresa);
+        $tieneAcceso = $usuario->esSistemas($idEmpresa)
+            || $usuario->esCalidad($idEmpresa)
+            || $usuario->resuelveAprobacionesArribo();
 
         if (! $tieneAcceso) {
             throw new AccessDeniedHttpException('Solo Calidad puede aprobar o rechazar una solicitud de arribo.');
