@@ -50,11 +50,10 @@ class PedidoController extends Controller
     {
         $idEmpresaActiva = (int) $request->attributes->get('id_empresa_activa');
 
-        // fecha_recepcion_esperada = fecha de ENTREGA. Es la que manda la
-        // pantalla (siempre hoy, ver PedidosInternosPage) y también la que
-        // usa Hana para "quién entrega hoy". Las otras dos filtran por la
-        // fecha de REGISTRO del pedido en BC: se dejan porque el service ya
-        // las soporta, pero la pantalla ya no las envía.
+        // fecha_recepcion_esperada = fecha de ENTREGA; es también la que usa
+        // Hana para "quién entrega hoy". Las otras dos filtran por la fecha de
+        // REGISTRO del pedido en BC: se dejan porque el service ya las
+        // soporta, pero la pantalla no las envía.
         $filtros = $request->validate([
             'fecha_recepcion_esperada' => ['nullable', 'date'],
             'fecha_desde' => ['nullable', 'date'],
@@ -64,6 +63,31 @@ class PedidoController extends Controller
             // La pantalla lo manda siempre (04-nov-2026): sin los entregados al 100%.
             'ocultar_completos' => ['nullable', 'boolean'],
         ]);
+
+        /*
+         * POR DEFECTO, SOLO LAS ENTREGAS DE HOY (pedido del usuario,
+         * 12-nov-2026).
+         *
+         * La pantalla no manda ninguna fecha, y el comentario de acá arriba
+         * decía que "siempre manda hoy": no era cierto, y por eso mezclaba
+         * entregas de días pasados con las del día (el 12-nov se veían
+         * pedidos esperados el 10 y el 11). El subtítulo de la pantalla
+         * siempre prometió "Entregas previstas para hoy"; esto lo hace verdad.
+         *
+         * Va en el CONTROLLER y no en el service a propósito: Hana llama al
+         * service directo (AsistenteHerramientas) y necesita poder mirar
+         * otros días. Y si la petición ya trae alguna fecha —la de entrega o
+         * el rango de registro— manda lo que pida: este valor por defecto es
+         * solo para la pantalla, que abre en "hoy".
+         *
+         * De paso, la consulta pasa de barrer el espejo entero (miles de
+         * pedidos) a unas decenas.
+         */
+        if (empty($filtros['fecha_recepcion_esperada'])
+            && empty($filtros['fecha_desde'])
+            && empty($filtros['fecha_hasta'])) {
+            $filtros['fecha_recepcion_esperada'] = now()->toDateString();
+        }
 
         $pedidosPorBodega = $this->pedidoInternoService->listarPorBodega(
             $request->user(),
