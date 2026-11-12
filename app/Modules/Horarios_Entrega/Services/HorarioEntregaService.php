@@ -12,6 +12,7 @@ use App\Modules\Horarios_Entrega\Models\SolicitudAprobacionArribo;
 use App\Modules\Pedidos\Models\PedidoCompra;
 use App\Modules\Proveedores\Models\Proveedor;
 use Carbon\Carbon;
+use Carbon\CarbonInterface;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
@@ -863,19 +864,32 @@ class HorarioEntregaService
             ->get();
     }
 
-    public function marcarRecepcionAutomatica(HorarioEntregaEstadoDiario $estadoDiario, ?string $nroDocumentoBc): void
+    /**
+     * $hora es la hora REAL del ingreso en SIGH (12-nov-2026). Antes se
+     * guardaba now(), la hora en que corría el job: si SIGH estaba caído,
+     * al volver marcaba todo en el mismo minuto y el historial quedaba sin
+     * sentido. Sin $hora (algún llamador viejo), se sigue usando now().
+     */
+    public function marcarRecepcionAutomatica(HorarioEntregaEstadoDiario $estadoDiario, ?string $nroDocumentoBc, ?CarbonInterface $hora = null): void
     {
         $estadoDiario->forceFill([
-            'Hora_Recepcion_Real' => now(),
+            'Hora_Recepcion_Real' => $hora ?? now(),
             'Nro_Documento_Bc' => $nroDocumentoBc,
             'Fecha_Modificacion' => now(),
         ])->save();
     }
 
-    public function marcarRecibidoAutomatico(HorarioEntregaEstadoDiario $estadoDiario): void
+    /**
+     * $hora: ver marcarRecepcionAutomatica. En SIGH el pedido pasa a
+     * EstadoPedido = 'N' en el mismo acto en que se registra el ingreso a
+     * bodega (en los datos del 12-nov, Documento.FechaModif coincide al
+     * minuto con DocumentoInv.FechaCreacion), así que el llamador pasa la
+     * misma hora del ingreso.
+     */
+    public function marcarRecibidoAutomatico(HorarioEntregaEstadoDiario $estadoDiario, ?CarbonInterface $hora = null): void
     {
         $estadoDiario->forceFill([
-            'Hora_Entregado_Real' => now(),
+            'Hora_Entregado_Real' => $hora ?? now(),
             // NULL a propósito: distingue "lo puso el job" de una marca
             // manual vieja (Marcado_Entregado_Por con un Id_Usuario).
             'Marcado_Entregado_Por' => null,

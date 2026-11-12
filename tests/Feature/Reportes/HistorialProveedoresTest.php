@@ -51,13 +51,13 @@ class HistorialProveedoresTest extends TestCase
     public function test_calcula_el_atraso_contra_la_hora_citada(): void
     {
         $empresa = $this->crearEmpresa();
-        $calidad = $this->crearUsuarioInterno($empresa, 'Calidad');
+        $compras = $this->crearUsuarioInterno($empresa, 'Compras');
         [, $proveedor] = $this->crearProveedorConUsuario($empresa);
 
         // Citado 11:00, llegó 11:05 -> 5 minutos tarde (el caso del pedido).
         $this->entregaRegistrada($empresa, $proveedor, now()->toDateString(), '11:00', '11:05');
 
-        $datos = $this->getJson('/api/reportes/historial-proveedores', $this->cabecerasComo($calidad, $empresa))
+        $datos = $this->getJson('/api/reportes/historial-proveedores', $this->cabecerasComo($compras, $empresa))
             ->assertSuccessful()
             ->json();
 
@@ -73,12 +73,12 @@ class HistorialProveedoresTest extends TestCase
     public function test_llegar_antes_de_la_hora_da_atraso_negativo(): void
     {
         $empresa = $this->crearEmpresa();
-        $calidad = $this->crearUsuarioInterno($empresa, 'Calidad');
+        $compras = $this->crearUsuarioInterno($empresa, 'Compras');
         [, $proveedor] = $this->crearProveedorConUsuario($empresa);
 
         $this->entregaRegistrada($empresa, $proveedor, now()->toDateString(), '11:00', '10:50');
 
-        $datos = $this->getJson('/api/reportes/historial-proveedores', $this->cabecerasComo($calidad, $empresa))
+        $datos = $this->getJson('/api/reportes/historial-proveedores', $this->cabecerasComo($compras, $empresa))
             ->assertSuccessful()
             ->json();
 
@@ -89,7 +89,7 @@ class HistorialProveedoresTest extends TestCase
     public function test_el_resumen_por_proveedor_separa_a_tiempo_de_tarde(): void
     {
         $empresa = $this->crearEmpresa();
-        $calidad = $this->crearUsuarioInterno($empresa, 'Calidad');
+        $compras = $this->crearUsuarioInterno($empresa, 'Compras');
         [, $proveedor] = $this->crearProveedorConUsuario($empresa);
 
         $hoy = now();
@@ -98,7 +98,7 @@ class HistorialProveedoresTest extends TestCase
         // Sin arribo marcado: no entra en los promedios pero se cuenta.
         $this->entregaRegistrada($empresa, $proveedor, $hoy->copy()->subDays(2)->toDateString(), '11:00', null);
 
-        $datos = $this->getJson('/api/reportes/historial-proveedores', $this->cabecerasComo($calidad, $empresa))
+        $datos = $this->getJson('/api/reportes/historial-proveedores', $this->cabecerasComo($compras, $empresa))
             ->assertSuccessful()
             ->json();
 
@@ -116,11 +116,11 @@ class HistorialProveedoresTest extends TestCase
     public function test_el_rango_se_acota_a_tres_meses(): void
     {
         $empresa = $this->crearEmpresa();
-        $calidad = $this->crearUsuarioInterno($empresa, 'Calidad');
+        $compras = $this->crearUsuarioInterno($empresa, 'Compras');
 
         $datos = $this->getJson(
             '/api/reportes/historial-proveedores?desde=' . now()->subYears(2)->toDateString() . '&hasta=' . now()->toDateString(),
-            $this->cabecerasComo($calidad, $empresa)
+            $this->cabecerasComo($compras, $empresa)
         )->assertSuccessful()->json();
 
         $dias = now()->parse($datos['desde'])->diffInDays(now()->parse($datos['hasta'])) + 1;
@@ -132,7 +132,7 @@ class HistorialProveedoresTest extends TestCase
     public function test_el_filtro_por_fecha_deja_fuera_lo_anterior(): void
     {
         $empresa = $this->crearEmpresa();
-        $calidad = $this->crearUsuarioInterno($empresa, 'Calidad');
+        $compras = $this->crearUsuarioInterno($empresa, 'Compras');
         [, $proveedor] = $this->crearProveedorConUsuario($empresa);
 
         $vieja = now()->subDays(40);
@@ -140,14 +140,14 @@ class HistorialProveedoresTest extends TestCase
 
         $ultimaSemana = $this->getJson(
             '/api/reportes/historial-proveedores?desde=' . now()->subDays(6)->toDateString(),
-            $this->cabecerasComo($calidad, $empresa)
+            $this->cabecerasComo($compras, $empresa)
         )->assertSuccessful()->json();
 
         $this->assertNull(collect($ultimaSemana['entregas'])->firstWhere('id_proveedor', $proveedor->Id_Proveedor));
 
         $tresMeses = $this->getJson(
             '/api/reportes/historial-proveedores?desde=' . now()->subDays(80)->toDateString(),
-            $this->cabecerasComo($calidad, $empresa)
+            $this->cabecerasComo($compras, $empresa)
         )->assertSuccessful()->json();
 
         $this->assertNotNull(collect($tresMeses['entregas'])->firstWhere('id_proveedor', $proveedor->Id_Proveedor));
@@ -157,28 +157,71 @@ class HistorialProveedoresTest extends TestCase
     {
         $empresa = $this->crearEmpresa();
         $otra = $this->crearEmpresa();
-        $calidad = $this->crearUsuarioInterno($empresa, 'Calidad');
+        $compras = $this->crearUsuarioInterno($empresa, 'Compras');
         [, $ajeno] = $this->crearProveedorConUsuario($otra);
 
         $this->entregaRegistrada($otra, $ajeno, now()->toDateString(), '11:00', '11:45');
 
-        $datos = $this->getJson('/api/reportes/historial-proveedores', $this->cabecerasComo($calidad, $empresa))
+        $datos = $this->getJson('/api/reportes/historial-proveedores', $this->cabecerasComo($compras, $empresa))
             ->assertSuccessful()
             ->json();
 
         $this->assertNull(collect($datos['entregas'])->firstWhere('id_proveedor', $ajeno->Id_Proveedor));
     }
 
-    public function test_compras_y_el_proveedor_no_entran(): void
+    /**
+     * Sistemas, Admin y Compras (12-nov-2026). Calidad lo tuvo unas horas
+     * ese mismo día y salió a propósito.
+     */
+    public function test_calidad_y_el_proveedor_no_entran(): void
     {
         $empresa = $this->crearEmpresa();
-        $compras = $this->crearUsuarioInterno($empresa, 'Compras');
+        $calidad = $this->crearUsuarioInterno($empresa, 'Calidad');
         [$usuarioProveedor] = $this->crearProveedorConUsuario($empresa);
 
-        $this->getJson('/api/reportes/historial-proveedores', $this->cabecerasComo($compras, $empresa))
+        $this->getJson('/api/reportes/historial-proveedores', $this->cabecerasComo($calidad, $empresa))
             ->assertForbidden();
 
         $this->getJson('/api/reportes/historial-proveedores', $this->cabecerasComo($usuarioProveedor, $empresa))
             ->assertForbidden();
+    }
+
+    public function test_sistemas_admin_y_compras_si_entran(): void
+    {
+        $empresa = $this->crearEmpresa();
+
+        foreach (['Sistemas', 'Admin', 'Compras'] as $rol) {
+            $usuario = $this->crearUsuarioInterno($empresa, $rol);
+
+            $this->getJson('/api/reportes/historial-proveedores', $this->cabecerasComo($usuario, $empresa))
+                ->assertSuccessful();
+        }
+    }
+
+    /**
+     * La espera es de la llegada a la recepción REAL (hora de SIGH), y la
+     * salida es la programada en el calendario: el portal no registra la
+     * hora real en que se va el camión.
+     */
+    public function test_muestra_la_espera_hasta_la_recepcion_y_la_salida_programada(): void
+    {
+        $empresa = $this->crearEmpresa();
+        $compras = $this->crearUsuarioInterno($empresa, 'Compras');
+        [, $proveedor] = $this->crearProveedorConUsuario($empresa);
+
+        $estado = $this->entregaRegistrada($empresa, $proveedor, now()->toDateString(), '05:00', '05:04', '05:45');
+        $estado->horario->update(['Hora_Salida' => '07:00']);
+
+        $datos = $this->getJson('/api/reportes/historial-proveedores', $this->cabecerasComo($compras, $empresa))
+            ->assertSuccessful()
+            ->json();
+
+        $entrega = collect($datos['entregas'])->firstWhere('id_proveedor', $proveedor->Id_Proveedor);
+        $this->assertSame('05:45', $entrega['hora_recepcion']);
+        $this->assertSame(41, $entrega['minutos_espera']);
+        $this->assertSame('07:00', $entrega['hora_salida']);
+
+        $resumen = collect($datos['por_proveedor'])->firstWhere('id_proveedor', $proveedor->Id_Proveedor);
+        $this->assertSame(41, $resumen['espera_promedio']);
     }
 }

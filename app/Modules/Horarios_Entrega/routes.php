@@ -69,7 +69,7 @@ Route::prefix('integraciones/bc/horarios-entrega')
 /**
  * Reporte "Historial de proveedores" (12-nov-2026): historia de entregas
  * con la hora citada, la hora real de arribo y el atraso, hasta 3 meses.
- * Solo lectura, para Calidad, Admin y Sistemas (lo verifica
+ * Solo lectura, para Sistemas, Admin y Compras (lo verifica
  * HistorialEntregasService::verificarAcceso).
  *
  * Cuelga de /reportes, como el historial de reclamos: en el portal se
