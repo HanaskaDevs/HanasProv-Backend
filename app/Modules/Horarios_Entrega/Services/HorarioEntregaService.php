@@ -747,6 +747,13 @@ class HorarioEntregaService
             fn ($q) => $q->where('Id_Empresa', $idEmpresa)
         )
             ->where('Estado', 'Pendiente')
+            // SOLO LAS DE HOY (12-nov-2026, pedido del usuario): una
+            // solicitud de arribo pide permiso para registrar una entrega
+            // que está ocurriendo AHORA. La de ayer ya no se puede
+            // resolver -el camión se fue- y lo único que hacía era
+            // ensuciar la bandeja. Las viejas quedan en la tabla con su
+            // estado Pendiente; no se tocan.
+            ->whereDate('Fecha', now()->toDateString())
             ->with(['horario.proveedor', 'solicitante'])
             ->orderBy('Fecha_Solicitud')
             ->get()
