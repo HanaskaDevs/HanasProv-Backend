@@ -326,6 +326,16 @@ class CalificacionProveedorService
             ]);
         }
 
+        // Un documento ya vencido no se aprueba (12-nov-2026): el proveedor
+        // tiene que subir el renovado. Rechazarlo sí se puede.
+        if ($aprobado && $documento->Fecha_Caducidad !== null && $documento->Fecha_Caducidad->lt(now()->startOfDay())) {
+            throw ValidationException::withMessages([
+                'documento' => [($documento->tipoDocumento?->Nombre_Documento ?? 'Este documento')
+                    .' venció el '.$documento->Fecha_Caducidad->format('d/m/Y')
+                    .'. No se puede aprobar: el proveedor tiene que subir el documento renovado.'],
+            ]);
+        }
+
         $documento->forceFill([
             'Estado_Calificacion' => $aprobado ? 'Aprobado' : 'Rechazado',
             'Comentario_Calificacion' => $observacion,
