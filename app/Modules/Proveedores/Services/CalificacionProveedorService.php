@@ -212,6 +212,12 @@ class CalificacionProveedorService
         return [
             'razon_social' => $proveedor->Razon_Social,
             'documentacion_registrada' => $proveedor->Fecha_Registro_Documentacion !== null,
+            // Lo que de verdad le falta o tiene vencido (12-nov-2026): el aviso
+            // de Calidad decía "probablemente le falten documentos" solo porque
+            // no presionó "Registrar documentación", aunque tuviera todos
+            // subidos y el problema fuera uno vencido (ej. LUAE de ALIMEC).
+            // Mismo cálculo que la calificación de recepciones.
+            'pendientes_documentacion' => app(DocumentoProveedorService::class)->pendientesDeDocumentacion($proveedor),
             // true = ya se calificaron todos y el admin confirmó con
             // "Registrar calificación" -> queda de solo lectura hasta que
             // el proveedor corrija algún documento rechazado (eso resetea
