@@ -63,6 +63,12 @@ class ProductoResource extends JsonResource
              * un "en revisión" que no dice a quién preguntarle.
              */
             'etapa_aprobacion' => $this->Etapa_Aprobacion,
+            // Código de Business Central y quién revisa el primer paso
+            // (13-nov-2026): con código lo revisa Catálogo, sin código
+            // Compras. La pantalla lo usa para habilitar los botones y para
+            // decirle al proveedor a quién está esperando.
+            'bc_nro_producto' => $this->tieneCodigoBc() ? trim((string) $this->Bc_Nro_Producto) : null,
+            'revisa_primer_paso' => $this->revisorPrimerPaso(),
             'comentario_calificacion' => $this->Comentario_Calificacion,
             // Grupos de producto (EK, CD, PH, IM...). whenLoaded para no
             // disparar una consulta por producto: el listado los trae con

@@ -30,6 +30,13 @@ use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
  * El aviso por correo nunca frena la acción: si el correo falla, la
  * decisión de Compras ya quedó guardada y se registra el error en el log
  * (mismo criterio que el posteo a BC).
+ *
+ * QUIÉN SE SIENTA EN ESTE ESCRITORIO (13-nov-2026, pedido del usuario):
+ * depende del producto. Con código de Business Central lo revisa
+ * CATÁLOGO; sin código -producto nuevo- lo sigue revisando COMPRAS (ver
+ * Producto::revisorPrimerPaso). Solo la ficha del producto: la
+ * documentación del proveedor no cambia. Admin, Sistemas y Calidad siguen
+ * pudiendo resolver cualquiera, como antes.
  */
 class RevisionComprasProductoService
 {
@@ -38,45 +45,79 @@ class RevisionComprasProductoService
     }
 
     /**
-     * Quién puede resolver esta etapa: Compras (los dueños del paso),
-     * más Admin y Sistemas -pedido explícito del usuario: "admin pueden
-     * aprobar tanto en el proceso de compras como en el de calidad", y
-     * Sistemas tiene acceso total en todo el portal-. Calidad entra con
-     * acceso total desde el 16-oct-2026 (pedido explícito del usuario).
-     *
-     * $soloVer: Catálogo (29-oct-2026) ve la bandeja -para saber qué entró y
-     * corregirle los datos desde Productos por proveedor- pero no aprueba,
-     * rechaza ni retira: esa decisión sigue siendo de Compras y Calidad.
+     * Quién puede ENTRAR a la bandeja: Compras y Catálogo (cada uno con lo
+     * suyo, ver pendientes()), más Admin, Sistemas y Calidad -Admin y
+     * Sistemas por pedido del usuario ("admin pueden aprobar tanto en el
+     * proceso de compras como en el de calidad"), Calidad con acceso total
+     * desde el 16-oct-2026-.
      */
-    public function verificarAcceso(Usuario $usuario, int $idEmpresaActiva, bool $soloVer = false): void
+    public function verificarAcceso(Usuario $usuario, int $idEmpresaActiva): void
     {
         if ($usuario->Tipo_Usuario !== 'Interno') {
             throw new AccessDeniedHttpException('Solo usuarios internos revisan los productos enviados.');
         }
 
-        if ($soloVer && $usuario->esCatalogo($idEmpresaActiva)) {
-            return;
-        }
-
         $puede = $usuario->esCompras($idEmpresaActiva)
-            || $usuario->esAdmin($idEmpresaActiva)
-            || $usuario->esSistemas($idEmpresaActiva)
-            || $usuario->esCalidad($idEmpresaActiva);
+            || $usuario->esCatalogo($idEmpresaActiva)
+            || $this->resuelveTodo($usuario, $idEmpresaActiva);
 
         if (! $puede) {
-            throw new AccessDeniedHttpException('Solo los roles Compras, Calidad, Admin y Sistemas revisan los productos enviados.');
+            throw new AccessDeniedHttpException('Solo los roles Compras, Catálogo, Calidad, Admin y Sistemas revisan los productos enviados.');
+        }
+    }
+
+    /** Admin, Sistemas y Calidad resuelven el primer paso de cualquier producto, con o sin código BC. */
+    private function resuelveTodo(Usuario $usuario, int $idEmpresaActiva): bool
+    {
+        return $usuario->esAdmin($idEmpresaActiva)
+            || $usuario->esSistemas($idEmpresaActiva)
+            || $usuario->esCalidad($idEmpresaActiva);
+    }
+
+    /**
+     * ¿Este usuario puede aprobar, devolver o retirar ESTE producto?
+     * Compras solo los que no tienen código BC; Catálogo solo los que sí.
+     */
+    public function puedeResolver(Usuario $usuario, int $idEmpresaActiva, Producto $producto): bool
+    {
+        if ($this->resuelveTodo($usuario, $idEmpresaActiva)) {
+            return true;
+        }
+
+        return $producto->tieneCodigoBc()
+            ? $usuario->esCatalogo($idEmpresaActiva)
+            : $usuario->esCompras($idEmpresaActiva);
+    }
+
+    private function verificarPuedeResolver(Usuario $usuario, int $idEmpresaActiva, Producto $producto): void
+    {
+        if (! $this->puedeResolver($usuario, $idEmpresaActiva, $producto)) {
+            throw new AccessDeniedHttpException($producto->tieneCodigoBc()
+                ? "\"{$producto->Nombre_Producto}\" tiene código de Business Central: lo revisa Catálogo."
+                : "\"{$producto->Nombre_Producto}\" es un producto nuevo, sin código de Business Central: lo revisa Compras.");
         }
     }
 
     /**
-     * Productos esperando a Compras, de todos los proveedores de la
+     * Productos esperando el primer paso, de todos los proveedores de la
      * empresa activa. Es la bandeja de esta etapa.
+     *
+     * Cada uno ve lo suyo (13-nov-2026): Compras, los productos sin código
+     * BC; Catálogo, los que tienen código; Admin, Sistemas y Calidad, todos.
+     * Quien tenga Compras y Catálogo a la vez ve los dos.
      */
     public function pendientes(Usuario $usuario, int $idEmpresaActiva)
     {
-        $this->verificarAcceso($usuario, $idEmpresaActiva, soloVer: true);
+        $this->verificarAcceso($usuario, $idEmpresaActiva);
+
+        $todos = $this->resuelveTodo($usuario, $idEmpresaActiva)
+            || ($usuario->esCompras($idEmpresaActiva) && $usuario->esCatalogo($idEmpresaActiva));
+        $conCodigo = fn ($q) => $q->whereNotNull('Bc_Nro_Producto')->whereRaw("LTRIM(RTRIM(Bc_Nro_Producto)) <> ''");
+        $sinCodigo = fn ($q) => $q->whereNull('Bc_Nro_Producto')->orWhereRaw("LTRIM(RTRIM(Bc_Nro_Producto)) = ''");
 
         return Producto::query()
+            ->when(! $todos && $usuario->esCatalogo($idEmpresaActiva), fn ($q) => $q->where($conCodigo))
+            ->when(! $todos && ! $usuario->esCatalogo($idEmpresaActiva), fn ($q) => $q->where($sinCodigo))
             ->whereHas('proveedor', fn ($q) => $q->where('Id_Empresa', $idEmpresaActiva)->where('Activo', 1))
             ->where('Activo', 1)
             ->where('Etapa_Aprobacion', Producto::ETAPA_COMPRAS)
@@ -87,7 +128,7 @@ class RevisionComprasProductoService
             ->get();
     }
 
-    /** Compras lo aprueba -> pasa a la bandeja de Calidad. */
+    /** Compras (o Catálogo, si tiene código BC) lo aprueba -> pasa a la bandeja de Calidad. */
     public function aprobar(Usuario $usuario, int $idEmpresaActiva, int $idProducto): Producto
     {
         $producto = $this->productoEnEtapaCompras($usuario, $idEmpresaActiva, $idProducto);
@@ -134,6 +175,18 @@ class RevisionComprasProductoService
         $noDisponibles = $productos->filter(
             fn (Producto $p) => $p->Etapa_Aprobacion !== Producto::ETAPA_COMPRAS || $p->Estado_Calificacion !== 'Pendiente'
         );
+
+        // Todo o nada también con los permisos: si la selección trae
+        // productos del otro escritorio (Compras vs Catálogo), no se aprueba
+        // ninguno y se dice cuál.
+        $ajenos = $productos->reject(fn (Producto $p) => $this->puedeResolver($usuario, $idEmpresaActiva, $p));
+
+        if ($ajenos->isNotEmpty()) {
+            throw new AccessDeniedHttpException(
+                'No se aprobó ninguno: '.$ajenos->pluck('Nombre_Producto')->take(3)->implode(', ')
+                .($ajenos->first()->tieneCodigoBc() ? ' lo revisa Catálogo (tiene código de Business Central).' : ' lo revisa Compras (producto nuevo).')
+            );
+        }
 
         if ($productos->count() !== count($ids) || $noDisponibles->isNotEmpty()) {
             $nombres = $noDisponibles->pluck('Nombre_Producto')->take(3)->implode(', ');
@@ -244,9 +297,11 @@ class RevisionComprasProductoService
 
         if ($producto->Etapa_Aprobacion !== Producto::ETAPA_COMPRAS || $producto->Estado_Calificacion !== 'Pendiente') {
             throw ValidationException::withMessages([
-                'producto' => ['Este producto ya no está esperando la revisión de Compras.'],
+                'producto' => ['Este producto ya no está esperando esta revisión.'],
             ]);
         }
+
+        $this->verificarPuedeResolver($usuario, $idEmpresaActiva, $producto);
 
         return $producto;
     }

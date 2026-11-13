@@ -19,6 +19,17 @@ class Producto extends BaseModel
     public const ETAPA_CALIDAD = 'Calidad';
 
     /**
+     * Quién resuelve el PRIMER paso de la revisión (13-nov-2026, pedido del
+     * usuario): el producto que ya tiene código de Business Central lo
+     * revisa CATÁLOGO; el que no lo tiene -producto nuevo para Hanaska- lo
+     * sigue revisando COMPRAS. La etapa en la base sigue llamándose
+     * 'Compras' (ETAPA_COMPRAS = primer escritorio): no se migra nada, solo
+     * cambia quién se sienta en ese escritorio según el producto.
+     */
+    public const REVISA_COMPRAS = 'Compras';
+    public const REVISA_CATALOGO = 'Catálogo';
+
+    /**
      * Categoría del producto (22-oct-2026). Mismos valores que la
      * clasificación del calendario de horarios.
      */
@@ -82,6 +93,18 @@ class Producto extends BaseModel
         'Fecha_Modificacion' => 'datetime',
         'Fecha_Calificacion' => 'datetime',
     ];
+
+    /** Tiene código de Business Central (Bc_Nro_Producto con algo que no sean espacios). */
+    public function tieneCodigoBc(): bool
+    {
+        return trim((string) $this->Bc_Nro_Producto) !== '';
+    }
+
+    /** Rol que resuelve el primer paso de la revisión de este producto (ver REVISA_CATALOGO). */
+    public function revisorPrimerPaso(): string
+    {
+        return $this->tieneCodigoBc() ? self::REVISA_CATALOGO : self::REVISA_COMPRAS;
+    }
 
     public function proveedor(): BelongsTo
     {
