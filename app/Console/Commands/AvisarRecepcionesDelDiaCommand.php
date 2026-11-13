@@ -6,6 +6,7 @@ use App\Models\Empresa;
 use App\Modules\Auditorias\Notifications\RecepcionesDelDiaNotification;
 use App\Modules\Auditorias\Services\AgendaRecepcionService;
 use App\Modules\Auth\Models\Usuario;
+use App\Modules\Horarios_Entrega\Models\HorarioEntregaProveedor;
 use App\Modules\Proveedores\Models\Proveedor;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
@@ -55,11 +56,18 @@ class AvisarRecepcionesDelDiaCommand extends Command
                 continue;
             }
 
+            $horarios = $this->horariosPorProveedor($empresa->Id_Empresa, $proveedores->pluck('Id_Proveedor')->all());
+
             Notification::send($destinatarios, new RecepcionesDelDiaNotification(
                 $proveedores->map(fn (Proveedor $p) => [
                     'razon_social' => $p->Razon_Social ?? 'Proveedor sin razón social',
                     'nombre_comercial' => $p->Nombre_Comercial,
                     'ruc' => $p->Ruc,
+                    // Horario de entrega (12-nov-2026, pedido del usuario):
+                    // quien va a recibir necesita saber qué día y a qué hora
+                    // se espera a ese proveedor, sin tener que abrir el
+                    // calendario en otra pantalla.
+                    'horarios' => $horarios[$p->Id_Proveedor] ?? [],
                 ])->all(),
                 $empresa->Nombre_Comercial ?? $empresa->Razon_Social,
             ));
@@ -71,6 +79,42 @@ class AvisarRecepcionesDelDiaCommand extends Command
         $this->info("Listo. Empresas avisadas: {$totalAvisos}.");
 
         return self::SUCCESS;
+    }
+
+    /**
+     * Los horarios de entrega activos de cada proveedor, ya legibles
+     * ("Lunes 08:00 · anden 3").
+     *
+     * Un proveedor puede entregar varios días de la semana, así que la
+     * clave trae una LISTA y no una sola línea. Se hace en una consulta
+     * para todos los proveedores del aviso, no una por proveedor.
+     *
+     * @param  array<int, int>  $idsProveedor
+     * @return array<int, array<int, string>>
+     */
+    protected function horariosPorProveedor(int $idEmpresa, array $idsProveedor): array
+    {
+        if ($idsProveedor === []) {
+            return [];
+        }
+
+        $orden = array_flip(HorarioEntregaProveedor::DIAS);
+
+        return HorarioEntregaProveedor::where('Id_Empresa', $idEmpresa)
+            ->whereIn('Id_Proveedor', $idsProveedor)
+            ->where('Activo', 1)
+            ->get()
+            ->sortBy(fn (HorarioEntregaProveedor $h) => [$orden[$h->Dia_Entrega] ?? 99, (string) $h->Hora_Llegada])
+            ->groupBy('Id_Proveedor')
+            ->map(fn ($delProveedor) => $delProveedor
+                ->map(function (HorarioEntregaProveedor $h) {
+                    $linea = trim(($h->Dia_Entrega ?? '') . ' ' . substr((string) $h->Hora_Llegada, 0, 5));
+
+                    return $h->Anden_Puerta ? $linea . ' · andén ' . $h->Anden_Puerta : $linea;
+                })
+                ->values()
+                ->all())
+            ->all();
     }
 
     /**

@@ -68,6 +68,16 @@
                             @if (! empty($proveedor['nombre_comercial'])){{ $proveedor['nombre_comercial'] }} · @endif
                             RUC {{ $proveedor['ruc'] ?? 'no registrado' }}
                           </p>
+                          {{-- Horario de entrega (12-nov-2026): se dice
+                               siempre, incluso cuando no hay ninguno
+                               cargado, para que se note que falta. --}}
+                          <p style="margin:6px 0 0 0; font-size:12px; color:#274E61;">
+                            @if (! empty($proveedor['horarios']))
+                              <strong>Horario de entrega:</strong> {{ implode(' · ', $proveedor['horarios']) }}
+                            @else
+                              <span style="color:#9aa7ab;">Sin horario de entrega registrado</span>
+                            @endif
+                          </p>
                         </td>
                       </tr>
                     </table>
