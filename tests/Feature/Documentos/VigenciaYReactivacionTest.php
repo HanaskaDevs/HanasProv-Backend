@@ -134,10 +134,17 @@ class VigenciaYReactivacionTest extends TestCase
             'Fecha_Creacion' => now(),
         ]);
 
-        // Con el documento TODAVÍA vencido no se reactiva, aunque esté
-        // aprobado: si no, el comando de la mañana lo volvería a suspender
-        // y quedaría un ida y vuelta diario con su correo cada vez.
-        $servicio->calificarDocumento($admin, $empresa->Id_Empresa, $vencido->Id_Documento_Proveedor, aprobado: true, observacion: null);
+        // Con el documento TODAVÍA vencido no se reactiva: si no, el comando
+        // de la mañana lo volvería a suspender y quedaría un ida y vuelta
+        // diario con su correo cada vez. Desde el 12-nov-2026 ni siquiera se
+        // deja aprobar un documento vencido (CalificacionProveedorService::
+        // calificarDocumento), así que el intento tiene que fallar.
+        try {
+            $servicio->calificarDocumento($admin, $empresa->Id_Empresa, $vencido->Id_Documento_Proveedor, aprobado: true, observacion: null);
+            $this->fail('Un documento vencido no se debería poder aprobar.');
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            $this->assertStringContainsString('No se puede aprobar', collect($e->errors())->flatten()->implode(' '));
+        }
         $this->assertSame(
             EstadoProveedor::SUSPENDIDO,
             (int) $proveedor->fresh()->Id_Estado_Proveedor,
