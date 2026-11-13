@@ -13,8 +13,10 @@ use Tests\TestCase;
 /**
  * Rol Catálogo (29-oct-2026): Catálogo de productos, Productos por proveedor
  * y Productos por revisar. Edita los DATOS de cualquier producto, esté o no
- * aprobado, sin cambiarle el estado; no carga documentos, no crea ni elimina
- * productos y no aprueba ni rechaza.
+ * aprobado, sin cambiarle el estado; no carga documentos y no crea ni
+ * elimina productos. Desde el 13-nov-2026 resuelve el primer paso de la
+ * revisión de los productos CON código de Business Central (los nuevos, sin
+ * código, siguen siendo de Compras): ver RevisionPorCodigoBcTest.
  */
 class RolCatalogoTest extends TestCase
 {
@@ -152,7 +154,13 @@ class RolCatalogoTest extends TestCase
         )->assertForbidden();
     }
 
-    public function test_ve_productos_por_revisar_pero_no_aprueba_ni_rechaza(): void
+    /**
+     * Desde el 13-nov-2026 Catálogo SÍ resuelve el primer paso de los
+     * productos que tienen código de Business Central (ver
+     * RevisionPorCodigoBcTest). Los productos nuevos, sin código, siguen
+     * siendo de Compras: Catálogo no los ve en su bandeja ni los resuelve.
+     */
+    public function test_no_ve_ni_resuelve_los_productos_nuevos_sin_codigo_bc(): void
     {
         [, $proveedor, $cabeceras] = $this->escenario();
         $producto = $this->producto($proveedor, [
@@ -162,7 +170,7 @@ class RolCatalogoTest extends TestCase
         ]);
 
         $ids = collect($this->getJson('/api/productos-revision', $cabeceras)->assertOk()->json())->pluck('id_producto');
-        $this->assertContains($producto->Id_Producto, $ids->all());
+        $this->assertNotContains($producto->Id_Producto, $ids->all());
 
         $this->postJson("/api/productos-revision/{$producto->Id_Producto}/aprobar", [], $cabeceras)->assertForbidden();
         $this->postJson("/api/productos-revision/{$producto->Id_Producto}/rechazar", ['observacion' => 'No corresponde este producto'], $cabeceras)->assertForbidden();

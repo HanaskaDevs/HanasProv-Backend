@@ -34,13 +34,30 @@ class AvisoProductosService
     /**
      * Paso 1: el proveedor mandó productos a aprobar.
      *
-     * Va a los usuarios con rol Compras de esa empresa MÁS las direcciones
-     * fijas de config('portal.copias_aviso_compras') -las jefaturas, que no
-     * tienen el rol en el portal pero quieren enterarse igual-.
+     * Desde el 13-nov-2026 el primer paso se reparte (ver
+     * Producto::revisorPrimerPaso): los productos SIN código de Business
+     * Central -nuevos- van a Compras, y los que YA tienen código, a
+     * Catálogo. Si el envío trae de los dos, sale un correo a cada rol con
+     * lo suyo.
+     *
+     * A Compras se suman las direcciones fijas de
+     * config('portal.copias_aviso_compras') -las jefaturas, que no tienen el
+     * rol en el portal pero quieren enterarse igual-.
      *
      * @param  \Illuminate\Support\Collection<int, Producto>  $productos
      */
     public function avisarACompras($productos, Usuario $proveedorUsuario): void
+    {
+        [$conCodigo, $sinCodigo] = $productos->partition(fn (Producto $p) => $p->tieneCodigoBc());
+
+        $this->avisarPrimerPaso($sinCodigo->values(), $proveedorUsuario, Producto::REVISA_COMPRAS);
+        $this->avisarPrimerPaso($conCodigo->values(), $proveedorUsuario, Producto::REVISA_CATALOGO);
+    }
+
+    /**
+     * @param  \Illuminate\Support\Collection<int, Producto>  $productos
+     */
+    private function avisarPrimerPaso($productos, Usuario $proveedorUsuario, string $rol): void
     {
         if ($productos->isEmpty()) {
             return;
@@ -48,10 +65,10 @@ class AvisoProductosService
 
         $primero = $productos->first();
         $proveedor = $primero->proveedor;
-        $destinatarios = $this->correosDelRol($proveedor->Id_Empresa, 'Compras');
+        $destinatarios = $this->correosDelRol($proveedor->Id_Empresa, $rol);
 
         if (empty($destinatarios)) {
-            Log::warning('Aviso a Compras: no hay a quién avisar.', [
+            Log::warning("Aviso a {$rol}: no hay a quién avisar.", [
                 'id_empresa' => $proveedor->Id_Empresa,
             ]);
 
@@ -70,13 +87,13 @@ class AvisoProductosService
                     : "{$cuantos} productos pendientes de revisión de {$this->nombreDe($proveedor)}",
                 mensaje: 'El proveedor <strong>'.e($this->nombreDe($proveedor)).'</strong> envió '
                     .($cuantos === 1 ? 'un producto' : "{$cuantos} productos")
-                    .' a aprobación. Compras debe revisarlo antes de que pase a Calidad.',
+                    ." a aprobación. {$rol} debe revisarlo antes de que pase a Calidad.",
                 nombreProveedor: $this->nombreDe($proveedor),
                 nombreProducto: $nombres.$resto,
                 urlAccion: $this->url('/productos-revision'),
                 textoAccion: 'Revisar los productos',
             ),
-            contexto: ['paso' => 'compras', 'id_usuario_proveedor' => $proveedorUsuario->Id_Usuario]
+            contexto: ['paso' => $rol, 'id_usuario_proveedor' => $proveedorUsuario->Id_Usuario]
         );
     }
 
