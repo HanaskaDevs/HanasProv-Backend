@@ -12,6 +12,7 @@ use App\Console\Commands\AvisarRecepcionesSinCalificarCommand;
 use App\Console\Commands\AvisarVencimientoDocumentosCommand;
 use App\Console\Commands\SuspenderProveedoresDocumentacionVencidaCommand;
 use App\Console\Commands\SincronizarEstadosSighCommand;
+use App\Console\Commands\HistorialHorarioProveedorCommand;
 use App\Console\Commands\RecordarDocumentacionIncompletaCommand;
 
 /*
@@ -98,6 +99,12 @@ Schedule::command(ReconciliarEstadosProveedoresCommand::class)->everyThirtyMinut
 // por si una corrida se demora más de un minuto (SIGH lento, etc.), no se
 // amontonan corridas encima.
 Schedule::command(SincronizarEstadosSighCommand::class)->everyMinute()->withoutOverlapping();
+// Historial de horario por proveedor (16-nov-2026): una fila por cita, haya
+// llegado o no, para ver puntualidad y estados por proveedor. Cada 5 minutos
+// alcanza (es historia, no el tablero en vivo); revisa además los 7 días
+// anteriores porque las aprobaciones de arribo se resuelven días después.
+// Solo lee tablas del portal. Ver HistorialHorarioProveedorService.
+Schedule::command(HistorialHorarioProveedorCommand::class)->everyFiveMinutes()->withoutOverlapping();
 // 05:00, antes de que empiecen a entrar las recepciones: el aviso dice
 // "estos proveedores entregan HOY y todavía deben su calificación del año",
 // y Calidad tiene que tenerlo en la bandeja cuando llegue. La primera
