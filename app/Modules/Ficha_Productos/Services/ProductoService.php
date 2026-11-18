@@ -287,6 +287,47 @@ class ProductoService
     }
 
     /**
+     * Escribe los DATOS de un producto y nada más: no le cambia el estado, no
+     * lo devuelve a calificación y NO comprueba permisos ni si está en
+     * revisión. Quien llama ya decidió todo eso.
+     *
+     * Hoy la usa solo el Excel de Catálogo en "Productos por revisar"
+     * (18-nov-2026, ver RevisionCatalogoExcelService), que actualiza de una
+     * vez muchos productos que están justamente EN REVISIÓN: pasar por
+     * actualizar() los rechazaría uno por uno.
+     *
+     * Está acá y no en ese servicio para que los campos del producto se sigan
+     * escribiendo en UN solo archivo (mismo motivo que medidasDelProducto):
+     * un campo nuevo que se agregue al producto se suma acá al lado de
+     * actualizar() y no queda olvidado en otro módulo.
+     *
+     * $data trae TODAS las claves de GuardarProductoRequest: las que falten
+     * se guardan vacías, igual que en actualizar(). 'grupos' es la única
+     * opcional (sin la clave, los grupos no se tocan).
+     *
+     * @param  array<string, mixed>  $data
+     */
+    public function guardarDatosSinCambiarEstado(Usuario $usuario, Producto $producto, array $data): void
+    {
+        $producto->forceFill([
+            'Id_Unidad_Presentacion' => $data['id_unidad_presentacion'],
+            'Nombre_Producto' => mb_strtoupper($data['nombre_producto'], 'UTF-8'),
+            'Codigo_Barras' => $data['codigo_barras'] ?? null,
+            // Mismo candado que en actualizar(): con una solicitud de cambio
+            // de precio abierta, el precio no se pisa por un costado.
+            'Precio' => $producto->Precio_En_Revision ? $producto->Precio : ($data['precio'] ?? null),
+            'Clasificacion' => $data['clasificacion'] ?? $producto->Clasificacion,
+            ...$this->medidasDelProducto($data),
+            'Modificado_Por' => $usuario->Id_Usuario,
+            'Fecha_Modificacion' => now(),
+        ])->save();
+
+        if (array_key_exists('grupos', $data)) {
+            $producto->grupos()->sync($data['grupos'] ?? []);
+        }
+    }
+
+    /**
      * Elimina un producto completo (borrado físico, ya que aún no ha sido
      * enviado a calificación -> no requiere trazabilidad histórica; los que
      * vienen de BC se desactivan, ver quitarProducto). Solo

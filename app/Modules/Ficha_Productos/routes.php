@@ -3,6 +3,7 @@
 use App\Modules\Auth\Http\Middleware\EmpresaActiva;
 use App\Modules\Ficha_Productos\Http\Controllers\ProductoController;
 use App\Modules\Ficha_Productos\Http\Controllers\ProductosDeProveedorController;
+use App\Modules\Ficha_Productos\Http\Controllers\RevisionCatalogoExcelController;
 use App\Modules\Ficha_Productos\Http\Controllers\RevisionComprasController;
 use App\Modules\Ficha_Productos\Http\Controllers\SolicitudCambioPrecioController;
 use App\Modules\Ficha_Productos\Http\Controllers\UnidadPresentacionController;
@@ -95,6 +96,15 @@ Route::prefix('productos-revision')
     ->middleware(['auth:sanctum', EmpresaActiva::class])
     ->group(function () {
         Route::get('/', [RevisionComprasController::class, 'pendientes']);
+
+        // Excel de lo que espera a CATÁLOGO (18-nov-2026): descargar todo,
+        // corregirlo en el archivo y volver a subirlo en dos pasos (validar
+        // sin guardar, después importar). Van ANTES de los comodines
+        // '/{producto}/...' como el resto de las rutas literales.
+        Route::get('/catalogo/exportar', [RevisionCatalogoExcelController::class, 'exportar']);
+        Route::post('/catalogo/importar/validar', [RevisionCatalogoExcelController::class, 'validarImportacion']);
+        Route::post('/catalogo/importar', [RevisionCatalogoExcelController::class, 'importar']);
+
         Route::post('/aprobar-varios', [RevisionComprasController::class, 'aprobarVarios']);
         Route::post('/{producto}/aprobar', [RevisionComprasController::class, 'aprobar']);
         Route::post('/{producto}/rechazar', [RevisionComprasController::class, 'rechazar']);
