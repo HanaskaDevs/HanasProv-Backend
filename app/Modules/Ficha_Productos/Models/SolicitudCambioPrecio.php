@@ -19,8 +19,8 @@ class SolicitudCambioPrecio extends BaseModel
     ];
 
     protected $casts = [
-        'Precio_Anterior' => 'decimal:2',
-        'Precio_Nuevo' => 'decimal:2',
+        'Precio_Anterior' => 'decimal:4',
+        'Precio_Nuevo' => 'decimal:4',
         'Fecha_Solicitud' => 'datetime',
         'Fecha_Resolucion' => 'datetime',
     ];

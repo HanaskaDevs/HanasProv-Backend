@@ -50,11 +50,11 @@
                   <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
                     <tr>
                       <td style="font-size:13px; color:#6b7c82; padding:4px 0;">Precio actual</td>
-                      <td align="right" style="font-size:14px; color:#142831; padding:4px 0;">${{ number_format((float) $precioAnterior, 2) }}</td>
+                      <td align="right" style="font-size:14px; color:#142831; padding:4px 0;">${{ \App\Shared\FormatoPrecio::mostrar($precioAnterior) }}</td>
                     </tr>
                     <tr>
                       <td style="font-size:13px; color:#6b7c82; padding:4px 0;">Precio solicitado</td>
-                      <td align="right" style="font-size:14px; font-weight:bold; color:#142831; padding:4px 0;">${{ number_format((float) $precioNuevo, 2) }}</td>
+                      <td align="right" style="font-size:14px; font-weight:bold; color:#142831; padding:4px 0;">${{ \App\Shared\FormatoPrecio::mostrar($precioNuevo) }}</td>
                     </tr>
                   </table>
                 </td>

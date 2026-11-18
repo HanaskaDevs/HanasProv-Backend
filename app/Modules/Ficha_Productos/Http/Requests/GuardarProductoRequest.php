@@ -4,6 +4,7 @@ namespace App\Modules\Ficha_Productos\Http\Requests;
 
 use App\Modules\Ficha_Productos\Models\Producto;
 use App\Modules\Ficha_Productos\Models\UnidadPresentacion;
+use App\Shared\FormatoPrecio;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -24,7 +25,9 @@ class GuardarProductoRequest extends FormRequest
             'clasificacion' => ['required', Rule::in(Producto::CLASIFICACIONES)],
             'codigo_barras' => ['nullable', 'string', 'max:50'],
             'id_unidad_presentacion' => ['required', 'integer', 'exists:Unidad_Presentacion,Id_Unidad_Presentacion'],
-            'precio' => ['nullable', 'numeric', 'min:0'],
+            // Hasta 4 decimales (18-nov-2026): mismas reglas en el Excel de
+            // Catálogo y en la solicitud de cambio de precio.
+            'precio' => ['nullable', ...FormatoPrecio::reglas()],
             'peso' => ['nullable', 'numeric', 'min:0'],
             // "Unidades x Masterpack (caja)" en pantalla. La columna se
             // sigue llamando Unidad_Por_Caja: es el mismo dato de siempre,
@@ -88,6 +91,7 @@ class GuardarProductoRequest extends FormRequest
         return [
             'grupos.*.exists' => 'Uno de los grupos de producto seleccionados ya no está disponible.',
             'contenido_paquete.required' => 'Indica cuántas unidades trae el paquete.',
+            'precio.decimal' => 'El precio admite hasta 4 decimales.',
         ];
     }
 

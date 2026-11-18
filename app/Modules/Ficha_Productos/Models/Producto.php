@@ -70,7 +70,9 @@ class Producto extends BaseModel
     ];
 
     protected $casts = [
-        'Precio' => 'decimal:2',
+        // 4 decimales desde el 18-nov-2026 (ver la migración
+        // 2026_11_18_090000 y App\Shared\FormatoPrecio).
+        'Precio' => 'decimal:4',
         'Oculto_Proveedor' => 'boolean',
         'Peso' => 'decimal:3',
         // 6 decimales: el volumen es en m³ y sale de medidas en cm, así
