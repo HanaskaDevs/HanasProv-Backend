@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Modules\Horarios_Entrega\Models\HorarioEntregaProveedor;
 use App\Modules\Horarios_Entrega\Services\AnuncioVozAudioService;
 use App\Modules\Horarios_Entrega\Services\CargaMasivaHorariosService;
+use App\Modules\Horarios_Entrega\Services\FueraPlanificacionService;
 use App\Modules\Horarios_Entrega\Services\HorarioEntregaService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -22,7 +23,8 @@ class HorarioEntregaController extends Controller
 {
     public function __construct(
         protected HorarioEntregaService $servicio,
-        protected CargaMasivaHorariosService $cargaMasiva
+        protected CargaMasivaHorariosService $cargaMasiva,
+        protected FueraPlanificacionService $fueraPlanificacion
     ) {
     }
 
@@ -37,6 +39,21 @@ class HorarioEntregaController extends Controller
 
         return response()->json(
             $this->servicio->listar($request->user(), $this->idEmpresa($request), $clasificacion)
+        );
+    }
+
+    /**
+     * Sección "Pedidos fuera de planificación" (19-nov-2026): los turnos de
+     * esta semana y las ventanas. Solo lectura; se agendan en BC.
+     */
+    public function fueraPlanificacion(Request $request): JsonResponse
+    {
+        $clasificacion = $request->validate([
+            'clasificacion' => ['nullable', 'in:'.implode(',', HorarioEntregaProveedor::CLASIFICACIONES)],
+        ])['clasificacion'] ?? null;
+
+        return response()->json(
+            $this->fueraPlanificacion->semana($request->user(), $this->idEmpresa($request), $clasificacion)
         );
     }
 

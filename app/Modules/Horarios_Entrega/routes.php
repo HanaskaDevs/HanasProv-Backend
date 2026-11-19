@@ -40,6 +40,8 @@ Route::prefix('horarios-entrega')
         // Con límite propio: cada frase nueva hace trabajar a Piper.
         Route::get('/anuncio-audio', [HorarioEntregaController::class, 'anuncioAudio'])
             ->middleware('throttle:60,1');
+        // Pedidos fuera de planificación de la semana (19-nov-2026), solo lectura.
+        Route::get('/fuera-planificacion', [HorarioEntregaController::class, 'fueraPlanificacion']);
         Route::get('/aprobaciones', [HorarioEntregaController::class, 'solicitudesPendientes']);
         Route::post('/aprobaciones/{solicitud}/aprobar', [HorarioEntregaController::class, 'aprobarSolicitud']);
         Route::post('/aprobaciones/{solicitud}/rechazar', [HorarioEntregaController::class, 'rechazarSolicitud']);
@@ -64,6 +66,17 @@ Route::prefix('integraciones/bc/horarios-entrega')
     ->group(function () {
         Route::get('/', [IntegracionBcHorariosController::class, 'index']);
         Route::post('/carga-masiva', [IntegracionBcHorariosController::class, 'cargaMasiva']);
+    });
+
+/**
+ * Pedidos fuera de planificación desde Business Central (19-nov-2026): mismo
+ * token y misma empresa que el calendario. Ver FueraPlanificacionService.
+ */
+Route::prefix('integraciones/bc/fuera-planificacion')
+    ->middleware([TokenIntegracionBc::class])
+    ->group(function () {
+        Route::get('/', [IntegracionBcHorariosController::class, 'fueraPlanificacion']);
+        Route::post('/', [IntegracionBcHorariosController::class, 'sincronizarFueraPlanificacion']);
     });
 
 /**

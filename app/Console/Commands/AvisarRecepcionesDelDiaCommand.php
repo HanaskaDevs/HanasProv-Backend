@@ -100,7 +100,10 @@ class AvisarRecepcionesDelDiaCommand extends Command
 
         $orden = array_flip(HorarioEntregaProveedor::DIAS);
 
+        // El horario semanal del proveedor (no sus turnos sueltos fuera de
+        // planificación, que no se repiten).
         return HorarioEntregaProveedor::where('Id_Empresa', $idEmpresa)
+            ->planificados()
             ->whereIn('Id_Proveedor', $idsProveedor)
             ->where('Activo', 1)
             ->get()

@@ -244,7 +244,12 @@ class HorarioEntregaService
     {
         $this->verificarAccesoLectura($usuario, $idEmpresa);
 
+        // Solo el calendario SEMANAL: los pedidos fuera de planificación
+        // tienen su propia sección (FueraPlanificacionService::semana). Esto
+        // lo usa también la integración con BC: si los incluyera, BC los
+        // vería como horarios que no tiene y los daría de baja.
         $query = HorarioEntregaProveedor::where('Id_Empresa', $idEmpresa)
+            ->planificados()
             ->where('Activo', 1)
             ->with('proveedor');
 
@@ -290,16 +295,22 @@ class HorarioEntregaService
             return collect();
         }
 
+        $hoy = now()->startOfDay();
+
+        // El calendario semanal y, desde el 19-nov-2026, los pedidos fuera de
+        // planificación del proveedor que todavía no pasaron (su turno suelto
+        // de esta semana, con su fecha).
         $horarios = HorarioEntregaProveedor::where('Id_Empresa', $idEmpresa)
             ->where('Id_Proveedor', $proveedor->Id_Proveedor)
             ->where('Activo', 1)
+            ->where(fn ($q) => $q->whereNull('Fecha_Fuera_Planificacion')
+                ->orWhereDate('Fecha_Fuera_Planificacion', '>=', $hoy->toDateString()))
             ->with('proveedor')
             ->get();
 
         $codigosBc = $this->resolverCodigosBc($idEmpresa, $horarios->pluck('proveedor')->filter());
 
         // Próxima fecha de cada día de la semana, desde hoy.
-        $hoy = now()->startOfDay();
         $proximaFecha = [];
         for ($i = 0; $i < 7; $i++) {
             $fecha = $hoy->copy()->addDays($i);
@@ -322,7 +333,9 @@ class HorarioEntregaService
 
         return $horarios
             ->map(function (HorarioEntregaProveedor $h) use ($codigosBc, $proximaFecha, $pedidosPorFecha) {
-                $fecha = $proximaFecha[$h->Dia_Entrega] ?? null;
+                $fecha = $h->esFueraDePlanificacion()
+                    ? $h->Fecha_Fuera_Planificacion->toDateString()
+                    : ($proximaFecha[$h->Dia_Entrega] ?? null);
 
                 return [
                     ...$this->serializar($h, $codigosBc),
@@ -332,7 +345,11 @@ class HorarioEntregaService
                         : [],
                 ];
             })
-            ->sort(fn ($a, $b) => (self::ORDEN_DIAS[$a['dia_entrega']] ?? 99) <=> (self::ORDEN_DIAS[$b['dia_entrega']] ?? 99))
+            ->sort(function ($a, $b) {
+                $ordenDia = (self::ORDEN_DIAS[$a['dia_entrega']] ?? 99) <=> (self::ORDEN_DIAS[$b['dia_entrega']] ?? 99);
+
+                return $ordenDia !== 0 ? $ordenDia : strcmp($a['hora_llegada'] ?? '', $b['hora_llegada'] ?? '');
+            })
             ->values();
     }
 
@@ -373,11 +390,12 @@ class HorarioEntregaService
         $this->verificarAccesoOperativo($usuario, $idEmpresa);
 
         $hoy = now();
-        $diaHoy = self::DIA_POR_INDICE[$hoy->dayOfWeek];
 
+        // Las citas de hoy: el calendario semanal de este día de la semana y
+        // los pedidos fuera de planificación con fecha de hoy (19-nov-2026).
         $query = HorarioEntregaProveedor::where('Id_Empresa', $idEmpresa)
             ->where('Activo', 1)
-            ->where('Dia_Entrega', $diaHoy)
+            ->queTocanEl($hoy)
             ->with('proveedor');
 
         if ($clasificacion) {
@@ -385,7 +403,10 @@ class HorarioEntregaService
         }
 
         if ($soloConPedidosRecientes) {
-            $query->whereIn('Id_Proveedor', $this->idsConPedidosRecientes($idEmpresa, $hoy));
+            // Un turno fuera de planificación se agendó a propósito para hoy:
+            // sale siempre, tenga o no pedidos recientes en la copia de BC.
+            $ids = $this->idsConPedidosRecientes($idEmpresa, $hoy);
+            $query->where(fn ($q) => $q->whereNotNull('Fecha_Fuera_Planificacion')->orWhereIn('Id_Proveedor', $ids));
         }
 
         $horarios = $query->get();
@@ -500,10 +521,57 @@ class HorarioEntregaService
             return self::ESTADO_PROGRAMADO;
         }
 
-        $minutosTarde = $horaLlegadaHoy->diffInMinutes($ahora);
-        $limiteRechazo = (int) config('portal.minutos_atrasado_a_rechazado', 30);
+        // 30 min en el calendario semanal, 10 en un turno fuera de
+        // planificación (ver HorarioEntregaProveedor::excedeTolerancia).
+        return $h->excedeTolerancia($horaLlegadaHoy->diffInSeconds($ahora))
+            ? self::ESTADO_RECHAZADO
+            : self::ESTADO_ATRASADO;
+    }
 
-        return $minutosTarde >= $limiteRechazo ? self::ESTADO_RECHAZADO : self::ESTADO_ATRASADO;
+    /** Estado que muestra un turno fuera de planificación de un día que ya pasó sin arribo. */
+    public const ESTADO_NO_LLEGO = 'No_Llego';
+
+    /**
+     * Estado de una cita en cualquier fecha (sección de pedidos fuera de
+     * planificación): hoy, el mismo de siempre; un día que ya pasó, lo que
+     * llegó a registrarse o "No llegó"; un día que viene, Programado.
+     */
+    public function estadoDeLaCita(HorarioEntregaProveedor $h, ?HorarioEntregaEstadoDiario $estadoDiario, Carbon $ahora): string
+    {
+        $fecha = $h->Fecha_Fuera_Planificacion?->toDateString() ?? $ahora->toDateString();
+
+        if ($fecha === $ahora->toDateString()) {
+            return $this->calcularEstado($h, $estadoDiario, $ahora);
+        }
+
+        if ($fecha > $ahora->toDateString()) {
+            return self::ESTADO_PROGRAMADO;
+        }
+
+        return match (true) {
+            (bool) $estadoDiario?->Hora_Entregado_Real => self::ESTADO_RECIBIDO,
+            (bool) $estadoDiario?->Hora_Recepcion_Real => self::ESTADO_EN_RECEPCION,
+            (bool) $estadoDiario?->Hora_Arribo_Real => self::ESTADO_ARRIBO,
+            default => self::ESTADO_NO_LLEGO,
+        };
+    }
+
+    /**
+     * serializar() de varios horarios resolviendo los códigos BC una sola
+     * vez (lo usa FueraPlanificacionService).
+     *
+     * @param  Collection<int, HorarioEntregaProveedor>  $horarios
+     * @return Collection<int, array<string, mixed>>
+     */
+    public function serializarVarios(Collection $horarios): Collection
+    {
+        if ($horarios->isEmpty()) {
+            return collect();
+        }
+
+        $codigosBc = $this->resolverCodigosBc((int) $horarios->first()->Id_Empresa, $horarios->pluck('proveedor')->filter());
+
+        return $horarios->map(fn (HorarioEntregaProveedor $h) => $this->serializar($h, $codigosBc))->values();
     }
 
     private function serializarEstadoDiario(HorarioEntregaProveedor $horario, HorarioEntregaEstadoDiario $estadoDiario, Carbon $ahora): array
@@ -671,7 +739,9 @@ class HorarioEntregaService
 
         if ($estadoActual === self::ESTADO_RECHAZADO) {
             throw ValidationException::withMessages([
-                'horario' => ['Este horario ya pasó a Rechazado (más de ' . config('portal.minutos_atrasado_a_rechazado', 30) . ' min de atraso). Envía una solicitud de aprobación en su lugar.'],
+                'horario' => [$horario->esFueraDePlanificacion()
+                    ? 'Este pedido fuera de planificación ya pasó los ' . $horario->toleranciaMinutos() . ' min de tolerancia: no se puede registrar el arribo.'
+                    : 'Este horario ya pasó a Rechazado (más de ' . config('portal.minutos_atrasado_a_rechazado', 30) . ' min de atraso). Envía una solicitud de aprobación en su lugar.'],
             ]);
         }
 
@@ -697,6 +767,14 @@ class HorarioEntregaService
     {
         $this->verificarAccesoCambiarEstado($usuario, $idEmpresa);
         $this->verificarPertenece($idEmpresa, $horario);
+
+        // Decisión del usuario (19-nov-2026): pasados los 10 min, un pedido
+        // fuera de planificación no se registra, ni con aprobación.
+        if ($horario->esFueraDePlanificacion()) {
+            throw ValidationException::withMessages([
+                'horario' => ['Los pedidos fuera de planificación no admiten solicitud de aprobación: pasados ' . $horario->toleranciaMinutos() . ' min de atraso ya no se registra el arribo.'],
+            ]);
+        }
 
         $hoy = now();
 
@@ -1088,6 +1166,11 @@ class HorarioEntregaService
             'tiempo_preparacion_min' => $h->Tiempo_Preparacion_Min,
             'tiempo_permanencia_min' => $h->Tiempo_Permanencia_Min,
             'hora_salida' => $h->Hora_Salida,
+            // Pedido fuera de planificación (19-nov-2026): turno de una fecha
+            // concreta agendado en BC, con 10 min de tolerancia y sin
+            // solicitud de aprobación.
+            'fuera_planificacion' => $h->esFueraDePlanificacion(),
+            'fecha_fuera_planificacion' => $h->Fecha_Fuera_Planificacion?->toDateString(),
         ];
     }
 }

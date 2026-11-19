@@ -111,7 +111,7 @@ class AgendaRecepcionService
         // ("HH:MM" ordena bien como texto), y a igual hora, alfabético.
         $horaDeLlegada = HorarioEntregaProveedor::where('Id_Empresa', $idEmpresa)
             ->where('Activo', 1)
-            ->where('Dia_Entrega', self::DIA_POR_INDICE[$fecha->dayOfWeek])
+            ->queTocanEl($fecha)
             ->whereIn('Id_Proveedor', $pendientes)
             ->get(['Id_Proveedor', 'Hora_Llegada'])
             ->groupBy('Id_Proveedor')
@@ -261,12 +261,16 @@ class AgendaRecepcionService
         ]);
     }
 
-    /** Filas del calendario de horarios activas con ese día de la semana. */
+    /**
+     * Filas del calendario de horarios activas con ese día de la semana, más
+     * los pedidos fuera de planificación de esa fecha (19-nov-2026): también
+     * son una entrega de ese día.
+     */
     protected function consultaCalendario(int $idEmpresa, CarbonInterface $fecha)
     {
         return HorarioEntregaProveedor::where('Id_Empresa', $idEmpresa)
             ->where('Activo', 1)
-            ->where('Dia_Entrega', self::DIA_POR_INDICE[$fecha->dayOfWeek]);
+            ->queTocanEl($fecha);
     }
 
     /**

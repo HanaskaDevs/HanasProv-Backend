@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Empresa;
 use App\Modules\Auth\Models\Usuario;
 use App\Modules\Horarios_Entrega\Services\CargaMasivaHorariosService;
+use App\Modules\Horarios_Entrega\Services\FueraPlanificacionService;
 use App\Modules\Horarios_Entrega\Services\HorarioEntregaService;
 use App\Modules\Proveedores\Models\Proveedor;
 use Illuminate\Http\JsonResponse;
@@ -32,7 +33,8 @@ class IntegracionBcHorariosController extends Controller
 {
     public function __construct(
         protected HorarioEntregaService $servicio,
-        protected CargaMasivaHorariosService $cargaMasiva
+        protected CargaMasivaHorariosService $cargaMasiva,
+        protected FueraPlanificacionService $fueraPlanificacion
     ) {
     }
 
@@ -93,6 +95,56 @@ class IntegracionBcHorariosController extends Controller
             $datos['filas'],
             $request->boolean('confirmar'),
             array_map('intval', $datos['conservar_ids'] ?? [])
+        );
+
+        return response()->json(['id_empresa' => $empresa->Id_Empresa, ...$resultado]);
+    }
+
+    /**
+     * Pedidos fuera de planificación de esta semana como los ve el portal
+     * (19-nov-2026), más las ventanas y la semana en curso: para revisar
+     * desde BC qué quedó allá.
+     */
+    public function fueraPlanificacion(Request $request): JsonResponse
+    {
+        $datos = $request->validate([
+            'empresa_bc' => ['required', 'string', 'max:100'],
+        ]);
+
+        $empresa = $this->empresa($datos['empresa_bc']);
+
+        return response()->json([
+            'id_empresa' => $empresa->Id_Empresa,
+            ...$this->fueraPlanificacion->semana($this->usuario(), $empresa->Id_Empresa),
+        ]);
+    }
+
+    /**
+     * BC manda TODOS sus turnos fuera de planificación de la semana y el
+     * portal queda igual (crea, actualiza, da de baja lo que BC ya no tiene
+     * y todavía no pasó). Cada turno vuelve con su resultado y, si no se
+     * pudo, el motivo. Con confirmar = false solo dice qué haría.
+     *
+     * turnos[]: id_bc (Nº de movimiento en BC), clasificacion, dia_entrega,
+     * fecha (AAAA-MM-DD, calculada en BC), codigo_bc, anden_puerta,
+     * hora_llegada (HH:MM), duracion_min (20, 40 o 60).
+     */
+    public function sincronizarFueraPlanificacion(Request $request): JsonResponse
+    {
+        $datos = $request->validate([
+            'empresa_bc' => ['required', 'string', 'max:100'],
+            'confirmar' => ['sometimes', 'boolean'],
+            'turnos' => ['present', 'array'],
+            'turnos.*' => ['array'],
+        ]);
+
+        $empresa = $this->empresa($datos['empresa_bc']);
+
+        $resultado = $this->fueraPlanificacion->sincronizarDesdeBc(
+            $this->usuario(),
+            $empresa->Id_Empresa,
+            $datos['turnos'],
+            $request->boolean('confirmar'),
         );
 
         return response()->json(['id_empresa' => $empresa->Id_Empresa, ...$resultado]);

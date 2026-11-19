@@ -272,4 +272,46 @@ return [
     */
     'horarios_solo_bc' => (bool) env('PORTAL_HORARIOS_SOLO_BC', true),
 
+    /*
+    | Pedidos fuera de planificación (19-nov-2026, pedido del usuario; ver
+    | FueraPlanificacionService). Turnos sueltos que Compras agenda en
+    | Business Central dentro de estas ventanas.
+    |
+    | - Un solo turno a la vez por CLASIFICACIÓN (sin importar la bodega ni el
+    |   andén) y solo entre turnos fuera de planificación: el calendario
+    |   semanal no cuenta (decisiones del usuario).
+    | - Duración 20, 40 o 60 min, y el turno tiene que TERMINAR a la hora de
+    |   cierre o antes: si cierra a las 16:00, a las 15:50 no cabe uno de 20.
+    | - El Guardia puede marcar el arribo hasta 'tolerancia_minutos' después
+    |   de la hora del turno (10, inclusive). Pasado eso no se registra y no
+    |   hay solicitud de aprobación (decisión del usuario: bloqueo total).
+    |
+    | LAS MISMAS VENTANAS ESTÁN EN BUSINESS CENTRAL (codeunit "CPP Fuera
+    | Plan" de la extensión Calendario_Portal_Proveedores), que valida al
+    | escribir. Si cambian, hay que cambiarlas en los dos lados; el portal es
+    | el que manda (vuelve a validar todo lo que llega).
+    */
+    'fuera_planificacion' => [
+        'tolerancia_minutos' => (int) env('PORTAL_FUERA_PLANIFICACION_TOLERANCIA_MIN', 10),
+        'duraciones' => [20, 40, 60],
+        // Clasificación => día => [apertura, cierre] en 'HH:MM'.
+        'ventanas' => [
+            'Perecibles' => [
+                'Jueves' => ['15:00', '17:00'],
+                'Viernes' => ['09:00', '12:00'],
+            ],
+            'No_Perecibles' => [
+                'Jueves' => ['15:20', '17:00'],
+                'Viernes' => ['09:00', '16:00'],
+            ],
+            'Fruver' => [
+                'Lunes' => ['14:00', '15:00'],
+                'Martes' => ['14:00', '15:00'],
+                'Miercoles' => ['14:00', '15:00'],
+                'Jueves' => ['14:00', '15:00'],
+                'Sabado' => ['15:00', '16:00'],
+            ],
+        ],
+    ],
+
 ];

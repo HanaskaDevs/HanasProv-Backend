@@ -1302,6 +1302,8 @@ class AsistenteHerramientas
             ->join('Proveedor as p', 'p.Id_Proveedor', '=', 'h.Id_Proveedor')
             ->where('h.Id_Empresa', $idEmpresa)
             ->where('h.Activo', 1)
+            // Calendario semanal (los turnos fuera de planificación tienen fecha y no se repiten).
+            ->whereNull('h.Fecha_Fuera_Planificacion')
             ->select([
                 'p.Razon_Social', 'p.Ruc', 'h.Dia_Entrega', 'h.Clasificacion', 'h.Anden_Puerta', 'h.Hora_Llegada',
                 'h.Hora_Salida', 'h.Tiempo_Preparacion_Min', 'h.Tiempo_Permanencia_Min',

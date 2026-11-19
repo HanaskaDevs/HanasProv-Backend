@@ -90,6 +90,7 @@ class HistorialHorarioProveedorService
     private const CAMPOS_FOTO = [
         'Id_Proveedor', 'Id_Empresa', 'Dia', 'Empresa', 'Cod_Proveedor', 'Ruc', 'Proveedor',
         'Nombre_Comercial', 'Clasificacion', 'Anden', 'Hora_Programada', 'Salida_Programada',
+        'Fuera_Planificacion',
     ];
 
     /** Lo que se sigue moviendo después del día (llegadas, aprobaciones, recepción). */
@@ -203,12 +204,13 @@ class HistorialHorarioProveedorService
      */
     private function horariosDelDia(Carbon $dia, string $modo, Collection $idsConMovimiento): Collection
     {
-        $nombreDia = self::DIA_POR_INDICE[$dia->dayOfWeek];
         $ids = $idsConMovimiento->map(fn ($id) => (int) $id);
 
         if ($modo === self::MODO_HOY) {
+            // Calendario semanal de este día + pedidos fuera de planificación
+            // con fecha de hoy (19-nov-2026).
             $ids = $ids->merge(
-                HorarioEntregaProveedor::where('Dia_Entrega', $nombreDia)->where('Activo', 1)->pluck('Id_Horario_Entrega_Proveedor')
+                HorarioEntregaProveedor::queTocanEl($dia)->where('Activo', 1)->pluck('Id_Horario_Entrega_Proveedor')
             );
         } elseif ($modo === self::MODO_RECONSTRUIR) {
             // El calendario de ESE día, aproximado: creado antes de que
@@ -219,7 +221,7 @@ class HistorialHorarioProveedorService
             $fin = $dia->copy()->addDay()->format('Y-m-d\TH:i:s');
 
             $ids = $ids->merge(
-                HorarioEntregaProveedor::where('Dia_Entrega', $nombreDia)
+                HorarioEntregaProveedor::queTocanEl($dia)
                     ->where(fn ($q) => $q->whereNull('Fecha_Creacion')->orWhere('Fecha_Creacion', '<', $fin))
                     ->where(fn ($q) => $q->where('Activo', 1)->orWhere('Fecha_Modificacion', '>=', $inicio))
                     ->pluck('Id_Horario_Entrega_Proveedor')
@@ -313,7 +315,6 @@ class HistorialHorarioProveedorService
         ?string $codigoBc,
     ): array {
         $proveedor = $horario->proveedor;
-        $limite = (int) config('portal.minutos_atrasado_a_rechazado', 30);
         $cerrado = $dia->lessThan($ahora->copy()->startOfDay());
 
         $programada = $this->horaDelDia($dia, $horario->Hora_Llegada);
@@ -330,9 +331,11 @@ class HistorialHorarioProveedorService
         $segundosAtraso = $arribo ? (int) $programada->diffInSeconds($arribo, false) : null;
 
         if ($arribo) {
+            // La tolerancia es la de la cita: 30 min el calendario, 10 un
+            // pedido fuera de planificación (HorarioEntregaProveedor::excedeTolerancia).
             $puntualidad = match (true) {
                 $segundosAtraso <= 0 => self::A_TIEMPO,
-                $segundosAtraso / 60 < $limite => self::ATRASADO,
+                ! $horario->excedeTolerancia($segundosAtraso) => self::ATRASADO,
                 default => self::FUERA_DE_PLAZO,
             };
             $minAtraso = intdiv($segundosAtraso, 60);
@@ -360,12 +363,13 @@ class HistorialHorarioProveedorService
             'Min_Atraso' => $minAtraso,
             'Llego' => $arribo ? 1 : 0,
             'Puntualidad' => $puntualidad,
-            'Estado' => $this->estado($estado, $solicitud, $cerrado, $programada, $ahora, $limite),
+            'Estado' => $this->estado($horario, $estado, $solicitud, $cerrado, $programada, $ahora),
             'Aprobacion' => $solicitud?->Estado,
             'Hora_Recepcion' => $recepcion?->format('H:i:s'),
             'Hora_Recibido' => $recibido?->format('H:i:s'),
             'Min_Espera' => ($arribo && $recepcion) ? intdiv((int) $arribo->diffInSeconds($recepcion, false), 60) : null,
             'Min_Descarga' => ($recepcion && $recibido) ? intdiv((int) $recepcion->diffInSeconds($recibido, false), 60) : null,
+            'Fuera_Planificacion' => $horario->esFueraDePlanificacion() ? 1 : 0,
         ];
     }
 
@@ -374,12 +378,12 @@ class HistorialHorarioProveedorService
      * (HorarioEntregaService::calcularEstado) más los del cierre del día.
      */
     private function estado(
+        HorarioEntregaProveedor $horario,
         ?HorarioEntregaEstadoDiario $estado,
         ?SolicitudAprobacionArribo $solicitud,
         bool $cerrado,
         Carbon $programada,
         CarbonInterface $ahora,
-        int $limite,
     ): string {
         return match (true) {
             (bool) $estado?->Hora_Entregado_Real => 'Recibido',
@@ -389,7 +393,7 @@ class HistorialHorarioProveedorService
             $solicitud?->Estado === 'Rechazada' => 'Rechazado',
             $cerrado => self::NO_LLEGO,
             $ahora->lessThanOrEqualTo($programada) => 'Programado',
-            $programada->diffInSeconds($ahora, false) / 60 < $limite => 'Atrasado',
+            ! $horario->excedeTolerancia($programada->diffInSeconds($ahora, false)) => 'Atrasado',
             default => 'Rechazado',
         };
     }

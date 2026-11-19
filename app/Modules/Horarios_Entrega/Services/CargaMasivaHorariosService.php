@@ -92,7 +92,10 @@ class CargaMasivaHorariosService
         // aunque sea en una fila con otro error.
         $clasificaciones = collect($resultados)->pluck('clasificacion')->filter()->unique()->values();
 
+        // Solo el calendario semanal: los pedidos fuera de planificación
+        // (19-nov-2026) se sincronizan aparte y no deben darse de baja acá.
         $existentes = HorarioEntregaProveedor::where('Id_Empresa', $idEmpresa)
+            ->planificados()
             ->where('Activo', 1)
             ->whereIn('Clasificacion', $clasificaciones)
             ->with('proveedor')
@@ -312,7 +315,7 @@ class CargaMasivaHorariosService
      * @param  array<int, array<string, mixed>>  $filas
      * @return array{0: array<string, Proveedor>, 1: array<string, string>}
      */
-    private function proveedoresPorIdentificador(int $idEmpresa, string $identificador, array $filas): array
+    public function proveedoresPorIdentificador(int $idEmpresa, string $identificador, array $filas): array
     {
         $valores = collect($filas)
             ->map(fn ($f) => self::normalizarIdentificador($f['identificador'] ?? null, $identificador))
