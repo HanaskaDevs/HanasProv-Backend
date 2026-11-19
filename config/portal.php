@@ -275,7 +275,9 @@ return [
     /*
     | Pedidos fuera de planificación (19-nov-2026, pedido del usuario; ver
     | FueraPlanificacionService). Turnos sueltos que Compras agenda en
-    | Business Central dentro de estas ventanas.
+    | Business Central dentro de estas ventanas. La semana va de sábado 01:00 a
+    | sábado 01:00: a esa hora BC borra los de la semana anterior (en la base
+    | del portal quedan como historial).
     |
     | - Un solo turno a la vez por CLASIFICACIÓN (sin importar la bodega ni el
     |   andén) y solo entre turnos fuera de planificación: el calendario

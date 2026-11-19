@@ -33,11 +33,14 @@ use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
  *  - El Guardia marca el arribo hasta 10 min tarde; después, nada (ver
  *    HorarioEntregaProveedor::excedeTolerancia y HorarioEntregaService).
  *
- * LA SEMANA (el "ciclo"): BC borra sus turnos cada domingo a la 1:00, así
- * que un ciclo va del domingo 01:00 al domingo siguiente 01:00, y "Lunes"
- * es el lunes que sigue a ese domingo. BC manda la fecha que calculó y acá
- * se comprueba que sea la de este ciclo: si el borrado del domingo fallara
- * en BC, los turnos viejos NO se convierten en turnos de la semana nueva.
+ * LA SEMANA (el "ciclo"): BC borra sus turnos cada SÁBADO a la 1:00
+ * (cambio del usuario, 19-nov-2026; antes era el domingo), así que un ciclo
+ * va del sábado 01:00 al sábado siguiente 01:00: "Sábado" es el sábado en
+ * que empieza, "Domingo" el día siguiente y "Viernes" el último. Un turno del
+ * sábado solo se puede agendar desde ese sábado a la 01:00. BC manda la fecha
+ * que calculó y acá se comprueba que sea la de este ciclo: si el borrado del
+ * sábado fallara en BC, los turnos viejos NO se convierten en turnos de la
+ * semana nueva.
  *
  * Aquí no se borra nada (decisión del usuario: "que se borre de BC pero que
  * quede historial en la base"): un turno que BC ya no manda se da de baja
@@ -48,9 +51,10 @@ class FueraPlanificacionService
 {
     public const MAX_TURNOS = 500;
 
+    // Días desde el sábado en que empieza la semana.
     private const OFFSET_DIA = [
-        'Domingo' => 0, 'Lunes' => 1, 'Martes' => 2, 'Miercoles' => 3,
-        'Jueves' => 4, 'Viernes' => 5, 'Sabado' => 6,
+        'Sabado' => 0, 'Domingo' => 1, 'Lunes' => 2, 'Martes' => 3,
+        'Miercoles' => 4, 'Jueves' => 5, 'Viernes' => 6,
     ];
 
     public function __construct(
@@ -63,16 +67,17 @@ class FueraPlanificacionService
     // Ciclo, ventanas y validación
     // ------------------------------------------------------------------
 
-    /** Domingo 01:00 más reciente (el momento en que BC borró la semana anterior). */
+    /** Sábado 01:00 más reciente (el momento en que BC borró la semana anterior). */
     public function inicioDelCiclo(?CarbonInterface $ahora = null): Carbon
     {
         $ahora = Carbon::parse($ahora ?? now());
-        $domingo = $ahora->copy()->startOfDay()->subDays($ahora->dayOfWeek)->setTime(1, 0);
+        // Carbon::dayOfWeek: 0 = domingo .. 6 = sábado -> días desde el último sábado.
+        $sabado = $ahora->copy()->startOfDay()->subDays(($ahora->dayOfWeek + 1) % 7)->setTime(1, 0);
 
-        return $ahora->lessThan($domingo) ? $domingo->subWeek() : $domingo;
+        return $ahora->lessThan($sabado) ? $sabado->subWeek() : $sabado;
     }
 
-    /** Fecha del día de la semana dentro del ciclo actual (Lunes = el lunes después del domingo de inicio). */
+    /** Fecha del día de la semana dentro del ciclo actual (Sábado = el sábado de inicio, Viernes = el último día). */
     public function fechaDelDia(string $dia, ?CarbonInterface $ahora = null): ?Carbon
     {
         if (! isset(self::OFFSET_DIA[$dia])) {

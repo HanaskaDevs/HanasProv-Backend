@@ -22,8 +22,9 @@ use Tests\TestCase;
  * BC dentro de ventanas fijas, de 20/40/60 min, uno a la vez por
  * clasificación, 10 min de tolerancia para el Guardia y sin aprobación.
  *
- * Todo pasa en una semana de 2099 (domingo 01-mar-2099 01:00 a domingo
- * 08-mar 01:00) y con una empresa propia: no se cruza con datos reales.
+ * Todo pasa en una semana de 2099 (sábado 28-feb-2099 01:00 a sábado
+ * 07-mar 01:00; la semana empieza el sábado desde el 19-nov-2026) y con una
+ * empresa propia: no se cruza con datos reales.
  * DatabaseTransactions deshace todo al terminar.
  */
 class FueraPlanificacionTest extends TestCase
@@ -32,12 +33,14 @@ class FueraPlanificacionTest extends TestCase
 
     private const TOKEN = 'token-de-prueba-bc-fuera-plan-0123456789';
 
-    // Semana de prueba: el martes 03-mar-2099 a las 10:00.
+    // Semana de prueba: el martes 03-mar-2099 a las 10:00. El sábado de esta
+    // semana es el 28-feb (el día en que empieza), no el 07-mar.
+    private const SABADO = '2099-02-28';
     private const LUNES = '2099-03-02';
     private const MARTES = '2099-03-03';
+    private const MIERCOLES = '2099-03-04';
     private const JUEVES = '2099-03-05';
     private const VIERNES = '2099-03-06';
-    private const SABADO = '2099-03-07';
 
     private Empresa $empresa;
 
@@ -113,20 +116,46 @@ class FueraPlanificacionTest extends TestCase
     // Semana, ventanas y duración
     // ------------------------------------------------------------------
 
-    public function test_la_semana_empieza_el_domingo_a_la_una(): void
+    public function test_la_semana_empieza_el_sabado_a_la_una(): void
     {
         $s = $this->servicio();
 
-        $this->assertSame('2099-03-01 01:00', $s->inicioDelCiclo(Carbon::parse(self::MARTES.' 10:00'))->format('Y-m-d H:i'));
-        // Domingo antes de la 1: todavía es la semana anterior (BC no borró).
-        $this->assertSame('2099-02-22 01:00', $s->inicioDelCiclo(Carbon::parse('2099-03-01 00:59'))->format('Y-m-d H:i'));
-        $this->assertSame('2099-03-01 01:00', $s->inicioDelCiclo(Carbon::parse('2099-03-01 01:00'))->format('Y-m-d H:i'));
-        $this->assertSame('2099-03-01 01:00', $s->inicioDelCiclo(Carbon::parse('2099-03-07 23:59'))->format('Y-m-d H:i'));
+        $this->assertSame('2099-02-28 01:00', $s->inicioDelCiclo(Carbon::parse(self::MARTES.' 10:00'))->format('Y-m-d H:i'));
+        // Sábado antes de la 1: todavía es la semana anterior (BC no borró).
+        $this->assertSame('2099-02-21 01:00', $s->inicioDelCiclo(Carbon::parse('2099-02-28 00:59'))->format('Y-m-d H:i'));
+        $this->assertSame('2099-02-28 01:00', $s->inicioDelCiclo(Carbon::parse('2099-02-28 01:00'))->format('Y-m-d H:i'));
+        $this->assertSame('2099-02-28 01:00', $s->inicioDelCiclo(Carbon::parse('2099-03-01 10:00'))->format('Y-m-d H:i'));
+        $this->assertSame('2099-02-28 01:00', $s->inicioDelCiclo(Carbon::parse('2099-03-06 23:59'))->format('Y-m-d H:i'));
+        $this->assertSame('2099-02-28 01:00', $s->inicioDelCiclo(Carbon::parse('2099-03-07 00:59'))->format('Y-m-d H:i'));
+        $this->assertSame('2099-03-07 01:00', $s->inicioDelCiclo(Carbon::parse('2099-03-07 01:00'))->format('Y-m-d H:i'));
 
-        $this->assertSame(self::LUNES, $s->fechaDelDia('Lunes')->toDateString());
+        // Sábado = el del inicio, Domingo = el siguiente, Viernes = el último día.
         $this->assertSame(self::SABADO, $s->fechaDelDia('Sabado')->toDateString());
-        // El domingo a las 10:00 "Lunes" ya es el de mañana.
-        $this->assertSame('2099-03-09', $s->fechaDelDia('Lunes', Carbon::parse('2099-03-08 10:00'))->toDateString());
+        $this->assertSame('2099-03-01', $s->fechaDelDia('Domingo')->toDateString());
+        $this->assertSame(self::LUNES, $s->fechaDelDia('Lunes')->toDateString());
+        $this->assertSame(self::VIERNES, $s->fechaDelDia('Viernes')->toDateString());
+        // El sábado siguiente a las 10:00 ya es otra semana: "Sabado" es ese mismo día y "Lunes" el que viene.
+        $this->assertSame('2099-03-07', $s->fechaDelDia('Sabado', Carbon::parse('2099-03-07 10:00'))->toDateString());
+        $this->assertSame('2099-03-09', $s->fechaDelDia('Lunes', Carbon::parse('2099-03-07 10:00'))->toDateString());
+    }
+
+    public function test_el_turno_del_sabado_solo_desde_ese_sabado(): void
+    {
+        [, , $codigo] = $this->proveedor();
+        $sabado = ['clasificacion' => 'Fruver', 'dia_entrega' => 'Sabado', 'hora_llegada' => '15:00'];
+
+        // El viernes: el "Sabado" de esta semana es el que ya pasó (28-feb).
+        Carbon::setTestNow(self::VIERNES.' 10:00');
+        $this->enviar([$this->turno(1301, $codigo, $sabado + ['fecha' => self::SABADO])])
+            ->assertOk()->assertJsonPath('turnos.0.resultado', 'error');
+        // Y el del 07-mar todavía no es de esta semana.
+        $this->enviar([$this->turno(1302, $codigo, $sabado + ['fecha' => '2099-03-07'])])
+            ->assertOk()->assertJsonPath('turnos.0.resultado', 'error');
+
+        // El sábado 07-mar a las 08:00 ya se puede.
+        Carbon::setTestNow('2099-03-07 08:00');
+        $this->enviar([$this->turno(1303, $codigo, $sabado + ['fecha' => '2099-03-07'])])
+            ->assertOk()->assertJsonPath('turnos.0.resultado', 'crear');
     }
 
     public function test_ventanas_duracion_y_hora_de_cierre(): void
@@ -298,7 +327,7 @@ class FueraPlanificacionTest extends TestCase
     {
         [, , $codigo] = $this->proveedor();
 
-        // BC no lo borró el domingo: viene con la fecha de la semana pasada.
+        // BC no lo borró el sábado: viene con la fecha de la semana pasada.
         $this->enviar([$this->turno(501, $codigo, ['fecha' => '2099-02-26'])])
             ->assertOk()
             ->assertJsonPath('resumen.otra_semana', 1)
@@ -510,16 +539,17 @@ class FueraPlanificacionTest extends TestCase
         [, , $codigo] = $this->proveedor();
         $this->enviar([
             $this->turno(1101, $codigo),
-            $this->turno(1102, $codigo, ['clasificacion' => 'Fruver', 'dia_entrega' => 'Sabado', 'fecha' => self::SABADO, 'hora_llegada' => '15:00']),
+            $this->turno(1102, $codigo, ['clasificacion' => 'Fruver', 'dia_entrega' => 'Miercoles', 'fecha' => self::MIERCOLES, 'hora_llegada' => '14:00']),
         ])->assertOk()->assertJsonPath('resumen.crear', 2);
 
         $compras = $this->crearUsuarioInterno($this->empresa, 'Compras');
         $respuesta = $this->getJson('/api/horarios-entrega/fuera-planificacion', $this->cabecerasComo($compras, $this->empresa))->assertOk();
 
-        $this->assertSame('2099-03-01 01:00', $respuesta->json('inicio_ciclo'));
+        $this->assertSame('2099-02-28 01:00', $respuesta->json('inicio_ciclo'));
         $this->assertSame(10, $respuesta->json('tolerancia_minutos'));
         $this->assertCount(2, $respuesta->json('turnos'));
-        $this->assertSame(self::JUEVES, $respuesta->json('turnos.0.fecha_fuera_planificacion'));
+        // Ordenados por fecha: el miércoles (Fruver) antes que el jueves (Perecibles).
+        $this->assertSame([self::MIERCOLES, self::JUEVES], collect($respuesta->json('turnos'))->pluck('fecha_fuera_planificacion')->all());
         $this->assertSame('Programado', $respuesta->json('turnos.0.estado'));
         $this->assertSame(['15:00', '17:00'], [$respuesta->json('ventanas.Perecibles.0.apertura'), $respuesta->json('ventanas.Perecibles.0.cierre')]);
 
@@ -532,8 +562,8 @@ class FueraPlanificacionTest extends TestCase
         $guardia = $this->crearUsuarioInterno($this->empresa, 'Guardia');
         $this->getJson('/api/horarios-entrega/fuera-planificacion', $this->cabecerasComo($guardia, $this->empresa))->assertStatus(403);
 
-        // Desde el domingo 01:00 la sección empieza vacía (semana nueva).
-        Carbon::setTestNow('2099-03-08 01:00');
+        // Desde el sábado 01:00 la sección empieza vacía (semana nueva).
+        Carbon::setTestNow('2099-03-07 01:00');
         $this->assertCount(0, $this->getJson('/api/horarios-entrega/fuera-planificacion', $this->cabecerasComo($compras, $this->empresa))->json('turnos'));
         $this->assertNotNull($this->delPortal(1101), 'En la base queda: es historia.');
     }
