@@ -319,6 +319,50 @@ class HistorialProveedoresTest extends TestCase
         $this->assertSame(55, $resumen['atraso_maximo']);
     }
 
+    /**
+     * Sin marca del Guardia ni solicitud, pero con su pedido de ese día
+     * recibido en bodega: llegó pasada la tolerancia (caso FINCA LOS NONNOS,
+     * 24-nov-2026). Es "llegó atrasado" sin solicitud, no "no llegó".
+     */
+    public function test_sin_marca_pero_con_el_pedido_recibido_es_llego_atrasado(): void
+    {
+        $empresa = $this->crearEmpresa(['Empresa_BC' => 'hist_'.\Illuminate\Support\Str::lower(\Illuminate\Support\Str::random(8))]);
+        $compras = $this->crearUsuarioInterno($empresa, 'Compras');
+        [, $entrego] = $this->crearProveedorConUsuario($empresa);
+        [, $noVino] = $this->crearProveedorConUsuario($empresa);
+        $ayer = now()->subDay()->toDateString();
+
+        $this->citaDelHistorial($empresa, $entrego, $ayer, 'No llegó', ['Cod_Proveedor' => 'PROV-ENTREGO']);
+        $this->citaDelHistorial($empresa, $noVino, $ayer, 'No llegó', ['Cod_Proveedor' => 'PROV-NOVINO']);
+
+        // Pedido de cada uno para ayer; solo el del primero tiene algo recibido.
+        foreach (['PROV-ENTREGO' => 'PD-HIST-1', 'PROV-NOVINO' => 'PD-HIST-2'] as $codigo => $pedido) {
+            DB::table('BC_Cab_Pedido_Compra')->insert([
+                'Empresa' => $empresa->Empresa_BC, 'Fecha_Registro' => now(), 'Tipo_Documento' => 'Pedido',
+                'Nro_Pedido' => $pedido, 'Nro_Proveedor' => $codigo, 'Fecha_Recepcion_Esperada' => $ayer,
+            ]);
+            DB::table('BC_Pedido_Compra_Fill_Rate')->insert([
+                'Empresa' => $empresa->Empresa_BC, 'Fecha_Registro' => now(), 'Nro_Documento' => $pedido,
+                'Nro_Linea' => 10000, 'Cantidad_Original' => 10, 'Cantidad_Recibida' => $codigo === 'PROV-ENTREGO' ? 10 : 0,
+            ]);
+        }
+
+        $datos = $this->getJson('/api/reportes/historial-proveedores', $this->cabecerasComo($compras, $empresa))
+            ->assertSuccessful()
+            ->json();
+
+        $filaEntrego = collect($datos['entregas'])->firstWhere('id_proveedor', $entrego->Id_Proveedor);
+        $this->assertSame(HistorialEntregasService::RECHAZADO_ATRASADO, $filaEntrego['estado_final']);
+        $this->assertSame('Sin_Solicitud', $filaEntrego['aprobacion']);
+        // No se sabe a qué hora llegó: sin hora ni minutos, y fuera de los promedios.
+        $this->assertNull($filaEntrego['hora_arribo']);
+        $this->assertNull($filaEntrego['minutos_atraso']);
+
+        $filaNoVino = collect($datos['entregas'])->firstWhere('id_proveedor', $noVino->Id_Proveedor);
+        $this->assertSame(HistorialEntregasService::RECHAZADO_NO_LLEGO, $filaNoVino['estado_final']);
+        $this->assertNull($filaNoVino['aprobacion']);
+    }
+
     public function test_una_cita_con_fila_de_llegada_no_se_repite_como_rechazada(): void
     {
         $empresa = $this->crearEmpresa();

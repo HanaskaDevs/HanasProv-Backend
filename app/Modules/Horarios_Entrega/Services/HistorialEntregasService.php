@@ -9,6 +9,7 @@ use App\Modules\Proveedores\Models\Proveedor;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 
 /**
@@ -53,6 +54,13 @@ use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
  *    pendiente ("Por aprobar") o rechazada por Calidad ("Rechazado" con
  *    Aprobacion = Rechazada). Su llegada es la hora de la solicitud: cuenta
  *    en el atraso, porque sí llegó.
+ *  - También Rechazado_Atrasado, sin solicitud (aprobacion = Sin_Solicitud):
+ *    sin marca del Guardia, pero su pedido de ese día se recibió en bodega
+ *    (algo recibido). Llegó pasada la tolerancia, el Guardia ya no pudo
+ *    marcarlo y no pidió aprobación: la responsabilidad es del proveedor que
+ *    llegó tarde (decisión del usuario, 25-nov-2026, con el caso de FINCA LOS
+ *    NONNOS del 24-nov). Así estaban 172 de los 184 "No llegó" del 11 al
+ *    24-nov; solo 12 no entregaron nada. La tolerancia NO se toca.
  * Las que se aprobaron ya tienen fila en Estado_Diario y salen como siempre.
  */
 class HistorialEntregasService
@@ -222,6 +230,8 @@ class HistorialEntregasService
      */
     protected function rechazados(int $idEmpresa, CarbonInterface $desde, CarbonInterface $hasta, array $filtros, Collection $yaIncluidas): Collection
     {
+        $recibidos = $this->pedidosConAlgoRecibido($idEmpresa, $desde, $hasta);
+
         return HistorialHorarioProveedor::query()
             ->where('Id_Empresa', $idEmpresa)
             ->whereBetween('Fecha', [$desde->toDateString(), $hasta->toDateString()])
@@ -232,16 +242,54 @@ class HistorialEntregasService
             ->orderBy('Hora_Programada')
             ->get()
             ->reject(fn (HistorialHorarioProveedor $h) => $yaIncluidas->has((int) $h->Id_Horario.'|'.substr((string) $h->Fecha, 0, 10)))
-            ->map(fn (HistorialHorarioProveedor $h) => $this->serializarRechazado($h))
+            ->map(fn (HistorialHorarioProveedor $h) => $this->serializarRechazado(
+                $h,
+                $recibidos->has(trim((string) $h->Cod_Proveedor).'|'.substr((string) $h->Fecha, 0, 10))
+            ))
             ->values();
     }
 
-    protected function serializarRechazado(HistorialHorarioProveedor $h): array
+    /**
+     * 'Cod_Proveedor|Y-m-d' de los proveedores con algún pedido de entrega
+     * esperada ese día que tenga algo recibido en bodega. Misma fuente que
+     * Pedidos por bodega (BC_Pedido_Compra_Fill_Rate), pero solo importa si
+     * hubo recepción, no cuánto: una sola consulta para todo el rango.
+     *
+     * @return Collection<string, int>
+     */
+    protected function pedidosConAlgoRecibido(int $idEmpresa, CarbonInterface $desde, CarbonInterface $hasta): Collection
     {
-        // Llegó atrasado = hay solicitud de aprobación (pendiente o rechazada).
-        // Sin solicitud, no llegó: el día en curso "Rechazado" sin aprobación
-        // es eso mismo, todavía sin cerrar.
-        $llegoAtrasado = $h->Estado === 'Por aprobar' || $h->Aprobacion === 'Rechazada';
+        $empresaBc = trim((string) DB::table('Empresa')->where('Id_Empresa', $idEmpresa)->value('Empresa_BC'));
+
+        if ($empresaBc === '') {
+            return collect();
+        }
+
+        return DB::table('BC_Cab_Pedido_Compra as c')
+            ->where('c.Empresa', $empresaBc)
+            ->whereRaw('CONVERT(date, c.Fecha_Recepcion_Esperada) BETWEEN CONVERT(date, ?, 120) AND CONVERT(date, ?, 120)', [
+                $desde->toDateString(), $hasta->toDateString(),
+            ])
+            ->whereExists(fn ($q) => $q->select(DB::raw(1))
+                ->from('BC_Pedido_Compra_Fill_Rate as fr')
+                ->whereColumn('fr.Empresa', 'c.Empresa')
+                ->whereColumn('fr.Nro_Documento', 'c.Nro_Pedido')
+                ->where('fr.Cantidad_Recibida', '>', 0))
+            ->distinct()
+            ->get([DB::raw('LTRIM(RTRIM(c.Nro_Proveedor)) as proveedor'), DB::raw('CONVERT(varchar(10), CONVERT(date, c.Fecha_Recepcion_Esperada), 23) as fecha')])
+            ->map(fn ($r) => $r->proveedor.'|'.$r->fecha)
+            ->flip();
+    }
+
+    protected function serializarRechazado(HistorialHorarioProveedor $h, bool $pedidoRecibido): array
+    {
+        // Llegó atrasado = hay solicitud de aprobación (pendiente o rechazada),
+        // o no la hay pero su pedido se recibió en bodega (llegó pasada la
+        // tolerancia y nadie pidió aprobación; ver la cabecera). Si no, no
+        // llegó: el día en curso "Rechazado" sin nada recibido es eso mismo,
+        // todavía sin cerrar.
+        $conSolicitud = $h->Estado === 'Por aprobar' || $h->Aprobacion === 'Rechazada';
+        $llegoAtrasado = $conSolicitud || $pedidoRecibido;
 
         return [
             'clave' => 'h'.$h->Id,
@@ -253,10 +301,11 @@ class HistorialEntregasService
             'clasificacion' => $h->Clasificacion,
             'anden_puerta' => $h->Anden,
             'hora_programada' => $this->horaCorta($h->Hora_Programada),
-            'hora_arribo' => $llegoAtrasado ? $this->horaCorta($h->Hora_Arribo) : null,
-            // Solo si llegó: el "atraso" de un no-show del día en curso son
-            // los minutos que lleva esperando, no un atraso de llegada.
-            'minutos_atraso' => $llegoAtrasado && $h->Min_Atraso !== null ? (int) $h->Min_Atraso : null,
+            // Hora y atraso solo con solicitud (es la hora en que se pidió):
+            // sin marca ni solicitud no se sabe a qué hora llegó, y el
+            // Min_Atraso de un día en curso son los minutos que lleva esperando.
+            'hora_arribo' => $conSolicitud ? $this->horaCorta($h->Hora_Arribo) : null,
+            'minutos_atraso' => $conSolicitud && $h->Min_Atraso !== null ? (int) $h->Min_Atraso : null,
             'hora_salida' => $this->horaCorta($h->Salida_Programada),
             'hora_recepcion' => null,
             'hora_entregado' => null,
@@ -264,7 +313,12 @@ class HistorialEntregasService
             'nro_documento_bc' => null,
             'estado_final' => $llegoAtrasado ? self::RECHAZADO_ATRASADO : self::RECHAZADO_NO_LLEGO,
             // Pendiente / Rechazada: en qué quedó la solicitud de arribo tardío.
-            'aprobacion' => $llegoAtrasado ? ($h->Aprobacion ?: 'Pendiente') : null,
+            // Sin_Solicitud: llegó (su pedido se recibió) y nadie la pidió.
+            'aprobacion' => match (true) {
+                $conSolicitud => $h->Aprobacion ?: 'Pendiente',
+                $llegoAtrasado => 'Sin_Solicitud',
+                default => null,
+            },
         ];
     }
 
