@@ -303,6 +303,13 @@ class ReclamoService
         if ($idEmpresaActiva !== null && $usuario->esGuardia($idEmpresaActiva)) {
             throw new AccessDeniedHttpException('El rol Guardia no crea reclamos.');
         }
+
+        // Bodega (25-nov-2026) tampoco: solo entra a pedidos, historial de
+        // proveedores y calendario. Sin esto, por ser interno, podía listar
+        // y crear reclamos por la API aunque no los tenga en el menú.
+        if ($idEmpresaActiva !== null && $usuario->esBodega($idEmpresaActiva)) {
+            throw new AccessDeniedHttpException('El rol Bodega no tiene acceso a los reclamos.');
+        }
     }
 
     protected function miProveedor(Usuario $usuario, int $idEmpresaActiva): Proveedor
@@ -323,6 +330,12 @@ class ReclamoService
     protected function verificarAcceso(Usuario $usuario, int $idEmpresaActiva, Reclamo $reclamo): void
     {
         if ($usuario->Tipo_Usuario === 'Interno') {
+            // Ver un reclamo o responderlo (detalle, responder, imágenes):
+            // cualquier interno, menos Bodega (25-nov-2026, ver verificarEsInterno).
+            if ($usuario->esBodega($idEmpresaActiva)) {
+                throw new AccessDeniedHttpException('El rol Bodega no tiene acceso a los reclamos.');
+            }
+
             return;
         }
 

@@ -693,6 +693,13 @@ class AsistenteContextoService
                 '/productos-revision' => 'Productos por revisar (solo consulta)',
                 '/productos-proveedor' => 'Productos por proveedor (editar datos de productos)',
             ],
+            // Bodega (25-nov-2026): solo consulta, las mismas 4 pantallas de su menú.
+            'Bodega' => [
+                '/pedidos' => 'Pedidos (vista interna por bodega, % de entrega)',
+                '/reportes/historial-proveedores' => 'Historial de proveedores (arribos, atrasos y estados de cada entrega)',
+                '/calendario' => 'Calendario de horarios de entrega',
+                '/calendario/fuera-planificacion' => 'Pedidos fuera de planificación (turnos extra de esta semana)',
+            ],
             default => [],
         };
     }

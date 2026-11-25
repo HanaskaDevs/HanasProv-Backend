@@ -365,7 +365,10 @@ class PedidoInternoService
      */
     public function obtenerBodegasPermitidas(Usuario $usuario, int $idEmpresa): array
     {
-        if ($usuario->esAdmin($idEmpresa) || $usuario->esSistemas($idEmpresa)) {
+        // Bodega (25-nov-2026) ve TODAS las bodegas, como Admin y Sistemas:
+        // decisión del usuario, para no tener que asignarle bodegas a cada
+        // persona de bodega en Usuarios internos.
+        if ($usuario->esAdmin($idEmpresa) || $usuario->esSistemas($idEmpresa) || $usuario->esBodega($idEmpresa)) {
             return self::BODEGAS;
         }
 

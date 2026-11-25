@@ -100,7 +100,7 @@ class AsistenteHerramientas
         // /cambios-precio — SolicitudCambioPrecioService
         'consultar_cambios_precio' => ['Sistemas', 'Admin', 'Calidad'],
         // /pedidos interno — PedidoInternoService::obtenerBodegasPermitidas (Calidad recibe 403)
-        'consultar_pedidos' => ['Sistemas', 'Admin', 'Compras'],
+        'consultar_pedidos' => ['Sistemas', 'Admin', 'Compras', 'Bodega'],
         // CalificacionGlobalController::lote
         'consultar_calificaciones_proveedores' => ['Sistemas', 'Admin', 'Calidad', 'Compras'],
         // /reclamos — ReclamoService::verificarEsInterno (todo interno menos Guardia)
@@ -108,7 +108,7 @@ class AsistenteHerramientas
         // /auditorias y /auditorias/recepciones — AuditoriaService / CalificacionRecepcionService::verificarAcceso
         'consultar_auditorias' => ['Sistemas', 'Admin', 'Calidad'],
         // /calendario — HorarioEntregaService::verificarAccesoLectura
-        'consultar_horarios_entrega' => ['Sistemas', 'Admin', 'Compras', 'Calidad'],
+        'consultar_horarios_entrega' => ['Sistemas', 'Admin', 'Compras', 'Calidad', 'Bodega'],
     ];
 
     /** Herramientas de un usuario proveedor: todas sobre SU propio proveedor y nada más. */

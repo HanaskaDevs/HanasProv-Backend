@@ -218,6 +218,17 @@ class Usuario extends Authenticatable
     }
 
     /**
+     * Rol Bodega (25-nov-2026): el personal de bodega. Solo consulta Pedidos
+     * (todas las bodegas, ver PedidoInternoService::obtenerBodegasPermitidas),
+     * Historial de proveedores, Calendario de horarios (con Modo TV) y
+     * Pedidos fuera de planificación. No cambia nada ni ve reclamos.
+     */
+    public function esBodega(int $idEmpresa): bool
+    {
+        return $this->tieneRolEnEmpresa($idEmpresa, 'Bodega');
+    }
+
+    /**
      * Rol Modo TV (11-nov-2026): la cuenta de las pantallas de TV. Solo ve
      * el calendario en Modo TV (ver HorarioEntregaService::
      * verificarAccesoOperativo) y su sesión no vence (ver esPantallaTv).

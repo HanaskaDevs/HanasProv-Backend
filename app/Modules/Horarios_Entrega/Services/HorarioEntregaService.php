@@ -134,14 +134,17 @@ class HorarioEntregaService
      * Ver el calendario (incluye Modo TV): Sistemas, Admin, Compras y
      * Calidad (pedido explícito del usuario, 27-ago-2026). El CRUD
      * (crear/editar/eliminar horarios) es más restringido, ver
-     * verificarAccesoGestion.
+     * verificarAccesoGestion. Bodega desde el 25-nov-2026: ve el calendario
+     * y los pedidos fuera de planificación (FueraPlanificacionService usa
+     * esta misma puerta), sin gestionar nada.
      */
     public function verificarAccesoLectura(Usuario $usuario, int $idEmpresa): void
     {
         $tieneAcceso = $usuario->esSistemas($idEmpresa)
             || $usuario->esAdmin($idEmpresa)
             || $usuario->esCompras($idEmpresa)
-            || $usuario->esCalidad($idEmpresa);
+            || $usuario->esCalidad($idEmpresa)
+            || $usuario->esBodega($idEmpresa);
 
         if (! $tieneAcceso) {
             throw new AccessDeniedHttpException('No tiene permisos para ver el calendario de horarios de entrega.');
@@ -170,7 +173,8 @@ class HorarioEntregaService
      * audiencias distintas -> acá se deja pasar la UNIÓN de las dos, y
      * cada pantalla filtra más estricto por su cuenta en el frontend
      * (RoleRoute):
-     *   - Modo TV (dentro de Calendario): Sistemas, Admin, Calidad, Compras.
+     *   - Modo TV (dentro de Calendario): Sistemas, Admin, Calidad, Compras
+     *     y Bodega (25-nov-2026).
      *   - Seguimiento de hoy: SOLO Sistemas y Guardia (pedido explícito
      *     del usuario, 27-ago-2026 -> Admin/Compras/Calidad ya NO entran
      *     a esta pantalla, aunque el endpoint técnicamente los deje).
@@ -183,7 +187,11 @@ class HorarioEntregaService
             || $usuario->esCalidad($idEmpresa)
             || $usuario->esGuardia($idEmpresa)
             // Cuenta de las pantallas de TV (11-nov-2026): solo lectura.
-            || $usuario->esModoTv($idEmpresa);
+            || $usuario->esModoTv($idEmpresa)
+            // Bodega (25-nov-2026): el Modo TV del calendario, solo lectura.
+            // Seguimiento de hoy no le aparece (lo filtra su RoleRoute) y
+            // marcar arribos sigue siendo de verificarAccesoCambiarEstado.
+            || $usuario->esBodega($idEmpresa);
 
         if (! $tieneAcceso) {
             throw new AccessDeniedHttpException('No tiene permisos para ver el seguimiento de entregas de hoy.');

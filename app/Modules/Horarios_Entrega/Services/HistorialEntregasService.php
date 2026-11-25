@@ -49,11 +49,13 @@ class HistorialEntregasService
      * Sistemas, Admin y Compras (pedido del usuario, 12-nov-2026). Calidad
      * lo tuvo unas horas ese mismo día y salió a propósito: el reporte mide
      * la puntualidad de las entregas, que es seguimiento de Compras.
+     * Bodega desde el 25-nov-2026 (pedido del usuario): recibe esas entregas.
      */
     public function verificarAcceso(Usuario $usuario, int $idEmpresa): void
     {
         $tieneAcceso = $usuario->Tipo_Usuario === 'Interno'
-            && ($usuario->esSistemas($idEmpresa) || $usuario->esAdmin($idEmpresa) || $usuario->esCompras($idEmpresa));
+            && ($usuario->esSistemas($idEmpresa) || $usuario->esAdmin($idEmpresa) || $usuario->esCompras($idEmpresa)
+                || $usuario->esBodega($idEmpresa));
 
         if (! $tieneAcceso) {
             throw new AccessDeniedHttpException('No tiene permisos para ver el historial de proveedores.');
