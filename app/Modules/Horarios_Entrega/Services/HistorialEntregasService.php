@@ -3,7 +3,9 @@
 namespace App\Modules\Horarios_Entrega\Services;
 
 use App\Modules\Auth\Models\Usuario;
+use App\Modules\Horarios_Entrega\Models\HistorialHorarioProveedor;
 use App\Modules\Horarios_Entrega\Models\HorarioEntregaEstadoDiario;
+use App\Modules\Proveedores\Models\Proveedor;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
@@ -36,11 +38,31 @@ use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
  *    = recibido). El histórico se recalculó con
  *    horarios-entrega:corregir-horas-sigh. Detalle del proceso en
  *    SincronizacionSighService::recepcionesEnWms.
+ *
+ * LOS RECHAZADOS (25-nov-2026, pedido del usuario: "que también salgan los
+ * rechazados que no llegaron y los rechazados que llegaron atrasados"):
+ * Horario_Entrega_Estado_Diario solo tiene fila cuando el Guardia marca la
+ * llegada (o se aprueba un arribo tardío), así que un rechazado nunca
+ * aparecía. Esas citas salen de Historial_Horario_Proveedor (una fila por
+ * cita con pedido o con llegada, desde el 11-nov-2026; la escribe
+ * HistorialHorarioProveedorService cada 5 min):
+ *  - Rechazado_No_Llego: tenía pedido y pasó la tolerancia sin que se
+ *    marcara la llegada ("No llegó" en días cerrados; "Rechazado" sin
+ *    solicitud, el día en curso).
+ *  - Rechazado_Atrasado: llegó fuera de plazo y el Guardia pidió aprobación,
+ *    pendiente ("Por aprobar") o rechazada por Calidad ("Rechazado" con
+ *    Aprobacion = Rechazada). Su llegada es la hora de la solicitud: cuenta
+ *    en el atraso, porque sí llegó.
+ * Las que se aprobaron ya tienen fila en Estado_Diario y salen como siempre.
  */
 class HistorialEntregasService
 {
     /** Tope de historia que se puede pedir (pedido del usuario: 3 meses). */
     public const MAX_DIAS = 92;
+
+    public const RECHAZADO_NO_LLEGO = 'Rechazado_No_Llego';
+
+    public const RECHAZADO_ATRASADO = 'Rechazado_Atrasado';
 
     /** Lo que se muestra al entrar, sin tocar los filtros. */
     public const DIAS_POR_DEFECTO = 30;
@@ -90,9 +112,21 @@ class HistorialEntregasService
             ->orderByDesc('Fecha')
             ->orderBy('Id_Horario_Entrega_Estado_Diario');
 
-        $entregas = $consulta->get()
-            ->filter(fn (HorarioEntregaEstadoDiario $e) => $e->horario !== null)
+        $estados = $consulta->get()->filter(fn (HorarioEntregaEstadoDiario $e) => $e->horario !== null);
+
+        // Las citas que ya salen por su fila de llegada no se repiten como rechazadas.
+        $yaIncluidas = $estados
+            ->map(fn (HorarioEntregaEstadoDiario $e) => (int) $e->Id_Horario_Entrega_Proveedor.'|'.$e->Fecha?->toDateString())
+            ->flip();
+
+        // toBase(): sin filas de llegada, el map de una colección de Eloquent
+        // vacía sigue siendo de Eloquent, y su merge pide getKey() a arreglos.
+        $entregas = $estados->toBase()
             ->map(fn (HorarioEntregaEstadoDiario $e) => $this->serializar($e))
+            ->merge($this->rechazados($idEmpresa, $desde, $hasta, $filtros, $yaIncluidas))
+            // Lo más reciente primero, como antes; sortBy es estable, así que
+            // dentro del mismo día se conserva el orden de llegada.
+            ->sortByDesc('fecha')
             ->values();
 
         return [
@@ -147,6 +181,9 @@ class HistorialEntregasService
         $arribo = $estado->Hora_Arribo_Real;
 
         return [
+            // Clave única de la fila en la pantalla: las rechazadas no tienen
+            // Id_Horario_Entrega_Estado_Diario (ver rechazados()).
+            'clave' => 'e'.$estado->Id_Horario_Entrega_Estado_Diario,
             'id_horario_entrega_estado_diario' => $estado->Id_Horario_Entrega_Estado_Diario,
             'fecha' => $estado->Fecha?->toDateString(),
             'id_proveedor' => $proveedor?->Id_Proveedor,
@@ -173,7 +210,70 @@ class HistorialEntregasService
                 : null,
             'nro_documento_bc' => $estado->Nro_Documento_Bc,
             'estado_final' => $this->estadoFinal($estado),
+            'aprobacion' => null,
         ];
+    }
+
+    /**
+     * Las citas rechazadas del rango (ver la cabecera), con la misma forma
+     * que una entrega. Sin recepción ni recibido: no se recibieron.
+     *
+     * @param  Collection<string, int>  $yaIncluidas  'Id_Horario|Y-m-d' de las que ya salen
+     */
+    protected function rechazados(int $idEmpresa, CarbonInterface $desde, CarbonInterface $hasta, array $filtros, Collection $yaIncluidas): Collection
+    {
+        return HistorialHorarioProveedor::query()
+            ->where('Id_Empresa', $idEmpresa)
+            ->whereBetween('Fecha', [$desde->toDateString(), $hasta->toDateString()])
+            ->whereIn('Estado', [HistorialHorarioProveedorService::NO_LLEGO, 'Por aprobar', 'Rechazado'])
+            ->when(! empty($filtros['id_proveedor']), fn ($q) => $q->where('Id_Proveedor', $filtros['id_proveedor']))
+            ->when(! empty($filtros['clasificacion']), fn ($q) => $q->where('Clasificacion', $filtros['clasificacion']))
+            ->orderByDesc('Fecha')
+            ->orderBy('Hora_Programada')
+            ->get()
+            ->reject(fn (HistorialHorarioProveedor $h) => $yaIncluidas->has((int) $h->Id_Horario.'|'.substr((string) $h->Fecha, 0, 10)))
+            ->map(fn (HistorialHorarioProveedor $h) => $this->serializarRechazado($h))
+            ->values();
+    }
+
+    protected function serializarRechazado(HistorialHorarioProveedor $h): array
+    {
+        // Llegó atrasado = hay solicitud de aprobación (pendiente o rechazada).
+        // Sin solicitud, no llegó: el día en curso "Rechazado" sin aprobación
+        // es eso mismo, todavía sin cerrar.
+        $llegoAtrasado = $h->Estado === 'Por aprobar' || $h->Aprobacion === 'Rechazada';
+
+        return [
+            'clave' => 'h'.$h->Id,
+            'id_horario_entrega_estado_diario' => null,
+            'fecha' => substr((string) $h->Fecha, 0, 10),
+            'id_proveedor' => $h->Id_Proveedor !== null ? (int) $h->Id_Proveedor : null,
+            'proveedor' => Proveedor::nombreVisibleDe($h->Proveedor),
+            'ruc' => $h->Ruc,
+            'clasificacion' => $h->Clasificacion,
+            'anden_puerta' => $h->Anden,
+            'hora_programada' => $this->horaCorta($h->Hora_Programada),
+            'hora_arribo' => $llegoAtrasado ? $this->horaCorta($h->Hora_Arribo) : null,
+            // Solo si llegó: el "atraso" de un no-show del día en curso son
+            // los minutos que lleva esperando, no un atraso de llegada.
+            'minutos_atraso' => $llegoAtrasado && $h->Min_Atraso !== null ? (int) $h->Min_Atraso : null,
+            'hora_salida' => $this->horaCorta($h->Salida_Programada),
+            'hora_recepcion' => null,
+            'hora_entregado' => null,
+            'minutos_espera' => null,
+            'nro_documento_bc' => null,
+            'estado_final' => $llegoAtrasado ? self::RECHAZADO_ATRASADO : self::RECHAZADO_NO_LLEGO,
+            // Pendiente / Rechazada: en qué quedó la solicitud de arribo tardío.
+            'aprobacion' => $llegoAtrasado ? ($h->Aprobacion ?: 'Pendiente') : null,
+        ];
+    }
+
+    /** '07:30:00' o '07:30:00.0000000' -> '07:30'. */
+    protected function horaCorta(mixed $hora): ?string
+    {
+        $hora = trim((string) $hora);
+
+        return $hora === '' ? null : substr($hora, 0, 5);
     }
 
     /**
@@ -226,8 +326,13 @@ class HistorialEntregasService
                     'id_proveedor' => $delProveedor->first()['id_proveedor'],
                     'proveedor' => $delProveedor->first()['proveedor'],
                     'ruc' => $delProveedor->first()['ruc'],
+                    // Todas sus citas del rango, también las rechazadas (25-nov-2026).
                     'entregas' => $delProveedor->count(),
-                    'sin_arribo_marcado' => $delProveedor->count() - $conArribo->count(),
+                    // Solo las filas de llegada sin arribo marcado; los que no
+                    // llegaron van aparte en rechazados_no_llego.
+                    'sin_arribo_marcado' => $delProveedor->where('estado_final', 'Sin_Arribo')->count(),
+                    'rechazados_no_llego' => $delProveedor->where('estado_final', self::RECHAZADO_NO_LLEGO)->count(),
+                    'rechazados_atrasado' => $delProveedor->where('estado_final', self::RECHAZADO_ATRASADO)->count(),
                     'a_tiempo' => $atrasos->filter(fn (int $m) => $m <= 0)->count(),
                     'tarde' => $atrasos->filter(fn (int $m) => $m > 0)->count(),
                     'atraso_promedio' => $atrasos->isEmpty() ? null : (int) round($atrasos->avg()),
